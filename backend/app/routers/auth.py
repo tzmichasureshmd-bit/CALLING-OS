@@ -79,43 +79,19 @@ def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
     info = _verify_firebase_token(body.credential)
     google_id = info.get("uid")
     email = info.get("email")
-    name = info.get("name") or email.split("@")[0]
     if not google_id or not email:
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
     user = db.query(User).filter(User.google_id == google_id).first()
     if not user:
-        user = db.query(User).filter(User.email == email).first()
+        user = db.query(User).filter(User.email == email, User.status == "active").first()
         if user:
             user.google_id = google_id
         else:
-            # Auto-register new organization via Google
-            prefix = _make_prefix(name)
-            slug = _make_slug(name)
-            code = _make_org_code(prefix, db)
-            base_slug, n = slug, 1
-            while db.query(Organization).filter(Organization.slug == slug).first():
-                slug = f"{base_slug}-{n}"
-                n += 1
-            org = Organization(
-                tenant_prefix=prefix, name=name, slug=slug, code=code,
-                email=email, status="active",
+            raise HTTPException(
+                status_code=403,
+                detail="No account found for this Google email. Please register first."
             )
-            db.add(org)
-            db.flush()
-            user = User(
-                organization_id=org.id, email=email,
-                password_hash=hash_password(google_id),
-                google_id=google_id, role="ADMIN", status="active",
-            )
-            db.add(user)
-            db.flush()
-            emp = Employee(
-                organization_id=org.id, user_id=user.id, name=name,
-                email=email, employee_code="EMP001", status="active",
-            )
-            db.add(emp)
-            db.commit()
 
     if user.status != "active":
         raise HTTPException(status_code=403, detail="Account suspended")
@@ -140,35 +116,7 @@ def otp_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
             if user:
                 user.google_id = firebase_uid
     if not user:
-        # Auto-register new user via phone OTP
-        name = phone
-        prefix = "usr"
-        slug = _make_slug(phone.replace("+", ""))
-        code = _make_org_code(prefix, db)
-        base_slug, n = slug, 1
-        while db.query(Organization).filter(Organization.slug == slug).first():
-            slug = f"{base_slug}-{n}"
-            n += 1
-        org = Organization(
-            tenant_prefix=prefix, name=f"Org {phone[-4:]}", slug=slug,
-            code=code, phone=phone, status="active",
-        )
-        db.add(org)
-        db.flush()
-        email = f"{phone.replace('+', '')}@phone.callingos.com"
-        user = User(
-            organization_id=org.id, email=email,
-            password_hash=hash_password(firebase_uid),
-            google_id=firebase_uid, role="ADMIN", status="active",
-        )
-        db.add(user)
-        db.flush()
-        emp = Employee(
-            organization_id=org.id, user_id=user.id, name=name,
-            email=email, phone=phone, employee_code="EMP001", status="active",
-        )
-        db.add(emp)
-        db.commit()
+        raise HTTPException(status_code=403, detail="No account found for this phone number.")
 
     if user.status != "active":
         raise HTTPException(status_code=403, detail="Account suspended")
