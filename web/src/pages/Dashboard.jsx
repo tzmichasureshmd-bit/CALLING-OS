@@ -4,7 +4,6 @@ import {
   Phone, Users2, Clock, Flame, TrendingUp, Trophy, Activity,
   AlertTriangle, Zap, Smartphone, ArrowRight, ChevronRight, Star,
   PhoneMissed, PhoneOutgoing, PhoneIncoming, Battery,
-  CheckCircle2, Circle, ShieldCheck,
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -18,80 +17,6 @@ import { formatTalkTime } from "../data/mockData.js";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
 import { useAuth } from "../context/AuthContext.jsx";
-
-const DONE = [
-  "Backend — FastAPI + PostgreSQL (Supabase)",
-  "Auth — Email / Password, Google, OTP",
-  "All DB Models — Org, User, Employee, Device, SIM, Call, Lead, Opportunity, Invoice",
-  "All API Endpoints — 11 routers, 40+ endpoints",
-  "Web — All 14 pages connected to real backend",
-  "Web — Login + Register (create organization)",
-  "Web — Super Admin panel",
-  "Web — PWA (installable as app)",
-  "Role System — SUPER_ADMIN / ADMIN / EMPLOYEE",
-  "Mobile — Full UI (4 tabs + onboarding)",
-  "Mobile — Connected to real API",
-];
-
-const PENDING = [
-  "📱 Real mobile call log reading (native Android)",
-  "🔄 Real-time call sync to backend",
-  "📲 Device registration & SIM card detection",
-  "🎙️ Call recording upload to cloud storage",
-];
-
-function ProjectSummary() {
-  const [open, setOpen] = useState(false);
-  if (!open) return (
-    <div onClick={() => setOpen(true)} style={{ background: "var(--grad-brand-soft)", border: "1px solid var(--border)", borderRadius: 14, padding: "12px 18px", marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <ShieldCheck size={18} color="var(--accent)" />
-        <span style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-primary)" }}>Project Status</span>
-        <Badge tone="success">11 Done</Badge>
-        <Badge tone="warning">4 Pending</Badge>
-      </div>
-      <ChevronRight size={16} color="var(--text-dim)" />
-    </div>
-  );
-  return (
-    <Card style={{ marginBottom: 18 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <ShieldCheck size={18} color="var(--accent)" />
-          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>Project Summary</span>
-        </div>
-        <button onClick={() => setOpen(false)} style={{ border: "none", background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>Close ✕</button>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }} className="nova-grid-2">
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--success)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>✅ Completed ({DONE.length})</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            {DONE.map((d) => (
-              <div key={d} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12.5, color: "var(--text-secondary)" }}>
-                <CheckCircle2 size={14} color="var(--success)" style={{ flexShrink: 0, marginTop: 1 }} />
-                {d}
-              </div>
-            ))}
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--warning)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>⏳ Pending ({PENDING.length})</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            {PENDING.map((p) => (
-              <div key={p} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12.5, color: "var(--text-secondary)" }}>
-                <Circle size={14} color="var(--warning)" style={{ flexShrink: 0, marginTop: 1 }} />
-                {p}
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop: 16, padding: "10px 14px", background: "var(--bg-hover)", borderRadius: 10, fontSize: 12.5, color: "var(--text-muted)" }}>
-            ⏱️ Estimated: <strong style={{ color: "var(--text-primary)" }}>~1 week</strong> to complete pending work
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-}
 
 const SEV = { high: { tone: "danger", color: "var(--danger)" }, medium: { tone: "warning", color: "var(--warning)" }, low: { tone: "info", color: "var(--info)" } };
 
@@ -122,7 +47,6 @@ export default function Dashboard() {
 
   return (
     <PageContainer>
-      <ProjectSummary />
       {/* KPI ROW */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 16, marginBottom: 18 }}>
         <div onClick={() => navigate("/call-logs")} style={{ cursor: "pointer" }}>

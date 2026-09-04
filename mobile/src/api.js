@@ -1,8 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Replace with your ngrok URL when testing on real device
-// e.g. https://abc123.ngrok-free.app/api/v1
-export const BASE_URL = "https://callingos.tzmicha.com/api/v1";
+export const BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://api.callingos.tzmicha.com/api/v1";
 
 async function getToken() {
   try { return await AsyncStorage.getItem("callos_token"); } catch { return null; }

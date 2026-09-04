@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   View, Text, Pressable, TextInput, ActivityIndicator,
-  KeyboardAvoidingView, Platform, ScrollView,
+  KeyboardAvoidingView, Platform, ScrollView, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -9,6 +9,9 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { palette, gradientBrand, useTheme } from "../src/theme";
 import { useAuth } from "../src/AuthContext";
+
+let Permissions = null;
+try { Permissions = require("react-native-permissions"); } catch {}
 
 const STEPS = [
   { icon: "shield-checkmark-outline", label: "Permissions" },
@@ -111,11 +114,40 @@ export default function Onboarding() {
 // ── Step 0: Permissions ───────────────────────────────────────────────────────
 function PermissionsStep() {
   const { theme } = useTheme();
+  const [granted, setGranted] = useState({});
+
+  async function requestAll() {
+    if (!Permissions || Platform.OS !== "android") {
+      setGranted({ callLog: true, phoneState: true, contacts: true, storage: true });
+      return;
+    }
+    const { PERMISSIONS, requestMultiple, RESULTS } = Permissions;
+    const results = await requestMultiple([
+      PERMISSIONS.ANDROID.READ_CALL_LOG,
+      PERMISSIONS.ANDROID.READ_PHONE_STATE,
+      PERMISSIONS.ANDROID.READ_CONTACTS,
+      PERMISSIONS.ANDROID.READ_EXTERNAL_STORAGE,
+    ]);
+    setGranted({
+      callLog: results[PERMISSIONS.ANDROID.READ_CALL_LOG] === RESULTS.GRANTED,
+      phoneState: results[PERMISSIONS.ANDROID.READ_PHONE_STATE] === RESULTS.GRANTED,
+      contacts: results[PERMISSIONS.ANDROID.READ_CONTACTS] === RESULTS.GRANTED,
+      storage: results[PERMISSIONS.ANDROID.READ_EXTERNAL_STORAGE] === RESULTS.GRANTED,
+    });
+  }
+
+  const perms = [
+    { key: "callLog",    icon: "call-outline",           title: "Call Log",    sub: "Read call history" },
+    { key: "phoneState", icon: "phone-portrait-outline", title: "Phone State", sub: "Detect calls & SIM" },
+    { key: "contacts",   icon: "people-outline",         title: "Contacts",    sub: "Match caller names" },
+    { key: "storage",    icon: "folder-outline",         title: "Storage",     sub: "Access recordings" },
+  ];
+
   return (
     <View style={{ gap: 10 }}>
       <Text style={{ fontSize: 16, fontWeight: "800", color: theme.primary, marginBottom: 6 }}>Grant Permissions</Text>
-      {PERMS.map((p) => (
-        <View key={p.title} style={{ flexDirection: "row", alignItems: "center", gap: 11, backgroundColor: theme.surface2 || theme.bg, borderRadius: 12, padding: 10 }}>
+      {perms.map((p) => (
+        <View key={p.key} style={{ flexDirection: "row", alignItems: "center", gap: 11, backgroundColor: theme.surface2 || theme.bg, borderRadius: 12, padding: 10 }}>
           <View style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: palette.teal + "1a", alignItems: "center", justifyContent: "center" }}>
             <Ionicons name={p.icon} size={16} color={theme.accent} />
           </View>
@@ -123,9 +155,15 @@ function PermissionsStep() {
             <Text style={{ fontSize: 13, fontWeight: "600", color: theme.primary }}>{p.title}</Text>
             <Text style={{ fontSize: 11, color: theme.dim }}>{p.sub}</Text>
           </View>
-          <Ionicons name="checkmark-circle" size={19} color={palette.emerald} />
+          <Ionicons name={granted[p.key] ? "checkmark-circle" : "ellipse-outline"} size={19} color={granted[p.key] ? palette.emerald : theme.dim} />
         </View>
       ))}
+      <Pressable onPress={requestAll} style={{ marginTop: 6 }}>
+        <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+          style={{ height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" }}>
+          <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>Request All Permissions</Text>
+        </LinearGradient>
+      </Pressable>
     </View>
   );
 }

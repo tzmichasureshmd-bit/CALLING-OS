@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+.env.production
+firebase-service-account.json
+*.log

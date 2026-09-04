@@ -1,17 +1,50 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { View, Text, ScrollView, useWindowDimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { palette, useTheme } from "../../src/theme";
 import { AppHeader, Card, RangeChip } from "../../src/components";
 import { LineChart, StackedBars, Donut, ProgressBar } from "../../src/charts";
 import { INSIGHTS } from "../../src/mockData";
+import { api } from "../../src/api";
+
+const RANGE_MAP = { "Today": "today", "7 Days": "7d", "30 Days": "30d" };
+
+function buildInsights(analytics) {
+  const daily = analytics.daily_metrics || [];
+  const labels = daily.map((d) => d.day);
+  return {
+    totalVsConnected: {
+      labels,
+      total: daily.map((d) => d.total),
+      connected: daily.map((d) => d.connected),
+    },
+    outcomes: {
+      labels,
+      data: daily.map((d) => ({ connected: d.connected, missed: d.missed, rejected: 0 })),
+    },
+    duration: (analytics.duration_distribution || []).map((d) => ({
+      label: d.name, value: d.value, color: d.color,
+    })),
+    topCallers: (analytics.leaderboard || []).slice(0, 5).map((e) => ({
+      name: e.name,
+      calls: e.calls,
+      pct: e.connected_pct ?? e.connectedPct ?? 0,
+    })),
+  };
+}
 
 export default function Insights() {
-  const [range] = useState("7 Days");
+  const [range, setRange] = useState("7 Days");
   const { width } = useWindowDimensions();
   const { theme } = useTheme();
   const w = width - 32 - 32;
-  const d = INSIGHTS;
+  const [d, setD] = useState(INSIGHTS);
+
+  useEffect(() => {
+    api.getAnalytics(RANGE_MAP[range] || "7d")
+      .then((res) => { const built = buildInsights(res); if (built.topCallers.length) setD(built); })
+      .catch(() => {});
+  }, [range]);
 
   const Legend = ({ items }) => (
     <View style={{ flexDirection: "row", gap: 16, marginBottom: 8, marginTop: 2 }}>
@@ -32,7 +65,7 @@ export default function Insights() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }} edges={["top"]}>
-      <AppHeader title="Insights" right={<RangeChip label={range} />} />
+      <AppHeader title="Insights" right={<RangeChip label={range} onPress={() => setRange(range === "7 Days" ? "30 Days" : range === "30 Days" ? "Today" : "7 Days")} />} />
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 110, paddingTop: 8 }} showsVerticalScrollIndicator={false}>
         <Card style={{ marginBottom: 14 }}>
           <Text style={title}>Total vs Connected Calls</Text>

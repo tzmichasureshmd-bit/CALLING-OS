@@ -2,6 +2,8 @@ import { createContext, useContext, useState, useCallback, useEffect } from "rea
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, saveSession, clearSession, getStoredUser, getDeviceId, saveDeviceId } from "./api";
+import { getDeviceInfo } from "./nativeModules";
+import { getNewCallsSinceLastSync, markSyncComplete, getPrimarySimInfo } from "./callLogService";
 
 const AuthContext = createContext(null);
 
@@ -10,13 +12,17 @@ async function ensureDevice(user) {
     let deviceId = await getDeviceId();
     if (deviceId) return deviceId;
 
-    // Register this device with the backend
+    const info = getDeviceInfo();
+    const simInfo = await getPrimarySimInfo();
+
     const device = await api.registerDevice({
       device_identifier: `${Platform.OS}-${user.id}`,
-      manufacturer: "Android",
-      model: Platform.OS === "android" ? "Android Device" : "iOS Device",
-      android_version: String(Platform.Version || ""),
+      manufacturer: info.manufacturer,
+      model: info.model,
+      android_version: info.androidVersion || String(Platform.Version || ""),
       app_version: "1.0.0",
+      sim_phone_number: simInfo.sim_phone_number,
+      sim_carrier: simInfo.sim_carrier,
     });
     await saveDeviceId(device.id);
     return device.id;
@@ -68,10 +74,15 @@ export function AuthProvider({ children }) {
     setDeviceId(null);
   }, []);
 
-  // Sync a list of call records to the backend
-  const syncCalls = useCallback(async (calls) => {
+  // Sync calls — uses real device call log when available, falls back to provided list
+  const syncCalls = useCallback(async (fallbackCalls) => {
     if (!deviceId) return { accepted: 0, error: "No device registered" };
-    return api.syncCalls(deviceId, calls);
+    const realCalls = await getNewCallsSinceLastSync();
+    const payload = realCalls.length > 0 ? realCalls : (fallbackCalls ?? []);
+    if (!payload.length) return { accepted: 0, duplicates: 0, failed: 0, total: 0 };
+    const result = await api.syncCalls(deviceId, payload);
+    if (result.accepted > 0) await markSyncComplete();
+    return result;
   }, [deviceId]);
 
   return (

@@ -28,32 +28,11 @@ export default function Profile() {
     }
     setSyncing(true); setSyncResult(null);
     try {
-      // Build sync payload from mock calls (replace with real call log later)
-      const now = new Date();
-      const calls = CALLS.map((c, i) => ({
-        client_event_id: `mock-${user?.id}-${c.id}`,
-        phone_number: c.phone.replace(/\s/g, ""),
-        contact_name: c.name,
-        call_type: c.type,
-        start_time: new Date(now.getTime() - (i + 1) * 3600000).toISOString(),
-        end_time: c.duration !== "00:00"
-          ? new Date(now.getTime() - (i + 1) * 3600000 + parseDur(c.duration) * 1000).toISOString()
-          : null,
-        duration_seconds: parseDur(c.duration),
-        sim_slot: c.sim === "SIM 2" ? 2 : 1,
-        source: c.sim,
-        recording_available: c.recording,
-      }));
-      const result = await syncCalls(calls);
+      const result = await syncCalls();
       setSyncResult(result);
     } catch (e) {
       Alert.alert("Sync Failed", e.message);
     } finally { setSyncing(false); }
-  }
-
-  function parseDur(str) {
-    const [m, s] = str.split(":").map(Number);
-    return (m || 0) * 60 + (s || 0);
   }
 
   async function handleSignOut() {

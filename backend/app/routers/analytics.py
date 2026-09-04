@@ -148,7 +148,7 @@ def dashboard_analytics(
         Call.start_time <= end,
     ).all()
 
-    days = 7 if range in ("7d", "30d") else 7
+    days = 30 if range == "30d" else 7
     return DashboardAnalytics(
         kpis=_build_kpis(calls),
         daily_metrics=_build_daily(calls, days),

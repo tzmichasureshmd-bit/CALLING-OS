@@ -1,7 +1,7 @@
 import uuid
 import math
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_
 from datetime import datetime, timezone
@@ -9,6 +9,7 @@ from ..database import get_db
 from ..models import User, Call, Device, Employee
 from ..schemas import CallSyncRequest, CallSyncResponse, CallOut, PaginatedCalls
 from ..auth import get_current_user
+from ..config import settings
 
 router = APIRouter(prefix="/calls", tags=["calls"])
 
@@ -134,6 +135,51 @@ def list_calls(
         page_size=page_size,
         total_pages=math.ceil(total / page_size) if total else 1,
     )
+
+
+@router.post("/{call_id}/recording")
+async def upload_recording(
+    call_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    call = db.query(Call).filter(
+        Call.id == call_id,
+        Call.organization_id == user.organization_id,
+    ).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    # Upload to Supabase Storage
+    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(status_code=503, detail="Storage not configured")
+
+    import httpx
+    content = await file.read()
+    ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "mp4"
+    storage_path = f"{user.organization_id}/{call_id}.{ext}"
+    storage_url = f"{settings.SUPABASE_URL}/storage/v1/object/{settings.SUPABASE_RECORDINGS_BUCKET}/{storage_path}"
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            storage_url,
+            content=content,
+            headers={
+                "Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}",
+                "Content-Type": file.content_type or "audio/mp4",
+                "x-upsert": "true",
+            },
+        )
+    if resp.status_code not in (200, 201):
+        raise HTTPException(status_code=502, detail=f"Storage upload failed: {resp.text}")
+
+    public_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{settings.SUPABASE_RECORDINGS_BUCKET}/{storage_path}"
+    call.recording_url = public_url
+    call.recording_available = True
+    call.recording_size_bytes = len(content)
+    db.commit()
+    return {"recording_url": public_url, "size_bytes": len(content)}
 
 
 @router.get("/{call_id}", response_model=CallOut)

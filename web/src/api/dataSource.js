@@ -211,12 +211,16 @@ export const dataSource = {
       deviceHealth: DEVICE_HEALTH, needsAttention: NEEDS_ATTENTION,
       livePulse: LIVE_PULSE, salesFunnel: SALES_FUNNEL,
     });
-    const [analytics, devicesRes] = await Promise.all([
+    const [analytics, devicesRes, oppsRes] = await Promise.all([
       api.analyticsApi.dashboard(),
       api.devicesApi.list().catch(() => []),
+      api.opportunitiesApi.list({ closed: false, page_size: 20 }).catch(() => ({ items: [] })),
     ]);
     const devices = (Array.isArray(devicesRes) ? devicesRes : devicesRes?.items || []).map(normalizeDevice);
-    return buildDashboard(analytics, devices);
+    const opps = (oppsRes?.items || []).map(normalizeOpportunity);
+    const dash = buildDashboard(analytics, devices);
+    dash.opportunities = opps;
+    return dash;
   },
 
   getDeviceHealth: async () => {

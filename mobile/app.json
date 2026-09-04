@@ -2,11 +2,11 @@
   "expo": {
     "name": "CallNexa",
     "slug": "callnexa",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "callnexa",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "backgroundColor": "#080b12"
     },
@@ -14,16 +14,34 @@
       "package": "com.tzmicha.callnexa",
       "usesCleartextTraffic": true,
       "permissions": [
-        "READ_CALL_LOG",
-        "READ_PHONE_STATE",
-        "READ_CONTACTS",
-        "READ_EXTERNAL_STORAGE"
+        "android.permission.READ_CALL_LOG",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.READ_CONTACTS",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.PROCESS_OUTGOING_CALLS"
       ]
     },
     "plugins": [
       "expo-router",
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      "expo-file-system",
+      [
+        "react-native-permissions",
+        {
+          "androidPermissions": [
+            "READ_CALL_LOG",
+            "READ_PHONE_STATE",
+            "READ_CONTACTS",
+            "READ_EXTERNAL_STORAGE",
+            "WRITE_EXTERNAL_STORAGE",
+            "RECORD_AUDIO",
+            "PROCESS_OUTGOING_CALLS"
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false
