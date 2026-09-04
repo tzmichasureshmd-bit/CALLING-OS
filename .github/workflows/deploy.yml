@@ -1,0 +1,39 @@
+name: Deploy CallingOS to VPS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            # Pull latest code
+            cd /opt/callingos
+            git pull origin main
+
+            # Write .env file from secret
+            cat > /opt/callingos/backend/.env << 'ENVEOF'
+            ${{ secrets.BACKEND_ENV }}
+            ENVEOF
+
+            # Write firebase service account from secret
+            echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /opt/callingos/backend/firebase-service-account.json
+
+            # Rebuild and restart containers
+            cd /opt/callingos/backend
+            docker compose up -d --build
+
+            # Clean up old images
+            docker image prune -f
