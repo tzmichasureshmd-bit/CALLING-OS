@@ -9,8 +9,8 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - JWT_ALGORITHM=${JWT_ALGORITHM}
-      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
-      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-30}
       - APP_ENV=production
       - APP_DEBUG=false
       - CORS_ORIGINS=${CORS_ORIGINS}
@@ -26,7 +26,7 @@ services:
       retries: 3
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.callingos-backend.rule=Host(`callingos.tzmicha.com`)"
+      - "traefik.http.routers.callingos-backend.rule=Host(`api.callingos.tzmicha.com`)"
       - "traefik.http.routers.callingos-backend.entrypoints=websecure"
       - "traefik.http.routers.callingos-backend.tls.certresolver=letsencrypt"
       - "traefik.http.services.callingos-backend.loadbalancer.server.port=8000"
@@ -42,7 +42,7 @@ services:
       - traefik-net
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.callingos-web.rule=Host(`app.callingos.tzmicha.com`)"
+      - "traefik.http.routers.callingos-web.rule=Host(`callingos.tzmicha.com`)"
       - "traefik.http.routers.callingos-web.entrypoints=websecure"
       - "traefik.http.routers.callingos-web.tls.certresolver=letsencrypt"
       - "traefik.http.services.callingos-web.loadbalancer.server.port=80"

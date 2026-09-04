@@ -1,4 +1,4 @@
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 from typing import List
 
@@ -16,6 +16,14 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+
+    @field_validator("ACCESS_TOKEN_EXPIRE_MINUTES", "REFRESH_TOKEN_EXPIRE_DAYS", mode="before")
+    @classmethod
+    def coerce_empty_int(cls, v, info):
+        defaults = {"ACCESS_TOKEN_EXPIRE_MINUTES": 60, "REFRESH_TOKEN_EXPIRE_DAYS": 30}
+        if v == "" or v is None:
+            return defaults[info.field_name]
+        return v
 
     # App
     APP_ENV: str = "development"
