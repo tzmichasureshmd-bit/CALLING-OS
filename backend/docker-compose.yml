@@ -17,8 +17,6 @@ services:
       - SEED_DEMO_DATA=false
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-service-account.json
-    volumes:
-      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
     networks:
       - traefik-net
     healthcheck:
@@ -42,9 +40,6 @@ services:
     restart: unless-stopped
     networks:
       - traefik-net
-    depends_on:
-      callingos-backend:
-        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.callingos-web.rule=Host(`app.callingos.tzmicha.com`)"

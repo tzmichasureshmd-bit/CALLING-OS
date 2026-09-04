@@ -15,13 +15,17 @@ import os
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# Init Firebase Admin — absolute path regardless of cwd
+# Init Firebase Admin — only if service account file exists
 _SA_PATH = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "firebase-service-account.json")
 )
 if not firebase_admin._apps:
-    cred = credentials.Certificate(_SA_PATH)
-    firebase_admin.initialize_app(cred)
+    if os.path.exists(_SA_PATH):
+        cred = credentials.Certificate(_SA_PATH)
+        firebase_admin.initialize_app(cred)
+    else:
+        import logging as _log
+        _log.getLogger("callnexa").warning("firebase-service-account.json not found — Google/OTP login disabled")
 
 
 class GoogleAuthRequest(BaseModel):
@@ -29,6 +33,8 @@ class GoogleAuthRequest(BaseModel):
 
 
 def _verify_firebase_token(id_token: str) -> dict:
+    if not firebase_admin._apps:
+        raise HTTPException(status_code=503, detail="Firebase not configured on this server")
     try:
         return firebase_auth.verify_id_token(id_token)
     except Exception as e:

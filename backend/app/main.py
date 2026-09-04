@@ -76,8 +76,6 @@ async def generic_error_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup():
     logger.info("CallNexa API starting up...")
-    import webbrowser, threading
-    threading.Timer(1.5, lambda: webbrowser.open("http://localhost:8000/docs")).start()
     # Create all tables
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables ready.")

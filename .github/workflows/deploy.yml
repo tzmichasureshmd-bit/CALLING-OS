@@ -19,21 +19,12 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
-            # Pull latest code
             cd /opt/callingos
             git pull origin main
 
-            # Write .env file from secret
-            cat > /opt/callingos/backend/.env << 'ENVEOF'
-            ${{ secrets.BACKEND_ENV }}
-            ENVEOF
+            printf '%s' '${{ secrets.BACKEND_ENV }}' > /opt/callingos/backend/.env
+            printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /opt/callingos/backend/firebase-service-account.json
 
-            # Write firebase service account from secret
-            echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /opt/callingos/backend/firebase-service-account.json
-
-            # Rebuild and restart containers
             cd /opt/callingos/backend
             docker compose up -d --build
-
-            # Clean up old images
             docker image prune -f
