@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "CallNexa",
+    "slug": "callnexa",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "callnexa",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#080b12"
+    },
+    "android": {
+      "package": "com.tzmicha.callnexa",
+      "usesCleartextTraffic": true,
+      "permissions": [
+        "READ_CALL_LOG",
+        "READ_PHONE_STATE",
+        "READ_CONTACTS",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-asset",
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

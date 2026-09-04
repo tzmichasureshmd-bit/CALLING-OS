@@ -1,0 +1,70 @@
+# ── Dependencies ─────────────────────────────────────────────
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+dist-ssr/
+build/
+.expo/
+
+# ── Environment & Secrets ─────────────────────────────────────
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# ── Firebase — NEVER commit service account keys ─────────────
+firebase-service-account.json
+*-service-account.json
+serviceAccountKey.json
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+backend.log
+logs/
+
+# ── Backend test/utility scripts (dev only) ──────────────────
+backend/check_pass.py
+backend/clear_db.py
+backend/reset_db.py
+backend/wipe.py
+backend/fix_admins.py
+backend/seed_orgs.py
+backend/test_register.py
+backend/db_result.txt
+backend/test_result.txt
+
+# ── OS files ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.qodo/
+
+# ── Python venv ───────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── Expo / React Native ───────────────────────────────────────
+.expo/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+
+# ── Misc ─────────────────────────────────────────────────────
+*.local
+*.pem

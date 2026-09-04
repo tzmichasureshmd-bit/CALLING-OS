@@ -1,0 +1,12 @@
+from .auth import router as auth_router
+from .employees import router as employees_router
+from .devices import router as devices_router
+from .calls import router as calls_router
+from .analytics import router as analytics_router
+from .organization import router as organization_router
+from .leads import router as leads_router
+from .opportunities import router as opportunities_router
+from .excluded_numbers import router as excluded_numbers_router
+from .billing import router as billing_router
+from .transcripts import router as transcripts_router
+from .superadmin import router as superadmin_router

@@ -1,0 +1,58 @@
+services:
+  callingos-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: callingos-backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS}
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - SEED_DEMO_DATA=false
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-service-account.json
+    volumes:
+      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
+    networks:
+      - traefik-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.callingos-backend.rule=Host(`callingos.tzmicha.com`)"
+      - "traefik.http.routers.callingos-backend.entrypoints=websecure"
+      - "traefik.http.routers.callingos-backend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.callingos-backend.loadbalancer.server.port=8000"
+      - "traefik.docker.network=traefik-net"
+
+  callingos-web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    container_name: callingos-web
+    restart: unless-stopped
+    networks:
+      - traefik-net
+    depends_on:
+      callingos-backend:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.callingos-web.rule=Host(`app.callingos.tzmicha.com`)"
+      - "traefik.http.routers.callingos-web.entrypoints=websecure"
+      - "traefik.http.routers.callingos-web.tls.certresolver=letsencrypt"
+      - "traefik.http.services.callingos-web.loadbalancer.server.port=80"
+      - "traefik.docker.network=traefik-net"
+
+networks:
+  traefik-net:
+    external: true
