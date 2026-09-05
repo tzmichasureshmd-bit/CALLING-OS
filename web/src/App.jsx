@@ -1,9 +1,10 @@
 import { useState, lazy, Suspense } from "react";
-import { Routes, Route, useLocation, Navigate } from "react-router-dom";
+import { Routes, Route, useLocation, Navigate, NavLink } from "react-router-dom";
 import { useAuth } from "./context/AuthContext.jsx";
 import Sidebar from "./components/Sidebar.jsx";
 import Topbar from "./components/Topbar.jsx";
 import { RouteFallback } from "./components/ui.jsx";
+import { LayoutDashboard, Phone, Users, BarChart3, Settings } from "lucide-react";
 
 const Login = lazy(() => import("./pages/Login.jsx"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin.jsx"));
@@ -85,6 +86,25 @@ export default function App() {
           </Suspense>
         </main>
       </div>
+
+      {/* Mobile bottom nav */}
+      <nav className="nova-bottom-nav">
+        <NavLink to="/" end className={({ isActive }) => isActive ? "active" : ""}>
+          <LayoutDashboard /><span>Dashboard</span>
+        </NavLink>
+        <NavLink to="/call-logs" className={({ isActive }) => isActive ? "active" : ""}>
+          <Phone /><span>Calls</span>
+        </NavLink>
+        <NavLink to="/manage/employees" className={({ isActive }) => isActive ? "active" : ""}>
+          <Users /><span>Team</span>
+        </NavLink>
+        <NavLink to="/analytics" className={({ isActive }) => isActive ? "active" : ""}>
+          <BarChart3 /><span>Analytics</span>
+        </NavLink>
+        <NavLink to="/settings" className={({ isActive }) => isActive ? "active" : ""}>
+          <Settings /><span>Settings</span>
+        </NavLink>
+      </nav>
     </div>
   );
 }

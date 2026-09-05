@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View, Text, Pressable, TextInput, ActivityIndicator,
   KeyboardAvoidingView, Platform, ScrollView, Alert,
@@ -10,22 +10,12 @@ import { LinearGradient } from "expo-linear-gradient";
 import { palette, gradientBrand, useTheme } from "../src/theme";
 import { useAuth } from "../src/AuthContext";
 
-let Permissions = null;
-try { Permissions = require("react-native-permissions"); } catch {}
-
 const STEPS = [
   { icon: "shield-checkmark-outline", label: "Permissions" },
   { icon: "person-add-outline",        label: "Sign Up" },
   { icon: "phone-portrait-outline",    label: "SIM\nSelection" },
   { icon: "checkmark-done-outline",    label: "SIM\nVerification" },
   { icon: "grid-outline",              label: "Dashboard" },
-];
-
-const PERMS = [
-  { icon: "call-outline",           title: "Call Log",    sub: "Read call history" },
-  { icon: "phone-portrait-outline", title: "Phone State", sub: "Detect calls" },
-  { icon: "people-outline",         title: "Contacts",    sub: "Match names" },
-  { icon: "folder-outline",         title: "Storage",     sub: "Access recordings" },
 ];
 
 export default function Onboarding() {
@@ -117,23 +107,9 @@ function PermissionsStep() {
   const [granted, setGranted] = useState({});
 
   async function requestAll() {
-    if (!Permissions || Platform.OS !== "android") {
-      setGranted({ callLog: true, phoneState: true, contacts: true, storage: true });
-      return;
-    }
-    const { PERMISSIONS, requestMultiple, RESULTS } = Permissions;
-    const results = await requestMultiple([
-      PERMISSIONS.ANDROID.READ_CALL_LOG,
-      PERMISSIONS.ANDROID.READ_PHONE_STATE,
-      PERMISSIONS.ANDROID.READ_CONTACTS,
-      PERMISSIONS.ANDROID.READ_EXTERNAL_STORAGE,
-    ]);
-    setGranted({
-      callLog: results[PERMISSIONS.ANDROID.READ_CALL_LOG] === RESULTS.GRANTED,
-      phoneState: results[PERMISSIONS.ANDROID.READ_PHONE_STATE] === RESULTS.GRANTED,
-      contacts: results[PERMISSIONS.ANDROID.READ_CONTACTS] === RESULTS.GRANTED,
-      storage: results[PERMISSIONS.ANDROID.READ_EXTERNAL_STORAGE] === RESULTS.GRANTED,
-    });
+    const { requestAllPermissions } = await import("../src/nativeModules");
+    const result = await requestAllPermissions();
+    setGranted(result);
   }
 
   const perms = [
@@ -291,6 +267,19 @@ function SignUpStep({ onDone }) {
 
 // ── Step 2: SIM Selection ─────────────────────────────────────────────────────
 function SimStep({ theme }) {
+  const [sims, setSims] = useState([]);
+  const [selected, setSelected] = useState([0]);
+
+  useEffect(() => {
+    import("../src/nativeModules").then(({ readSimInfo }) => {
+      readSimInfo().then((s) => { if (s.length) setSims(s); });
+    });
+  }, []);
+
+  const displaySims = sims.length
+    ? sims.map((s) => `SIM ${s.slot + 1}${s.carrierName ? ` — ${s.carrierName}` : ""}${s.phoneNumber ? ` (${s.phoneNumber})` : ""}`)
+    : ["SIM 1 — Primary", "SIM 2 — Secondary"];
+
   return (
     <View style={{ alignItems: "center", paddingVertical: 24 }}>
       <View style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: palette.teal + "1a", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>
@@ -300,13 +289,19 @@ function SimStep({ theme }) {
       <Text style={{ fontSize: 13.5, color: theme.muted, textAlign: "center", lineHeight: 20 }}>
         Choose which SIM card(s) to monitor for call logs and recordings.
       </Text>
-      {["SIM 1 — Primary", "SIM 2 — Secondary"].map((s, i) => (
-        <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 12, marginTop: 14, backgroundColor: i === 0 ? palette.teal + "1a" : "transparent",
-          borderRadius: 12, padding: 12, borderWidth: 1, borderColor: i === 0 ? palette.teal : theme.border, width: "100%" }}>
-          <Ionicons name={i === 0 ? "checkmark-circle" : "ellipse-outline"} size={20} color={i === 0 ? palette.teal : theme.dim} />
-          <Text style={{ fontSize: 14, fontWeight: "600", color: theme.primary }}>{s}</Text>
-        </View>
-      ))}
+      {displaySims.map((s, i) => {
+        const on = selected.includes(i);
+        return (
+          <Pressable key={i} onPress={() => setSelected(on ? selected.filter((x) => x !== i) : [...selected, i])}
+            style={{ flexDirection: "row", alignItems: "center", gap: 12, marginTop: 14,
+              backgroundColor: on ? palette.teal + "1a" : "transparent",
+              borderRadius: 12, padding: 12, borderWidth: 1,
+              borderColor: on ? palette.teal : theme.border, width: "100%" }}>
+            <Ionicons name={on ? "checkmark-circle" : "ellipse-outline"} size={20} color={on ? palette.teal : theme.dim} />
+            <Text style={{ fontSize: 14, fontWeight: "600", color: theme.primary }}>{s}</Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   FileSpreadsheet, PhoneIncoming, PhoneOutgoing, PhoneMissed, PhoneOff,
   Play, RotateCcw, FilterX, Phone, Sparkles, Target, TrendingUp,
@@ -99,6 +99,33 @@ export default function CallLogs() {
 
 function CallIntelligenceDrawer({ call, onClose }) {
   const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    setPlaying(false);
+    setProgress(0);
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+  }, [call?.id]);
+
+  function togglePlay() {
+    if (!call?.recordingUrl) return;
+    if (!audioRef.current) audioRef.current = new Audio(call.recordingUrl);
+    if (playing) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play();
+      audioRef.current.ontimeupdate = () => {
+        const pct = audioRef.current.duration
+          ? (audioRef.current.currentTime / audioRef.current.duration) * 100
+          : 0;
+        setProgress(pct);
+      };
+      audioRef.current.onended = () => { setPlaying(false); setProgress(0); };
+    }
+    setPlaying((p) => !p);
+  }
+
   if (!call) return null;
   const meta = TYPE_META[call.type] || TYPE_META.rejected;
 
@@ -125,12 +152,12 @@ function CallIntelligenceDrawer({ call, onClose }) {
 
       {/* Recording player */}
       <div style={{ background: "var(--bg-hover)", borderRadius: 12, padding: 14, marginBottom: 18, display: "flex", alignItems: "center", gap: 12 }}>
-        <button onClick={() => setPlaying((p) => !p)} disabled={!call.recordingUrl} style={{ width: 40, height: 40, borderRadius: 20, border: "none", cursor: call.recordingUrl ? "pointer" : "not-allowed", background: call.recordingUrl ? "var(--grad-brand)" : "var(--border)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <button onClick={togglePlay} disabled={!call.recordingUrl} style={{ width: 40, height: 40, borderRadius: 20, border: "none", cursor: call.recordingUrl ? "pointer" : "not-allowed", background: call.recordingUrl ? "var(--grad-brand)" : "var(--border)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           {playing ? <Pause size={18} /> : <Play size={18} />}
         </button>
         <div style={{ flex: 1 }}>
-          <div style={{ height: 5, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}><div style={{ width: playing ? "45%" : "0%", height: "100%", background: "var(--grad-brand)", transition: "width 0.3s" }} /></div>
-          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 6 }}>{call.recordingUrl ? "Recording available" : "No recording for this call"}</div>
+          <div style={{ height: 5, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}><div style={{ width: `${progress}%`, height: "100%", background: "var(--grad-brand)", transition: "width 0.4s" }} /></div>
+          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 6 }}>{call.recordingUrl ? (playing ? "Playing…" : "Recording available · click to play") : "No recording for this call"}</div>
         </div>
       </div>
 

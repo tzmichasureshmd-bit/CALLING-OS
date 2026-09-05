@@ -43,6 +43,8 @@ export const analyticsApi = {
   dashboard: (params) => client.get("/analytics/dashboard", { params }).then((r) => r.data),
   employees: (params) => client.get("/analytics/employees", { params }).then((r) => r.data),
   team: (params) => client.get("/analytics/team", { params }).then((r) => r.data),
+  needsAttention: () => client.get("/analytics/needs-attention").then((r) => r.data),
+  livePulse: () => client.get("/analytics/live-pulse").then((r) => r.data),
 };
 
 export const leadsApi = {
@@ -71,4 +73,15 @@ export const subscriptionApi = {
 
 export const transcriptsApi = {
   list: (params) => client.get("/transcripts", { params }).then((r) => r.data),
+};
+
+export const twoFaApi = {
+  setup:   ()           => client.post("/auth/2fa/setup").then((r) => r.data),
+  verify:  (code)       => client.post("/auth/2fa/verify", { code }).then((r) => r.data),
+  disable: (code)       => client.post("/auth/2fa/disable", { code }).then((r) => r.data),
+};
+
+export const notificationsApi = {
+  needsAttention: () => client.get("/analytics/needs-attention").then((r) => r.data),
+  recentCalls: () => client.get("/calls", { params: { page_size: 20 } }).then((r) => r.data),
 };

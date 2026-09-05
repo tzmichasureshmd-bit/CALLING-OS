@@ -9,6 +9,7 @@ from ..auth import create_access_token, create_refresh_token, decode_token, veri
 from ..auth.password import hash_password
 from pydantic import BaseModel
 import re, random, string
+import pyotp, qrcode, qrcode.image.svg, io, base64
 import firebase_admin
 from firebase_admin import auth as firebase_auth, credentials
 import os
@@ -267,6 +268,37 @@ def register_employee(body: EmployeeRegisterRequest, db: Session = Depends(get_d
     )
 
 
+@router.patch("/me")
+def update_me(
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update the current user's name and/or email."""
+    emp = db.query(Employee).filter(Employee.user_id == user.id).first()
+    if "name" in body and body["name"].strip():
+        if emp:
+            emp.name = body["name"].strip()
+    if "email" in body and body["email"].strip():
+        # Check uniqueness
+        existing = db.query(User).filter(User.email == body["email"], User.id != user.id).first()
+        if existing:
+            raise HTTPException(status_code=409, detail="Email already in use")
+        user.email = body["email"].strip()
+        if emp:
+            emp.email = body["email"].strip()
+    db.commit()
+    org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+    return MeResponse(
+        id=user.id,
+        email=user.email,
+        role=user.role,
+        organization_id=user.organization_id,
+        organization_name=org.name if org else "",
+        organization_code=org.code if org else "",
+    )
+
+
 @router.post("/logout")
 def logout():
     return {"message": "Logged out successfully"}
@@ -282,4 +314,56 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
         organization_id=user.organization_id,
         organization_name=org.name if org else "",
         organization_code=org.code if org else "",
+        totp_enabled=bool(user.totp_enabled),
     )
+
+
+# ── 2FA endpoints ─────────────────────────────────────────────────────────────
+
+@router.post("/2fa/setup")
+def setup_2fa(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Generate a new TOTP secret + QR code URI for Google Authenticator."""
+    secret = pyotp.random_base32()
+    user.totp_secret = secret
+    db.commit()
+    org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+    label = f"CallNexa:{user.email}"
+    issuer = org.name if org else "CallNexa"
+    uri = pyotp.totp.TOTP(secret).provisioning_uri(name=label, issuer_name=issuer)
+    # Build QR as base64 PNG
+    img = qrcode.make(uri)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    qr_b64 = base64.b64encode(buf.getvalue()).decode()
+    return {"secret": secret, "uri": uri, "qr": f"data:image/png;base64,{qr_b64}"}
+
+
+class TotpVerifyRequest(BaseModel):
+    code: str
+
+
+@router.post("/2fa/verify")
+def verify_2fa(body: TotpVerifyRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Verify the 6-digit code and enable 2FA."""
+    if not user.totp_secret:
+        raise HTTPException(status_code=400, detail="2FA setup not initiated. Call /2fa/setup first.")
+    totp = pyotp.TOTP(user.totp_secret)
+    if not totp.verify(body.code.strip(), valid_window=1):
+        raise HTTPException(status_code=400, detail="Invalid code. Please try again.")
+    user.totp_enabled = True
+    db.commit()
+    return {"enabled": True}
+
+
+@router.post("/2fa/disable")
+def disable_2fa(body: TotpVerifyRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Disable 2FA after confirming with current code."""
+    if not user.totp_enabled or not user.totp_secret:
+        raise HTTPException(status_code=400, detail="2FA is not enabled.")
+    totp = pyotp.TOTP(user.totp_secret)
+    if not totp.verify(body.code.strip(), valid_window=1):
+        raise HTTPException(status_code=400, detail="Invalid code.")
+    user.totp_enabled = False
+    user.totp_secret = None
+    db.commit()
+    return {"enabled": False}

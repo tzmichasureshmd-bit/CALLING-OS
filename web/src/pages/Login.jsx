@@ -17,9 +17,7 @@ export default function Login() {
         {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 12, background: "var(--grad-brand)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <img src="/callos.svg" style={{ width: 24, height: 24 }} alt="CallNexa" />
-            </div>
+            <img src="/logo.png" alt="CallNexa" style={{ width: 44, height: 44, borderRadius: 12, objectFit: "contain" }} />
             <span style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>CallNexa</span>
           </div>
           <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Sales Call Monitoring Platform</p>

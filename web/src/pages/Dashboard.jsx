@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Phone, Users2, Clock, Flame, TrendingUp, Trophy, Activity,
@@ -17,6 +17,9 @@ import { formatTalkTime } from "../data/mockData.js";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import * as api from "../api/resources.js";
+
+const POLL_INTERVAL = 30000; // 30s live pulse refresh
 
 const SEV = { high: { tone: "danger", color: "var(--danger)" }, medium: { tone: "warning", color: "var(--warning)" }, low: { tone: "info", color: "var(--info)" } };
 
@@ -37,11 +40,25 @@ function DashboardSkeleton() {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { loading, error, data, reload } = useResource(() => dataSource.getDashboard());
+  const [livePulse, setLivePulse] = useState(null);
+  const pollRef = useRef(null);
+
+  useEffect(() => {
+    function fetchPulse() {
+      api.analyticsApi.livePulse()
+        .then((res) => setLivePulse(res.items || []))
+        .catch(() => {});
+    }
+    fetchPulse();
+    pollRef.current = setInterval(fetchPulse, POLL_INTERVAL);
+    return () => clearInterval(pollRef.current);
+  }, []);
 
   if (loading) return <DashboardSkeleton />;
   if (error) return <PageContainer><Card><ErrorState title="Sync interrupted" message={error.message} hint="Last successful sync: 12:41 PM" code={error.error_code} onRetry={reload} /></Card></PageContainer>;
 
-  const { kpis, buckets, topPerformer: top, leaderboard, opportunities, dailyMetrics, outcomeBreakdown, durationDistribution, deviceHealth, needsAttention, livePulse, salesFunnel } = data;
+  const { kpis, topPerformer: top, leaderboard, opportunities, dailyMetrics, outcomeBreakdown, durationDistribution, deviceHealth, needsAttention, salesFunnel } = data;
+  const pulse = livePulse ?? data.livePulse ?? [];
   const hotLeads = opportunities.filter((o) => o.hot).slice(0, 4);
   const axis = "var(--text-dim)";
 
@@ -50,16 +67,16 @@ export default function Dashboard() {
       {/* KPI ROW */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 16, marginBottom: 18 }}>
         <div onClick={() => navigate("/call-logs")} style={{ cursor: "pointer" }}>
-          <KpiCard icon={Phone} label="Total Calls" value={kpis.totalCalls} sub="all employees" tone="teal" numeric delta={12} />
+          <KpiCard icon={Phone} label="Total Calls" value={kpis.totalCalls} sub="all employees" tone="teal" numeric />
         </div>
         <div onClick={() => navigate("/call-logs")} style={{ cursor: "pointer" }}>
-          <KpiCard icon={Users2} label="Connected" value={`${kpis.connectedPct}%`} sub={`${kpis.connected} connected`} tone="violet" delta={5} />
+          <KpiCard icon={Users2} label="Connected" value={`${kpis.connectedPct}%`} sub={`${kpis.connected} connected`} tone="violet" />
         </div>
         <div onClick={() => navigate("/analytics")} style={{ cursor: "pointer" }}>
           <KpiCard icon={Clock} label="Talk Time" value={formatTalkTime(kpis.talkTimeSeconds)} sub="this week" tone="cyan" />
         </div>
         <div onClick={() => navigate("/leads")} style={{ cursor: "pointer" }}>
-          <KpiCard icon={Flame} label="Hot Leads" value={kpis.hotLeads} sub="need action" tone="warning" numeric delta={-3} />
+          <KpiCard icon={Flame} label="Hot Leads" value={kpis.hotLeads} sub="need action" tone="warning" numeric />
         </div>
       </div>
 
@@ -116,8 +133,10 @@ export default function Dashboard() {
             <CardHeader icon={Zap} title="Live Pulse" subtitle="Real-time call events" action={<span className="nova-live-dot" />} />
           </div>
           <div style={{ padding: "0 8px 8px", maxHeight: 240, overflowY: "auto" }}>
-            {livePulse.map((p) => {
-              const c = { success: "var(--success)", danger: "var(--danger)", info: "var(--info)" }[p.tone];
+            {pulse.length === 0 ? (
+              <div style={{ padding: "20px 12px", textAlign: "center", color: "var(--text-dim)", fontSize: 12.5 }}>No recent call events</div>
+            ) : pulse.map((p) => {
+              const c = { success: "var(--success)", danger: "var(--danger)", info: "var(--info)" }[p.tone] || "var(--info)";
               return (
                 <div key={p.id} style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "10px 12px", borderRadius: 10 }}>
                   <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "Space Grotesk", minWidth: 34, paddingTop: 2 }}>{p.time}</div>
@@ -254,21 +273,23 @@ export default function Dashboard() {
       </div>
 
       {/* SALES FUNNEL + DURATION */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }} className="nova-grid-2">
-        <Card>
-          <CardHeader icon={TrendingUp} title="Sales Flow" subtitle="Call → Connected → Conversation → Follow-up → Lead → Opportunity → Won" />
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={salesFunnel} layout="vertical" margin={{ top: 4, right: 16, left: 20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="stage" tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} width={90} />
-              <Tooltip content={<ChartTooltip />} />
-              <Bar dataKey="value" name="Count" radius={[0, 6, 6, 0]}>
-                {salesFunnel.map((_, i) => <Cell key={i} fill={i % 2 ? "#8b5cf6" : "#14b8a6"} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
+      <div style={{ display: "grid", gridTemplateColumns: salesFunnel.length ? "1.6fr 1fr" : "1fr", gap: 16 }} className="nova-grid-2">
+        {salesFunnel.length > 0 && (
+          <Card>
+            <CardHeader icon={TrendingUp} title="Sales Flow" subtitle="Call → Connected → Conversation → Follow-up → Lead → Opportunity → Won" />
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={salesFunnel} layout="vertical" margin={{ top: 4, right: 16, left: 20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="stage" tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} width={90} />
+                <Tooltip content={<ChartTooltip />} />
+                <Bar dataKey="value" name="Count" radius={[0, 6, 6, 0]}>
+                  {salesFunnel.map((_, i) => <Cell key={i} fill={i % 2 ? "#8b5cf6" : "#14b8a6"} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+        )}
 
         <Card>
           <CardHeader icon={Clock} title="Duration Distribution" />

@@ -43,5 +43,6 @@ class MeResponse(BaseModel):
     organization_id: str
     organization_name: str
     organization_code: str
+    totp_enabled: bool = False
 
     model_config = {"from_attributes": True}

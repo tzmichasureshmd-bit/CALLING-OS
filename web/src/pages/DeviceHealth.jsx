@@ -45,7 +45,7 @@ export default function DeviceHealth() {
           {devices.map((d) => {
             const s = STATUS[d.status];
             return (
-              <Card key={d.id} hover style={{ borderLeft: `3px solid ${s.color}` }}>
+              <Card key={d.id} hover style={{ borderLeftWidth: 3, borderLeftStyle: "solid", borderLeftColor: s.color }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                   <div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>{d.employee}</div>

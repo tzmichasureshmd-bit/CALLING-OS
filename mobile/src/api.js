@@ -38,6 +38,7 @@ export const api = {
   register: ({ name, email, password, company_code }) =>
     request("POST", "/auth/register/employee", { name, email, password, company_code }),
   me: () => request("GET", "/auth/me"),
+  updateProfile: (payload) => request("PATCH", "/auth/me", payload),
 
   // ── Device ────────────────────────────────────────────────────────────────
   registerDevice: (payload) => request("POST", "/devices/register", payload),

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Index, text
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Index, text
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from ..database import Base
@@ -15,6 +15,8 @@ class User(Base):
     google_id       = Column(String(200), nullable=True, unique=True)
     role            = Column(String(30),  default="EMPLOYEE")
     status          = Column(String(20),  default="active")
+    totp_secret     = Column(String(64),  nullable=True)
+    totp_enabled    = Column(Boolean,     default=False)
     last_login_at   = Column(DateTime, nullable=True)
     created_at      = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at      = Column(DateTime, default=lambda: datetime.now(timezone.utc),

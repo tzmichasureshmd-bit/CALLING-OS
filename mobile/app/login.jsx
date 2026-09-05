@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   View, Text, TextInput, Pressable, ScrollView,
-  KeyboardAvoidingView, Platform, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ActivityIndicator, Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -22,10 +22,11 @@ export default function LoginScreen() {
 
           {/* Logo */}
           <View style={{ alignItems: "center", marginTop: 32, marginBottom: 28 }}>
-            <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-              style={{ width: 60, height: 60, borderRadius: 18, alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
-              <MaterialCommunityIcons name="pulse" size={28} color="#fff" />
-            </LinearGradient>
+            <Image
+              source={require("../assets/logo.png")}
+              style={{ width: 72, height: 72, borderRadius: 20, marginBottom: 12 }}
+              resizeMode="contain"
+            />
             <Text style={{ fontSize: 24, fontWeight: "800", color: theme.primary }}>
               Call<Text style={{ color: palette.teal }}>Nexa</Text>
             </Text>

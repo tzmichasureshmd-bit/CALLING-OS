@@ -10,23 +10,11 @@ import { Inbox, X } from "lucide-react";
 export function Logo({ size = 24, showText = true, collapsed = false }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-      <div
-        style={{
-          width: size + 8,
-          height: size + 8,
-          borderRadius: 9,
-          background: "var(--grad-brand)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-          boxShadow: "var(--glow)",
-        }}
-      >
-        <svg width={size - 4} height={size - 4} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round">
-          <path d="M3 12h3l2-6 4 12 3-8 2 4h4" />
-        </svg>
-      </div>
+      <img
+        src="/logo.png"
+        alt="CallNexa"
+        style={{ width: size + 8, height: size + 8, borderRadius: 9, objectFit: "contain", flexShrink: 0 }}
+      />
       {showText && !collapsed && (
         <span style={{ fontFamily: "Space Grotesk", fontSize: size * 0.72, fontWeight: 700, letterSpacing: "0.04em", color: "var(--text-primary)" }}>
           Call<span style={{ background: "var(--grad-brand)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>Nexa</span>
@@ -44,7 +32,7 @@ export function Card({ children, style, className = "", padding = 20, hover = fa
       style={{
         padding,
         transition: "transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease",
-        ...(hover && h ? { transform: "translateY(-2px)", boxShadow: "var(--shadow-md)", borderColor: "var(--border-strong)" } : {}),
+        ...(hover && h ? { transform: "translateY(-2px)", boxShadow: "var(--shadow-md)" } : {}),
         ...style,
       }}
       onMouseEnter={() => hover && setH(true)}
@@ -156,13 +144,25 @@ export function CountUp({ value, duration = 700, format = (n) => n }) {
 }
 
 export function KpiCard({ icon: Icon, label, value, sub, tone = "teal", numeric = false, delta }) {
-  const toneColor = { teal: "var(--accent)", violet: "var(--accent-2)", cyan: "var(--cyan)", success: "var(--success)", warning: "var(--warning)", danger: "var(--danger)", info: "var(--info)" }[tone] || "var(--accent)";
+  const COLORS = { teal: "#14b8a6", violet: "#8b5cf6", cyan: "#22d3ee", success: "#22c55e", warning: "#f59e0b", danger: "#ef4444", info: "#0891b2" };
+  const color = COLORS[tone] || COLORS.teal;
   return (
-    <Card hover style={{ display: "flex", flexDirection: "column", gap: 12, position: "relative", overflow: "hidden" }}>
-      <div style={{ position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: toneColor, opacity: 0.8 }} />
+    <div style={{
+      background: "var(--bg-card)",
+      border: `2px solid ${color}`,
+      borderRadius: "var(--radius-card)",
+      boxShadow: "var(--shadow-sm)",
+      padding: 20,
+      display: "flex", flexDirection: "column", gap: 12,
+      cursor: "pointer",
+      transition: "transform 0.16s ease, box-shadow 0.16s ease",
+    }}
+    onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; }}
+    onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "var(--shadow-sm)"; }}
+    >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 12.5, color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
-        <div style={{ width: 34, height: 34, borderRadius: 10, background: "var(--grad-brand-soft)", color: toneColor, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ width: 34, height: 34, borderRadius: 10, background: color + "22", color, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Icon size={17} />
         </div>
       </div>
@@ -177,7 +177,7 @@ export function KpiCard({ icon: Icon, label, value, sub, tone = "teal", numeric 
           </span>
         )}
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -315,7 +315,7 @@ export function Pagination({ page, totalPages, onChange }) {
 
 export function PageContainer({ children }) {
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} style={{ padding: "22px 26px 44px" }}>
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="nova-page">
       {children}
     </motion.div>
   );

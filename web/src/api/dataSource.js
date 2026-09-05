@@ -1,28 +1,8 @@
-// dataSource — single abstraction all pages use.
-// USE_MOCK=true  → local mock data (no backend needed)
-// USE_MOCK=false → real API, responses normalized to match page expectations exactly.
+// dataSource — all data from real backend API. No mock data.
 
-import { USE_MOCK } from "./config.js";
 import * as api from "./resources.js";
-import {
-  ORGANIZATION, EMPLOYEES, CALL_LOGS, OPPORTUNITIES, CLOSED_OPPORTUNITIES,
-  EXCLUDED_NUMBERS, INVOICES, DAILY_METRICS, OUTCOME_BREAKDOWN,
-  DURATION_DISTRIBUTION, DEVICE_HEALTH, NEEDS_ATTENTION, LIVE_PULSE,
-  SALES_FUNNEL, LEADS, PIPELINE,
-  getKpis, getOpportunityBuckets, getTopPerformer, getLeaderboard,
-} from "../data/mockData.js";
 
-const MOCK_DELAY_MS = 300;
-const delay = (ms = MOCK_DELAY_MS) => new Promise((r) => setTimeout(r, ms));
-const mock = async (v) => { await delay(); return v; };
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-function fmtSeconds(s) {
-  if (!s) return "0m 0s";
-  const m = Math.floor(s / 60), sec = s % 60;
-  return m === 0 ? `${sec}s` : `${m}m ${sec}s`;
-}
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 function relativeDate(iso) {
   if (!iso) return "—";
@@ -33,7 +13,6 @@ function relativeDate(iso) {
   return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
-// Normalize a backend Call row → shape CallLogs page expects
 function normalizeCall(c) {
   return {
     id: c.id,
@@ -49,7 +28,6 @@ function normalizeCall(c) {
   };
 }
 
-// Normalize backend Employee → shape Employees page expects
 function normalizeEmployee(e) {
   return {
     id: e.id,
@@ -63,16 +41,15 @@ function normalizeEmployee(e) {
     device: "—",
     sim: "SIM 1",
     status: e.status,
-    calls: 0,
-    connected: 0,
-    connectedPct: 0,
-    missed: 0,
-    talkTimeSeconds: 0,
+    calls: e.calls ?? 0,
+    connected: e.connected ?? 0,
+    connectedPct: e.connected_pct ?? 0,
+    missed: e.missed ?? 0,
+    talkTimeSeconds: e.talk_time_seconds ?? 0,
     repeatClients: 0,
   };
 }
 
-// Normalize backend Device → shape DeviceHealth page expects
 function normalizeDevice(d) {
   const perms = d.permissions_status || {};
   const allOk = perms.callLog && perms.phoneState && perms.contacts && perms.recording;
@@ -106,7 +83,6 @@ function normalizeDevice(d) {
   };
 }
 
-// Normalize backend Opportunity → shape Opportunities/Dashboard pages expect
 function normalizeOpportunity(o) {
   return {
     id: o.id,
@@ -131,7 +107,6 @@ function normalizeOpportunity(o) {
   };
 }
 
-// Normalize backend Lead → shape Leads page expects
 function normalizeLead(l) {
   return {
     id: l.id,
@@ -154,44 +129,35 @@ function normalizeLead(l) {
   };
 }
 
-// Build dashboard shape from analytics API response
 function buildDashboard(analytics, devices) {
   const lb = (analytics.leaderboard || []).map((e, i) => ({
     id: e.id, name: e.name, rank: e.rank || i + 1,
     calls: e.calls, connected: e.connected,
-    connectedPct: e.connected_pct ?? e.connectedPct ?? 0,
-    missed: e.missed, talkTimeSeconds: e.talk_time_seconds ?? e.talkTimeSeconds ?? 0,
+    connectedPct: e.connected_pct ?? 0,
+    missed: e.missed,
+    talkTimeSeconds: e.talk_time_seconds ?? 0,
     repeatClients: 0,
   }));
-
   const kpis = analytics.kpis || {};
   const top = lb[0] || { name: "—", calls: 0, connected: 0, connectedPct: 0, missed: 0, talkTimeSeconds: 0, repeatClients: 0 };
-
   return {
     kpis: {
-      totalCalls: kpis.total_calls ?? kpis.totalCalls ?? 0,
+      totalCalls: kpis.total_calls ?? 0,
       connected: kpis.connected ?? 0,
-      connectedPct: kpis.connected_pct ?? kpis.connectedPct ?? 0,
-      talkTimeSeconds: kpis.talk_time_seconds ?? kpis.talkTimeSeconds ?? 0,
-      hotLeads: kpis.hot_leads ?? kpis.hotLeads ?? 0,
+      connectedPct: kpis.connected_pct ?? 0,
+      talkTimeSeconds: kpis.talk_time_seconds ?? 0,
+      hotLeads: kpis.hot_leads ?? 0,
     },
-    buckets: { twoPlus: 0, threePlus: 0, fivePlus: 0, avgTalkTime: 0 },
     topPerformer: top,
     leaderboard: lb,
-    opportunities: [],          // filled separately if needed
-    dailyMetrics: (analytics.daily_metrics || analytics.dailyMetrics || []).map((d) => ({
-      day: d.day, total: d.total, connected: d.connected, missed: d.missed,
-    })),
-    outcomeBreakdown: (analytics.outcome_breakdown || analytics.outcomeBreakdown || []).map((d) => ({
-      day: d.day, incoming: d.incoming, outgoing: d.outgoing, missed: d.missed,
-    })),
-    durationDistribution: (analytics.duration_distribution || analytics.durationDistribution || []).map((d) => ({
-      name: d.name, value: d.value, color: d.color,
-    })),
+    opportunities: [],
+    dailyMetrics: (analytics.daily_metrics || []).map((d) => ({ day: d.day, total: d.total, connected: d.connected, missed: d.missed })),
+    outcomeBreakdown: (analytics.outcome_breakdown || []).map((d) => ({ day: d.day, incoming: d.incoming, outgoing: d.outgoing, missed: d.missed })),
+    durationDistribution: (analytics.duration_distribution || []).map((d) => ({ name: d.name, value: d.value, color: d.color })),
     deviceHealth: devices,
-    needsAttention: [],         // requires dedicated endpoint — use empty for now
-    livePulse: [],              // requires websocket/polling — use empty for now
-    salesFunnel: SALES_FUNNEL,  // static funnel shape until backend adds it
+    needsAttention: [],
+    livePulse: [],
+    salesFunnel: [],
   };
 }
 
@@ -199,61 +165,47 @@ function buildDashboard(analytics, devices) {
 
 export const dataSource = {
 
-  getOrganization: () =>
-    USE_MOCK ? mock(ORGANIZATION) : api.organizationApi.current(),
+  getOrganization: () => api.organizationApi.current(),
 
   getDashboard: async () => {
-    if (USE_MOCK) return mock({
-      kpis: getKpis(), buckets: getOpportunityBuckets(),
-      topPerformer: getTopPerformer(), leaderboard: getLeaderboard(),
-      opportunities: OPPORTUNITIES, dailyMetrics: DAILY_METRICS,
-      outcomeBreakdown: OUTCOME_BREAKDOWN, durationDistribution: DURATION_DISTRIBUTION,
-      deviceHealth: DEVICE_HEALTH, needsAttention: NEEDS_ATTENTION,
-      livePulse: LIVE_PULSE, salesFunnel: SALES_FUNNEL,
-    });
-    const [analytics, devicesRes, oppsRes] = await Promise.all([
+    const [analytics, devicesRes, oppsRes, attentionRes, pulseRes] = await Promise.all([
       api.analyticsApi.dashboard(),
       api.devicesApi.list().catch(() => []),
       api.opportunitiesApi.list({ closed: false, page_size: 20 }).catch(() => ({ items: [] })),
+      api.analyticsApi.needsAttention().catch(() => ({ items: [] })),
+      api.analyticsApi.livePulse().catch(() => ({ items: [] })),
     ]);
     const devices = (Array.isArray(devicesRes) ? devicesRes : devicesRes?.items || []).map(normalizeDevice);
     const opps = (oppsRes?.items || []).map(normalizeOpportunity);
     const dash = buildDashboard(analytics, devices);
     dash.opportunities = opps;
+    dash.needsAttention = attentionRes.items || [];
+    dash.livePulse = (pulseRes.items || []).map((p, i) => ({ ...p, id: p.id || i }));
     return dash;
   },
 
   getDeviceHealth: async () => {
-    if (USE_MOCK) return mock({ items: DEVICE_HEALTH });
     const res = await api.devicesApi.list();
-    const items = (Array.isArray(res) ? res : res?.items || []).map(normalizeDevice);
-    return { items };
+    return { items: (Array.isArray(res) ? res : res?.items || []).map(normalizeDevice) };
   },
 
   getLeads: async () => {
-    if (USE_MOCK) return mock({ items: LEADS });
     const res = await api.leadsApi.list();
     return { items: (res.items || []).map(normalizeLead) };
   },
 
   getPipeline: async () => {
-    if (USE_MOCK) return mock({ items: PIPELINE, funnel: SALES_FUNNEL });
     const res = await api.opportunitiesApi.list({ closed: false });
-    return { items: (res.items || []).map(normalizeOpportunity), funnel: SALES_FUNNEL };
+    return { items: (res.items || []).map(normalizeOpportunity), funnel: [] };
   },
 
   getAnalytics: async () => {
-    if (USE_MOCK) return mock({
-      dailyMetrics: DAILY_METRICS, outcomeBreakdown: OUTCOME_BREAKDOWN,
-      durationDistribution: DURATION_DISTRIBUTION, funnel: SALES_FUNNEL,
-      leaderboard: getLeaderboard(),
-    });
     const res = await api.analyticsApi.dashboard();
     return {
       dailyMetrics: (res.daily_metrics || []).map((d) => ({ day: d.day, total: d.total, connected: d.connected, missed: d.missed })),
       outcomeBreakdown: (res.outcome_breakdown || []).map((d) => ({ day: d.day, incoming: d.incoming, outgoing: d.outgoing, missed: d.missed })),
       durationDistribution: (res.duration_distribution || []).map((d) => ({ name: d.name, value: d.value, color: d.color })),
-      funnel: SALES_FUNNEL,
+      funnel: [],
       leaderboard: (res.leaderboard || []).map((e, i) => ({
         id: e.id, name: e.name, rank: e.rank || i + 1,
         calls: e.calls, connected: e.connected,
@@ -265,25 +217,21 @@ export const dataSource = {
   },
 
   getEmployees: async (params) => {
-    if (USE_MOCK) return mock({ items: EMPLOYEES, total: EMPLOYEES.length });
     const res = await api.employeesApi.list(params);
     return { items: (res.items || []).map(normalizeEmployee), total: res.total || 0 };
   },
 
   getCalls: async (params) => {
-    if (USE_MOCK) return mock({ items: CALL_LOGS, total: CALL_LOGS.length });
     const res = await api.callsApi.list(params);
     return { items: (res.items || []).map(normalizeCall), total: res.total || 0 };
   },
 
   getOpportunities: async () => {
-    if (USE_MOCK) return mock({ items: OPPORTUNITIES });
     const res = await api.opportunitiesApi.list({ closed: false });
     return { items: (res.items || []).map(normalizeOpportunity) };
   },
 
   getClosedOpportunities: async () => {
-    if (USE_MOCK) return mock({ items: CLOSED_OPPORTUNITIES });
     const res = await api.opportunitiesApi.list({ closed: true });
     return {
       items: (res.items || []).map((o) => ({
@@ -296,7 +244,6 @@ export const dataSource = {
   },
 
   getExcludedNumbers: async () => {
-    if (USE_MOCK) return mock({ items: EXCLUDED_NUMBERS });
     const res = await api.excludedApi.list();
     return {
       items: (res.items || []).map((n) => ({
@@ -307,7 +254,6 @@ export const dataSource = {
   },
 
   getRecordedCalls: async () => {
-    if (USE_MOCK) return mock({ items: CALL_LOGS.filter((c) => c.recordingUrl) });
     const res = await api.transcriptsApi.list();
     return {
       items: (res.items || []).map((c) => ({
@@ -324,25 +270,18 @@ export const dataSource = {
   },
 
   getInvoices: async () => {
-    if (USE_MOCK) return mock({ items: INVOICES });
     const res = await api.invoicesApi.list();
     return {
       items: (res.items || []).map((inv) => ({
-        id: inv.id,
-        period: inv.period,
-        users: inv.users,
+        id: inv.id, period: inv.period, users: inv.users,
         amount: `₹${Number(inv.amount).toLocaleString("en-IN")}`,
-        status: inv.status,
-        date: inv.date,
+        status: inv.status, date: inv.date,
       })),
     };
   },
 
   getSubscription: async () => {
-    if (USE_MOCK) return mock({ users: EMPLOYEES.length, perUser: 99 });
     const res = await api.subscriptionApi.current();
     return { users: res.users, perUser: res.per_user ?? 99 };
   },
 };
-
-export { USE_MOCK };

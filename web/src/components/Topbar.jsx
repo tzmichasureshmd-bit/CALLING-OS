@@ -1,8 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Sun, Moon, Bell, ChevronDown, Menu, Copy, Check,
-  LogOut, Plus, Building2, CheckCircle2, X, Loader, Trash2, ArrowLeftRight,
+  Plus, CheckCircle2, X, Loader, Trash2, ArrowLeftRight,
+  PhoneMissed, Mic, AlertTriangle, AlertCircle, Info,
 } from "lucide-react";
+import { fetchNotifications, markRead, markAllRead } from "../api/notifications.js";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useNavigate } from "react-router-dom";
@@ -287,11 +289,57 @@ export default function Topbar({ title, onMenu }) {
   const [copied, setCopied] = useState(false);
   const [query, setQuery] = useState("");
   const [showSwitcher, setShowSwitcher] = useState(false);
+  const [showNotifs, setShowNotifs] = useState(false);
+  const [notifs, setNotifs] = useState([]);
+  const [notifsLoading, setNotifsLoading] = useState(false);
+  const notifRef = useRef();
+
+  const loadNotifs = useCallback(async () => {
+    setNotifsLoading(true);
+    try { setNotifs(await fetchNotifications()); }
+    catch { /* silent */ }
+    finally { setNotifsLoading(false); }
+  }, []);
+
+  // Load on mount + poll every 60s
+  useEffect(() => {
+    loadNotifs();
+    const t = setInterval(loadNotifs, 60000);
+    return () => clearInterval(t);
+  }, [loadNotifs]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!showNotifs) return;
+    const h = (e) => { if (notifRef.current && !notifRef.current.contains(e.target)) setShowNotifs(false); };
+    setTimeout(() => document.addEventListener("mousedown", h), 0);
+    return () => document.removeEventListener("mousedown", h);
+  }, [showNotifs]);
+
+  const unread = notifs.filter((n) => !n.read).length;
+
+  function handleMarkAllRead() {
+    markAllRead(notifs);
+    setNotifs((ns) => ns.map((n) => ({ ...n, read: true })));
+  }
+
+  function handleNotifClick(n) {
+    markRead([n.id]);
+    setNotifs((ns) => ns.map((x) => x.id === n.id ? { ...x, read: true } : x));
+    if (n.to) { setShowNotifs(false); navigate(n.to); }
+  }
+
+  function notifIcon(type) {
+    if (type === "missed")    return { Icon: PhoneMissed,   color: "var(--red)" };
+    if (type === "recording") return { Icon: Mic,           color: "var(--accent)" };
+    if (type === "alert")     return { Icon: AlertCircle,   color: "var(--red)" };
+    if (type === "warning")   return { Icon: AlertTriangle, color: "var(--amber)" };
+    return                           { Icon: Info,          color: "var(--text-muted)" };
+  }
 
   const companyCode = user?.organization_code || user?.company_code || "";
   const orgName = user?.organization_name || "Organization";
 
-  const handleLogout = () => { logout(); navigate("/login"); };
   const copyCode = () => {
     if (companyCode) navigator.clipboard?.writeText(companyCode);
     setCopied(true);
@@ -362,15 +410,82 @@ export default function Topbar({ title, onMenu }) {
 
           <button onClick={toggleTheme} style={iconBtn}>{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button>
 
-          <button style={{ ...iconBtn, position: "relative" }}>
-            <Bell size={17} />
-            <span style={{ position: "absolute", top: 7, right: 8, width: 7, height: 7, borderRadius: "50%", background: "var(--red)" }} />
-          </button>
+          <div style={{ position: "relative" }} ref={notifRef}>
+            <button onClick={() => setShowNotifs((s) => !s)} style={{ ...iconBtn, position: "relative", background: showNotifs ? "var(--accent-soft)" : "var(--bg-card)", borderColor: showNotifs ? "var(--accent)" : "var(--border)" }}>
+              <Bell size={17} />
+              {unread > 0 && <span style={{ position: "absolute", top: 7, right: 8, width: 7, height: 7, borderRadius: "50%", background: "var(--red)" }} />}
+            </button>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <OrgAvatar name={orgName} size={34} />
-            <button onClick={handleLogout} title="Logout" style={iconBtn}><LogOut size={16} /></button>
+            {showNotifs && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 10px)", right: 0,
+                width: 330, background: "var(--bg-elevated)",
+                border: "1px solid var(--border)", borderRadius: 16,
+                boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+                zIndex: 200, overflow: "hidden",
+                animation: "nova-slide-in-down 0.18s ease",
+              }}>
+                {/* Header */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 10px", borderBottom: "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Bell size={14} color="var(--accent)" />
+                    <span style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>Notifications</span>
+                    {unread > 0 && <span style={{ fontSize: 11, fontWeight: 700, background: "var(--red)", color: "#fff", borderRadius: 20, padding: "1px 7px" }}>{unread}</span>}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {unread > 0 && <button onClick={handleMarkAllRead} style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent)", border: "none", background: "transparent", cursor: "pointer" }}>Mark all read</button>}
+                    <button onClick={loadNotifs} title="Refresh" style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--text-dim)", display: "flex", alignItems: "center" }}>
+                      {notifsLoading ? <Loader size={13} style={{ animation: "nova-spin 0.8s linear infinite" }} /> : <span style={{ fontSize: 13 }}>↻</span>}
+                    </button>
+                  </div>
+                </div>
+
+                {/* List */}
+                <div style={{ maxHeight: 360, overflowY: "auto" }}>
+                  {notifsLoading && notifs.length === 0 ? (
+                    <div style={{ padding: "28px 16px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+                      <Loader size={18} style={{ animation: "nova-spin 0.8s linear infinite" }} />
+                    </div>
+                  ) : notifs.length === 0 ? (
+                    <div style={{ padding: "28px 16px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>No notifications</div>
+                  ) : notifs.map((n) => {
+                    const { Icon, color } = notifIcon(n.type);
+                    return (
+                      <div
+                        key={n.id}
+                        onClick={() => handleNotifClick(n)}
+                        style={{
+                          display: "flex", alignItems: "flex-start", gap: 12,
+                          padding: "12px 16px", cursor: n.to ? "pointer" : "default",
+                          background: n.read ? "transparent" : "var(--accent-soft)",
+                          borderBottom: "1px solid var(--border)",
+                          transition: "background 0.12s",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = n.read ? "transparent" : "var(--accent-soft)")}
+                      >
+                        <div style={{ width: 34, height: 34, borderRadius: 10, background: color + "22", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                          <Icon size={16} color={color} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: n.read ? 500 : 700, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.title}</div>
+                          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{n.sub}</div>
+                        </div>
+                        {!n.read && <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", flexShrink: 0, marginTop: 6 }} />}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Footer */}
+                <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", textAlign: "center" }}>
+                  <button onClick={() => { setShowNotifs(false); navigate("/call-logs"); }} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", border: "none", background: "transparent", cursor: "pointer" }}>View all call logs →</button>
+                </div>
+              </div>
+            )}
           </div>
+
+
         </div>
       </header>
 

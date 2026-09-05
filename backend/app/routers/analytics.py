@@ -4,7 +4,7 @@ from sqlalchemy import func, case
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from ..database import get_db
-from ..models import User, Call, Employee
+from ..models import User, Call, Employee, Device, Lead
 from ..schemas.analytics import DashboardAnalytics, KPIs, DailyPoint, OutcomePoint, DurationBucket, EmployeeStat
 from ..auth import get_current_user
 
@@ -148,9 +148,16 @@ def dashboard_analytics(
         Call.start_time <= end,
     ).all()
 
+    hot_leads = db.query(Lead).filter(
+        Lead.organization_id == user.organization_id,
+        Lead.status.in_(["hot", "interested", "follow_up"]),
+    ).count()
+
     days = 30 if range == "30d" else 7
+    kpis = _build_kpis(calls)
+    kpis.hot_leads = hot_leads
     return DashboardAnalytics(
-        kpis=_build_kpis(calls),
+        kpis=kpis,
         daily_metrics=_build_daily(calls, days),
         outcome_breakdown=_build_outcome(calls, days),
         duration_distribution=_build_duration(calls),
@@ -198,3 +205,103 @@ def call_analytics(
         Call.start_time <= end,
     ).all()
     return {"kpis": _build_kpis(calls), "range": range}
+
+
+@router.get("/needs-attention")
+def needs_attention(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Items that require manager action: offline devices, missed call spikes, permission issues."""
+    items = []
+    now = datetime.now(timezone.utc)
+
+    # Offline devices (last seen > 2 hours ago)
+    devices = db.query(Device).filter(Device.organization_id == user.organization_id).all()
+    for d in devices:
+        if d.last_seen_at and (now - d.last_seen_at).total_seconds() > 7200:
+            emp = db.query(Employee).filter(Employee.id == d.employee_id).first()
+            name = emp.name if emp else "Unknown"
+            items.append({
+                "id": f"offline-{d.id}",
+                "title": f"{name}'s device is offline",
+                "detail": f"Last seen {int((now - d.last_seen_at).total_seconds() / 3600)}h ago · {d.model or 'Unknown device'}",
+                "severity": "high",
+                "to": "/device-health",
+            })
+
+        # Permission issues
+        perms = d.permissions_status or {}
+        missing = [k for k in ["callLog", "phoneState"] if not perms.get(k)]
+        if missing and d.is_online:
+            emp = db.query(Employee).filter(Employee.id == d.employee_id).first()
+            name = emp.name if emp else "Unknown"
+            items.append({
+                "id": f"perms-{d.id}",
+                "title": f"{name} has missing permissions",
+                "detail": f"Missing: {', '.join(missing)}",
+                "severity": "medium",
+                "to": "/device-health",
+            })
+
+    # Missed call spike today vs yesterday
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
+    today_missed = db.query(Call).filter(
+        Call.organization_id == user.organization_id,
+        Call.call_type == "missed",
+        Call.start_time >= today_start,
+    ).count()
+    yesterday_missed = db.query(Call).filter(
+        Call.organization_id == user.organization_id,
+        Call.call_type == "missed",
+        Call.start_time >= yesterday_start,
+        Call.start_time < today_start,
+    ).count()
+    if yesterday_missed > 0 and today_missed > yesterday_missed * 1.5:
+        items.append({
+            "id": "missed-spike",
+            "title": "Missed call spike today",
+            "detail": f"{today_missed} missed today vs {yesterday_missed} yesterday",
+            "severity": "medium",
+            "to": "/call-logs",
+        })
+
+    return {"items": items}
+
+
+@router.get("/live-pulse")
+def live_pulse(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Last 20 call events for the live pulse feed on the dashboard."""
+    calls = (
+        db.query(Call)
+        .filter(Call.organization_id == user.organization_id)
+        .order_by(Call.start_time.desc())
+        .limit(20)
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    items = []
+    for c in calls:
+        diff = int((now - c.start_time).total_seconds() / 60)
+        if diff < 1:
+            time_str = "just now"
+        elif diff < 60:
+            time_str = f"{diff}m ago"
+        else:
+            time_str = f"{diff // 60}h ago"
+
+        tone = "success" if c.call_type == "incoming" and c.duration_seconds > 0 else \
+               "info" if c.call_type == "outgoing" and c.duration_seconds > 0 else "danger"
+        emp = db.query(Employee).filter(Employee.id == c.employee_id).first()
+        items.append({
+            "id": c.id,
+            "time": time_str,
+            "text": f"{c.call_type.capitalize()} · {c.contact_name or c.phone_number} · {c.duration_seconds // 60}m {c.duration_seconds % 60}s",
+            "employee": emp.name if emp else "Unknown",
+            "tone": tone,
+        })
+    return {"items": items}
