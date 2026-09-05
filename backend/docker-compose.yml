@@ -13,7 +13,7 @@ services:
       - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-30}
       - APP_ENV=production
       - APP_DEBUG=false
-      - CORS_ORIGINS=${CORS_ORIGINS}
+      - CORS_ORIGINS=https://callingos.tzmicha.com,https://www.callingos.tzmicha.com,https://api.callingos.tzmicha.com,http://localhost:5173,http://localhost:3000
       - SEED_DEMO_DATA=false
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-service-account.json
