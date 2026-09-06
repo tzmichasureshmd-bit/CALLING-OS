@@ -7,6 +7,7 @@ import {
 import { fetchNotifications, markRead, markAllRead } from "../api/notifications.js";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useRange } from "../context/RangeContext.jsx";
 import { useNavigate } from "react-router-dom";
 import { authApi } from "../api/resources.js";
 import { setAccessToken } from "../api/client.js";
@@ -284,8 +285,8 @@ function AccountSwitcherModal({ user, onClose }) {
 export default function Topbar({ title, onMenu }) {
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();
+  const { range, setRange: setGlobalRange, RANGE_MAP } = useRange();
   const navigate = useNavigate();
-  const [range, setRange] = useState("Today");
   const [copied, setCopied] = useState(false);
   const [query, setQuery] = useState("");
   const [showSwitcher, setShowSwitcher] = useState(false);
@@ -293,6 +294,14 @@ export default function Topbar({ title, onMenu }) {
   const [notifs, setNotifs] = useState([]);
   const [notifsLoading, setNotifsLoading] = useState(false);
   const notifRef = useRef();
+
+  // Map display label → API range key
+  const DISPLAY_RANGES = ["Today", "Yesterday", "7 Days", "30 Days"];
+  const currentLabel = Object.entries(RANGE_MAP).find(([, v]) => v === range)?.[0] || "Today";
+
+  function handleRangeClick(label) {
+    setGlobalRange(RANGE_MAP[label] || "today");
+  }
 
   const loadNotifs = useCallback(async () => {
     setNotifsLoading(true);
@@ -378,13 +387,13 @@ export default function Topbar({ title, onMenu }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {/* Date filter */}
           <div className="nova-cmd-hide" style={{ display: "flex", background: "var(--bg-hover)", border: "1px solid var(--border)", borderRadius: 10, padding: 3 }}>
-            {RANGES.map((r) => (
-              <button key={r} onClick={() => setRange(r)} style={{
+            {DISPLAY_RANGES.map((r) => (
+              <button key={r} onClick={() => handleRangeClick(r)} style={{
                 padding: "5px 10px", borderRadius: 8, border: "none", cursor: "pointer",
                 fontSize: 12, fontWeight: 600,
-                background: range === r ? "var(--bg-elevated)" : "transparent",
-                color: range === r ? "var(--accent)" : "var(--text-muted)",
-                boxShadow: range === r ? "var(--shadow-sm)" : "none",
+                background: r === currentLabel ? "var(--bg-elevated)" : "transparent",
+                color: r === currentLabel ? "var(--accent)" : "var(--text-muted)",
+                boxShadow: r === currentLabel ? "var(--shadow-sm)" : "none",
               }}>{r}</button>
             ))}
           </div>

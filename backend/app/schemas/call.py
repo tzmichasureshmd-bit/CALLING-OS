@@ -15,6 +15,7 @@ class CallSyncItem(BaseModel):
     sim_slot: int = 1
     source: Optional[str] = "SIM 1"
     recording_available: bool = False
+    recording_path: Optional[str] = None  # local device path, used by mobile upload queue
 
 
 class CallSyncRequest(BaseModel):

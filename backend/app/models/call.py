@@ -28,6 +28,8 @@ class Call(Base):
     recording_available     = Column(Boolean, default=False)
     recording_url           = Column(String(500), nullable=True)
     recording_size_bytes    = Column(BigInteger, nullable=True)
+    transcript_status       = Column(String(20), nullable=True)  # pending | processing | completed | failed
+    transcript_text         = Column(String, nullable=True)
     sync_status             = Column(String(20), default="synced")
     created_at              = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

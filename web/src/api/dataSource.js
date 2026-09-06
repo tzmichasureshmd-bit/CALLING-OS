@@ -167,9 +167,9 @@ export const dataSource = {
 
   getOrganization: () => api.organizationApi.current(),
 
-  getDashboard: async () => {
+  getDashboard: async (range = "today") => {
     const [analytics, devicesRes, oppsRes, attentionRes, pulseRes] = await Promise.all([
-      api.analyticsApi.dashboard(),
+      api.analyticsApi.dashboard({ range }),
       api.devicesApi.list().catch(() => []),
       api.opportunitiesApi.list({ closed: false, page_size: 20 }).catch(() => ({ items: [] })),
       api.analyticsApi.needsAttention().catch(() => ({ items: [] })),
@@ -199,8 +199,8 @@ export const dataSource = {
     return { items: (res.items || []).map(normalizeOpportunity), funnel: [] };
   },
 
-  getAnalytics: async () => {
-    const res = await api.analyticsApi.dashboard();
+  getAnalytics: async (range = "today") => {
+    const res = await api.analyticsApi.dashboard({ range });
     return {
       dailyMetrics: (res.daily_metrics || []).map((d) => ({ day: d.day, total: d.total, connected: d.connected, missed: d.missed })),
       outcomeBreakdown: (res.outcome_breakdown || []).map((d) => ({ day: d.day, incoming: d.incoming, outgoing: d.outgoing, missed: d.missed })),
@@ -265,6 +265,7 @@ export const dataSource = {
         durationSeconds: c.duration_seconds,
         recordingUrl: c.recording_url || null,
         transcriptStatus: c.transcript_status || "pending",
+        transcriptText: c.transcript_text || null,
       })),
     };
   },

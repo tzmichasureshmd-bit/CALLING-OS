@@ -17,6 +17,9 @@ services:
       - SEED_DEMO_DATA=false
       - GOOGLE_CLIENT_ID=
       - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-service-account.json
+      - SUPABASE_URL=https://gjfohkxocurrzbdpybuu.supabase.co
+      - SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqZm9oa3hvY3VycnpiZHB5YnV1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4ODM3NzQ2OCwiZXhwIjoyMTAzOTUzNDY4fQ.jKIf6t6Ngd9LGwB7ZxXm32Zgk1Yh81A2ZNvuyF6GgmI
+      - SUPABASE_RECORDINGS_BUCKET=call-recordings
     networks:
       - traefik-net
     healthcheck:

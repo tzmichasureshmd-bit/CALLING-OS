@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { View, Text, ScrollView, TextInput, Pressable, Linking, RefreshControl } from "react-native";
+import { View, Text, ScrollView, TextInput, Pressable, Linking, RefreshControl, ToastAndroid, Platform, Clipboard, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { palette, useTheme } from "../../src/theme";
+import { LinearGradient } from "expo-linear-gradient";
+import { palette, gradientBrand, useTheme } from "../../src/theme";
 import { AppHeader } from "../../src/components";
 import { api } from "../../src/api";
 
@@ -42,6 +43,66 @@ function groupLabel(iso) {
   return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
+// Direct call — no chooser popup
+function directCall(phone) {
+  const clean = phone.replace(/\s/g, "");
+  Linking.openURL(`tel:${clean}`);
+}
+
+// ── Dial Pad Modal ────────────────────────────────────────────────────────────
+function DialPad({ visible, onClose, theme }) {
+  const [num, setNum] = useState("");
+  const KEYS = ["1","2","3","4","5","6","7","8","9","*","0","#"];
+
+  function press(k) { setNum((n) => n + k); }
+  function del() { setNum((n) => n.slice(0, -1)); }
+  function call() {
+    if (!num) return;
+    onClose();
+    directCall(num);
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.6)" }}>
+        <View style={{ backgroundColor: theme.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 40 }}>
+          {/* Number display */}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", marginBottom: 20, minHeight: 52 }}>
+            <Text style={{ fontSize: 32, fontWeight: "700", color: theme.primary, letterSpacing: 3, flex: 1, textAlign: "center" }}>{num || " "}</Text>
+            {num.length > 0 && (
+              <Pressable onPress={del} style={{ padding: 8 }}>
+                <Ionicons name="backspace-outline" size={24} color={theme.muted} />
+              </Pressable>
+            )}
+          </View>
+
+          {/* Keys grid */}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 16, marginBottom: 24 }}>
+            {KEYS.map((k) => (
+              <Pressable key={k} onPress={() => press(k)}
+                style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 24, fontWeight: "600", color: theme.primary }}>{k}</Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {/* Call button */}
+          <View style={{ flexDirection: "row", justifyContent: "center", gap: 20 }}>
+            <Pressable onPress={onClose} style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="close" size={26} color={theme.muted} />
+            </Pressable>
+            <Pressable onPress={call} disabled={!num}>
+              <LinearGradient colors={gradientBrand} style={{ width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="call" size={28} color="#fff" />
+              </LinearGradient>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function Calls() {
   const [query, setQuery]       = useState("");
   const [chip, setChip]         = useState("All");
@@ -49,6 +110,7 @@ export default function Calls() {
   const [allCalls, setAllCalls] = useState([]);
   const [loading, setLoading]   = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [dialOpen, setDialOpen] = useState(false);
   const { theme, shadowSoft } = useTheme();
 
   const load = useCallback((isRefresh = false) => {
@@ -80,14 +142,13 @@ export default function Calls() {
   const filtered = allCalls.filter((c) => {
     const q = [c.name, c.phone].join(" ").toLowerCase().includes(query.toLowerCase());
     let f = true;
-    if (chip === "In")       f = c.type === "incoming";
-    else if (chip === "Out") f = c.type === "outgoing";
+    if (chip === "In")         f = c.type === "incoming";
+    else if (chip === "Out")   f = c.type === "outgoing";
     else if (chip === "Missed") f = c.type === "missed";
     else if (chip === "Recorded") f = !!c.recording;
     return q && f;
   });
 
-  // Group by date label
   const groups = [];
   const seen = new Set();
   filtered.forEach((c) => {
@@ -131,13 +192,18 @@ export default function Calls() {
           </View>
           {open && (
             <View style={{ flexDirection: "row", justifyContent: "space-around", marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: theme.border }}>
+              {/* Direct call — no chooser */}
               <Action icon="call" label="Call" color={palette.emerald}
-                onPress={() => Linking.openURL(`tel:${c.phone}`)} />
+                onPress={() => directCall(c.phone)} />
               <Action icon="logo-whatsapp" label="WhatsApp" color="#25D366"
                 onPress={() => Linking.openURL(`whatsapp://send?phone=${c.phone.replace(/\D/g, "")}`)} />
-              <Action icon="play" label="Play" disabled={!c.recordingUrl} />
+              <Action icon="play" label="Play" disabled={!c.recordingUrl}
+                onPress={() => c.recordingUrl && Linking.openURL(c.recordingUrl)} />
               <Action icon="copy-outline" label="Copy"
-                onPress={() => { /* clipboard */ }} />
+                onPress={() => {
+                  Clipboard.setString(c.phone);
+                  if (Platform.OS === "android") ToastAndroid.show("Copied!", ToastAndroid.SHORT);
+                }} />
             </View>
           )}
         </View>
@@ -199,6 +265,20 @@ export default function Calls() {
           </View>
         ))}
       </ScrollView>
+
+      {/* Dial Pad FAB */}
+      <Pressable onPress={() => setDialOpen(true)} style={{
+        position: "absolute", bottom: 100, right: 20,
+        width: 58, height: 58, borderRadius: 29,
+        alignItems: "center", justifyContent: "center",
+        shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8,
+      }}>
+        <LinearGradient colors={gradientBrand} style={{ width: 58, height: 58, borderRadius: 29, alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="keypad-outline" size={24} color="#fff" />
+        </LinearGradient>
+      </Pressable>
+
+      <DialPad visible={dialOpen} onClose={() => setDialOpen(false)} theme={theme} />
     </SafeAreaView>
   );
 }

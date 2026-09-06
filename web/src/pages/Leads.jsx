@@ -1,15 +1,70 @@
 import { useState } from "react";
-import { Target, Phone, Calendar, ArrowRight } from "lucide-react";
-import { PageContainer, Card, Badge, SearchInput, EmptyState, ErrorState, SkeletonRows } from "../components/ui.jsx";
+import { Target, Phone, Calendar, ArrowRight, Plus, FileSpreadsheet, X } from "lucide-react";
+import { PageContainer, Card, Badge, SearchInput, EmptyState, ErrorState, SkeletonRows, Button } from "../components/ui.jsx";
 import { LEAD_STATUS_META } from "../data/mockData.js";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
+import { leadsApi } from "../api/resources.js";
+
+function AddLeadModal({ onClose, onAdded }) {
+  const [f, setF] = useState({ name: "", phone: "", source: "", notes: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
+
+  async function submit() {
+    if (!f.name.trim() || !f.phone.trim()) { setErr("Name and phone are required"); return; }
+    setSaving(true); setErr("");
+    try {
+      await leadsApi.create({ name: f.name.trim(), phone: f.phone.trim(), source: f.source.trim() || "Manual", notes: f.notes.trim() || null });
+      onAdded(); onClose();
+    } catch (e) { setErr(e?.message || "Failed to add lead"); }
+    finally { setSaving(false); }
+  }
+
+  const inp = { width: "100%", padding: "10px 13px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box", marginTop: 6 };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }} />
+      <div style={{ position: "relative", width: 420, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 18, padding: 24, boxShadow: "0 24px 64px rgba(0,0,0,0.4)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>Add Lead</div>
+          <button onClick={onClose} style={{ border: "none", background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={14} /></button>
+        </div>
+        {[{label:"FULL NAME",k:"name",ph:"Customer Name",type:"text"},{label:"PHONE",k:"phone",ph:"+91 98765 43210",type:"tel"},{label:"SOURCE",k:"source",ph:"e.g. Cold Call, Referral",type:"text"},{label:"NOTES",k:"notes",ph:"Optional notes",type:"text"}].map((field) => (
+          <div key={field.k} style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>{field.label}</label>
+            <input style={inp} type={field.type} placeholder={field.ph} value={f[field.k]} onChange={set(field.k)} />
+          </div>
+        ))}
+        {err && <div style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 12 }}>{err}</div>}
+        <div style={{ display: "flex", gap: 10 }}>
+          <Button icon={Plus} onClick={submit} disabled={saving}>{saving ? "Adding…" : "Add Lead"}</Button>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function exportLeadsCSV(leads) {
+  const rows = [["Name", "Phone", "Source", "Employee", "Status", "Priority", "Next Follow-up", "Value"]];
+  leads.forEach((l) => rows.push([l.name, l.phone, l.source, l.employee, l.status, l.priority, l.nextFollowUp, l.expectedValue]));
+  const csv = rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `leads-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
 
 const FLOW = ["Call", "Connected", "Conversation", "Follow-up", "Lead", "Opportunity", "Won/Lost"];
 
 export default function Leads() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
+  const [showAdd, setShowAdd] = useState(false);
   const { loading, error, data, reload } = useResource(() => dataSource.getLeads());
 
   if (loading) return <PageContainer><Card><SkeletonRows rows={6} cols={5} /></Card></PageContainer>;
@@ -45,7 +100,11 @@ export default function Leads() {
               </button>
             ))}
           </div>
-          <SearchInput value={query} onChange={setQuery} placeholder="Search leads..." />
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <Button variant="outline" icon={FileSpreadsheet} onClick={() => exportLeadsCSV(filtered)}>Export CSV</Button>
+            <Button icon={Plus} onClick={() => setShowAdd(true)}>Add Lead</Button>
+            <SearchInput value={query} onChange={setQuery} placeholder="Search leads..." />
+          </div>
         </div>
 
         <div className="nova-scroll-x">
@@ -77,6 +136,7 @@ export default function Leads() {
           )}
         </div>
       </Card>
+      {showAdd && <AddLeadModal onClose={() => setShowAdd(false)} onAdded={reload} />}
     </PageContainer>
   );
 }

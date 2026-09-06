@@ -2,18 +2,28 @@ import { createContext, useContext, useState, useCallback, useEffect } from "rea
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, saveSession, clearSession, getStoredUser, getDeviceId, saveDeviceId } from "./api";
-import { getDeviceInfo } from "./nativeModules";
-import { getNewCallsSinceLastSync, markSyncComplete, getPrimarySimInfo } from "./callLogService";
+import { getDeviceInfo, requestAllPermissions } from "./nativeModules";
+import { getRealCallLog, getNewCallsSinceLastSync, markSyncComplete, getPrimarySimInfo } from "./callLogService";
 
 const AuthContext = createContext(null);
+
+const FIRST_SYNC_KEY = "callos_first_sync_done";
 
 async function ensureDevice(user) {
   try {
     let deviceId = await getDeviceId();
-    if (deviceId) return deviceId;
-
     const info = getDeviceInfo();
     const simInfo = await getPrimarySimInfo();
+
+    if (deviceId) {
+      // Update SIM info on existing device via heartbeat
+      api.heartbeat(deviceId, {
+        is_online: true,
+        sim_phone_number: simInfo.sim_phone_number,
+        sim_carrier: simInfo.sim_carrier,
+      }).catch(() => {});
+      return deviceId;
+    }
 
     const device = await api.registerDevice({
       device_identifier: `${Platform.OS}-${user.id}`,
@@ -29,6 +39,19 @@ async function ensureDevice(user) {
   } catch {
     return null;
   }
+}
+
+// On first login: sync ALL existing call logs (not just new ones)
+async function doFirstFullSync(deviceId) {
+  try {
+    const done = await AsyncStorage.getItem(FIRST_SYNC_KEY);
+    if (done) return;
+    const allCalls = await getRealCallLog(90); // last 90 days
+    if (!allCalls.length) return;
+    await api.syncCalls(deviceId, allCalls);
+    await AsyncStorage.setItem(FIRST_SYNC_KEY, "1");
+    await markSyncComplete();
+  } catch { /* silent */ }
 }
 
 export function AuthProvider({ children }) {
@@ -49,13 +72,31 @@ export function AuthProvider({ children }) {
   }, []);
 
   const _afterAuth = useCallback(async (tokenData) => {
-    await saveSession(tokenData, { id: tokenData.organization_id, email: "" }); // save token first
+    // 1. Save token first so api.me() is authenticated
+    await saveSession(tokenData, { id: tokenData.organization_id, email: "" });
     const me = await api.me();
-    await saveSession(tokenData, me);
-    setUser(me);
-    // Register device in background — don't block login
-    ensureDevice(me).then(setDeviceId).catch(() => {});
-    return me;
+    const userData = {
+      ...me,
+      name: me.name || me.email?.split("@")[0] || "Employee",
+    };
+    await saveSession(tokenData, userData);
+    setUser(userData);
+
+    // 2. Request ALL permissions immediately after login
+    if (Platform.OS === "android") {
+      requestAllPermissions().catch(() => {});
+    }
+
+    // 3. Register device + verify SIM in background
+    ensureDevice(userData).then(async (dId) => {
+      if (dId) {
+        setDeviceId(dId);
+        // 4. First-time full call log sync
+        doFirstFullSync(dId);
+      }
+    }).catch(() => {});
+
+    return userData;
   }, []);
 
   const login = useCallback(async (email, password) => {
@@ -70,23 +111,37 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     await clearSession();
+    await AsyncStorage.removeItem(FIRST_SYNC_KEY); // reset so next login re-syncs
     setUser(null);
     setDeviceId(null);
   }, []);
 
-  // Sync calls — uses real device call log when available, falls back to provided list
+  // Sync calls — full on first login, incremental after
   const syncCalls = useCallback(async (fallbackCalls) => {
     if (!deviceId) return { accepted: 0, error: "No device registered" };
-    const realCalls = await getNewCallsSinceLastSync();
-    const payload = realCalls.length > 0 ? realCalls : (fallbackCalls ?? []);
+
+    // Check if first sync done
+    const firstDone = await AsyncStorage.getItem(FIRST_SYNC_KEY);
+    let calls;
+    if (!firstDone) {
+      calls = await getRealCallLog(90);
+    } else {
+      calls = await getNewCallsSinceLastSync();
+    }
+
+    const payload = calls.length > 0 ? calls : (fallbackCalls ?? []);
     if (!payload.length) return { accepted: 0, duplicates: 0, failed: 0, total: 0 };
+
     const result = await api.syncCalls(deviceId, payload);
-    if (result.accepted > 0) await markSyncComplete();
+    if (result.accepted > 0) {
+      await markSyncComplete();
+      if (!firstDone) await AsyncStorage.setItem(FIRST_SYNC_KEY, "1");
+    }
     return result;
   }, [deviceId]);
 
   return (
-    <AuthContext.Provider value={{ user, deviceId, ready, login, register, logout, syncCalls, isAuthed: !!user }}>
+    <AuthContext.Provider value={{ user, setUser, deviceId, ready, login, register, logout, syncCalls, isAuthed: !!user }}>
       {children}
     </AuthContext.Provider>
   );

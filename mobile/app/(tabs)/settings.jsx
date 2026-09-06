@@ -13,33 +13,49 @@ import { useAuth } from "../../src/AuthContext";
 import { checkPermissions, requestAllPermissions, readSimInfo, getDeviceInfo } from "../../src/nativeModules";
 import { api } from "../../src/api";
 
+const LAST_SYNC_KEY = "callos_last_sync_ts";
+
 export default function Profile() {
   const { theme, mode, toggle, shadowSoft } = useTheme();
   const router = useRouter();
-  const { user, logout, syncCalls, deviceId } = useAuth();
-  const [syncing, setSyncing]       = useState(false);
-  const [syncResult, setSyncResult] = useState(null);
+  const { user, setUser, logout, syncCalls, deviceId } = useAuth();
+  const [syncing, setSyncing]         = useState(false);
+  const [syncResult, setSyncResult]   = useState(null);
+  const [lastSync, setLastSync]       = useState(null);
   const [permissions, setPermissions] = useState({});
-  const [sims, setSims]             = useState([]);
-  const [deviceInfo, setDeviceInfo] = useState({});
-  const [stats, setStats]           = useState({ totalCalls: "—", connectedPct: "—", talkTime: "—" });
-  const [editOpen, setEditOpen]     = useState(false);
-  const [simOpen, setSimOpen]       = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [sims, setSims]               = useState([]);
+  const [deviceInfo, setDeviceInfo]   = useState({});
+  const [stats, setStats]             = useState({ totalCalls: "—", connectedPct: "—", talkTime: "—" });
+  const [editOpen, setEditOpen]       = useState(false);
+  const [simOpen, setSimOpen]         = useState(false);
+  const [refreshing, setRefreshing]   = useState(false);
 
   const loadAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
-    const [perms, simList] = await Promise.all([checkPermissions(), readSimInfo()]);
+
+    const [perms, simList, ts] = await Promise.all([
+      checkPermissions(),
+      readSimInfo(),
+      AsyncStorage.getItem(LAST_SYNC_KEY),
+    ]);
+
     setPermissions(perms);
     if (simList.length) setSims(simList);
     setDeviceInfo(getDeviceInfo());
 
-    // Send heartbeat
-    if (deviceId) {
-      api.heartbeat(deviceId, { is_online: true, permissions_status: perms }).catch(() => {});
+    if (ts) {
+      const d = new Date(parseInt(ts, 10));
+      setLastSync(d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" }));
     }
 
-    // Load real stats
+    // Send heartbeat with latest permissions + SIM
+    if (deviceId) {
+      api.heartbeat(deviceId, {
+        is_online: true,
+        permissions_status: perms,
+      }).catch(() => {});
+    }
+
     api.getAnalytics("today")
       .then((res) => {
         const k = res.kpis || {};
@@ -67,6 +83,9 @@ export default function Profile() {
     try {
       const result = await syncCalls();
       setSyncResult(result);
+      const now = Date.now();
+      await AsyncStorage.setItem(LAST_SYNC_KEY, String(now));
+      setLastSync(new Date(now).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" }));
       Alert.alert("Sync Complete", `✓ ${result.accepted} new · ${result.duplicates} duplicates`);
     } catch (e) {
       Alert.alert("Sync Failed", e.message);
@@ -91,6 +110,13 @@ export default function Profile() {
   async function handleSignOut() {
     await logout();
     router.replace("/login");
+  }
+
+  // Called by EditProfileModal on save — updates context + storage
+  function handleProfileSaved(updated) {
+    const merged = { ...user, ...updated };
+    setUser(merged);
+    AsyncStorage.setItem("callos_user", JSON.stringify(merged));
   }
 
   const dark = mode === "dark";
@@ -124,7 +150,6 @@ export default function Profile() {
         {/* ── Profile header ── */}
         <View style={{ padding: 16 }}>
           <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ borderRadius: 22, padding: 20 }}>
-            {/* Edit button */}
             <Pressable onPress={() => setEditOpen(true)} style={{ position: "absolute", top: 16, right: 16, width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" }}>
               <Ionicons name="create-outline" size={17} color="#fff" />
             </Pressable>
@@ -145,7 +170,6 @@ export default function Profile() {
               </View>
             </View>
 
-            {/* Real stats */}
             <View style={{ flexDirection: "row", marginTop: 18, backgroundColor: "rgba(255,255,255,0.14)", borderRadius: 14, paddingVertical: 12 }}>
               {[
                 { label: "Calls",     value: stats.totalCalls },
@@ -251,7 +275,13 @@ export default function Profile() {
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Sync Calls Now</Text>
               <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>
-                {syncResult ? `✓ ${syncResult.accepted} synced · ${syncResult.duplicates} duplicates` : "Push call logs to dashboard"}
+                {syncing
+                  ? "Syncing all call logs..."
+                  : syncResult
+                    ? `✓ ${syncResult.accepted} new · ${syncResult.duplicates} duplicates`
+                    : lastSync
+                      ? `Last synced: ${lastSync}`
+                      : "Auto-syncs on open · tap to sync now"}
               </Text>
             </View>
             {!syncing && <Ionicons name="chevron-forward" size={20} color={palette.teal} />}
@@ -288,37 +318,44 @@ export default function Profile() {
         </View>
       </ScrollView>
 
-      {/* ── Edit Profile Modal ── */}
-      <EditProfileModal visible={editOpen} onClose={() => setEditOpen(false)} user={user} theme={theme} />
-
-      {/* ── SIM Config Modal ── */}
+      <EditProfileModal
+        visible={editOpen}
+        onClose={() => setEditOpen(false)}
+        onSaved={handleProfileSaved}
+        user={user}
+        theme={theme}
+      />
       <SimConfigModal visible={simOpen} onClose={() => setSimOpen(false)} sims={sims} theme={theme} />
     </SafeAreaView>
   );
 }
 
 // ── Edit Profile Modal ────────────────────────────────────────────────────────
-function EditProfileModal({ visible, onClose, user, theme }) {
-  const [name, setName]   = useState(user?.name || "");
-  const [email, setEmail] = useState(user?.email || "");
+function EditProfileModal({ visible, onClose, onSaved, user, theme }) {
+  const [name, setName]     = useState(user?.name || "");
+  const [email, setEmail]   = useState(user?.email || "");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setName(user?.name || "");
     setEmail(user?.email || "");
-  }, [user]);
+  }, [user, visible]);
 
   async function save() {
     if (!name.trim()) { Alert.alert("Error", "Name cannot be empty"); return; }
     setSaving(true);
     try {
       const updated = await api.updateProfile({ name: name.trim(), email: email.trim() });
-      // Update stored user so header reflects new name immediately
+      const newData = {
+        name:  updated.name  || name.trim(),
+        email: updated.email || email.trim(),
+      };
+      // Persist to storage
       const stored = await AsyncStorage.getItem("callos_user");
       if (stored) {
-        const u = JSON.parse(stored);
-        await AsyncStorage.setItem("callos_user", JSON.stringify({ ...u, name: updated.name || name.trim(), email: updated.email || email.trim() }));
+        await AsyncStorage.setItem("callos_user", JSON.stringify({ ...JSON.parse(stored), ...newData }));
       }
+      onSaved(newData); // updates AuthContext setUser
       Alert.alert("Saved", "Profile updated successfully.");
       onClose();
     } catch (err) {
@@ -364,7 +401,7 @@ function SimConfigModal({ visible, onClose, sims, theme }) {
           </View>
           {sims.length === 0 ? (
             <Text style={{ color: theme.muted, textAlign: "center", paddingVertical: 24 }}>
-              SIM info not available in this build.{"\n"}Requires a custom EAS dev client.
+              SIM info available after custom APK build.{"\n"}Install via: eas build --profile customClient
             </Text>
           ) : sims.map((s, i) => (
             <View key={i} style={{ backgroundColor: theme.surface, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: theme.border }}>

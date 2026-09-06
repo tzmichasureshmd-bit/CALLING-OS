@@ -12,6 +12,21 @@ import { formatDuration, formatDateTime } from "../data/mockData.js";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
 
+function exportCallsCSV(calls) {
+  const rows = [["Date", "Type", "Customer", "Phone", "Employee", "Duration (s)", "SIM", "Device", "Recording"]];
+  calls.forEach((c) => rows.push([
+    formatDateTime(c.date), c.type, c.contact, c.phone,
+    c.employee, c.durationSeconds, c.source, c.device,
+    c.recordingUrl ? "Yes" : "No",
+  ]));
+  const csv = rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `call-logs-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
 const TYPE_META = {
   incoming: { label: "Incoming", color: "var(--success)", icon: PhoneIncoming },
   outgoing: { label: "Outgoing", color: "var(--accent)", icon: PhoneOutgoing },
@@ -45,8 +60,8 @@ export default function CallLogs() {
       <Card padding={0}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", gap: 12, flexWrap: "wrap", borderBottom: "1px solid var(--border)" }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Button variant="outline" icon={FileSpreadsheet}>Export</Button>
-            <Button variant="ghost" icon={RotateCcw}>Reset</Button>
+            <Button variant="outline" icon={FileSpreadsheet} onClick={() => exportCallsCSV(filtered)}>Export CSV</Button>
+            <Button variant="ghost" icon={RotateCcw} onClick={reload}>Reset</Button>
             <Button variant="ghost" icon={FilterX} onClick={() => { setFilter("All"); setQuery(""); }}>Clear</Button>
           </div>
           <SearchInput value={query} onChange={setQuery} placeholder="Search customer or number..." />

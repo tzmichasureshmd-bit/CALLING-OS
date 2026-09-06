@@ -289,14 +289,31 @@ def update_me(
             emp.email = body["email"].strip()
     db.commit()
     org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+    emp = db.query(Employee).filter(Employee.user_id == user.id).first()
     return MeResponse(
         id=user.id,
+        name=emp.name if emp else None,
         email=user.email,
         role=user.role,
         organization_id=user.organization_id,
         organization_name=org.name if org else "",
         organization_code=org.code if org else "",
     )
+
+
+@router.post("/verify-company-code")
+def verify_company_code(body: dict, db: Session = Depends(get_db)):
+    """Mobile onboarding — validate company code before registration."""
+    code = (body.get("code") or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Company code is required")
+    org = db.query(Organization).filter(
+        Organization.code == code,
+        Organization.status == "active",
+    ).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Invalid company code. Ask your manager for the correct code.")
+    return {"valid": True, "organization_name": org.name, "code": org.code}
 
 
 @router.post("/logout")
@@ -307,8 +324,10 @@ def logout():
 @router.get("/me", response_model=MeResponse)
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+    emp = db.query(Employee).filter(Employee.user_id == user.id).first()
     return MeResponse(
         id=user.id,
+        name=emp.name if emp else None,
         email=user.email,
         role=user.role,
         organization_id=user.organization_id,

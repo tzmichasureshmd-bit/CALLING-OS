@@ -15,15 +15,17 @@ router = APIRouter(prefix="/calls", tags=["calls"])
 
 
 def normalize_phone(phone: str) -> str:
-    """Normalize to +91XXXXXXXXXX format for Indian numbers."""
-    digits = re.sub(r"\D", "", phone)
+    """Normalize to +91XXXXXXXXXX format. Strips all non-digit chars first."""
+    # Only allow digits and leading +
+    cleaned = re.sub(r"[^\d+]", "", phone.strip())[:15]  # E.164 max 15 digits
+    digits = re.sub(r"\D", "", cleaned)
     if len(digits) == 10:
         return f"+91{digits}"
     if len(digits) == 12 and digits.startswith("91"):
         return f"+{digits}"
     if len(digits) == 11 and digits.startswith("0"):
         return f"+91{digits[1:]}"
-    return f"+{digits}" if not phone.startswith("+") else phone
+    return f"+{digits}" if not phone.startswith("+") else cleaned
 
 
 @router.post("/sync", response_model=CallSyncResponse)

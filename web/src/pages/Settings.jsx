@@ -6,6 +6,54 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
 import { twoFaApi } from "../api/resources.js";
+import client from "../api/client.js";
+
+// ── Edit Profile Modal ────────────────────────────────────────────────────────
+function EditProfileModal({ user, onClose, onSaved }) {
+  const [name, setName]   = useState(user?.name || "");
+  const [email, setEmail] = useState(user?.email || "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr]     = useState("");
+
+  async function save() {
+    if (!name.trim()) { setErr("Name cannot be empty"); return; }
+    setSaving(true); setErr("");
+    try {
+      const res = await client.patch("/auth/me", { name: name.trim(), email: email.trim() });
+      onSaved(res.data);
+      onClose();
+    } catch (e) {
+      setErr(e?.message || "Could not update profile");
+    } finally { setSaving(false); }
+  }
+
+  const inp = { width: "100%", padding: "10px 13px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box", marginTop: 6 };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }} />
+      <div style={{ position: "relative", width: 400, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 18, padding: 24, boxShadow: "0 24px 64px rgba(0,0,0,0.4)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>Edit Profile</div>
+          <button onClick={onClose} style={{ border: "none", background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={14} /></button>
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>FULL NAME</label>
+          <input style={inp} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </div>
+        <div style={{ marginBottom: 18 }}>
+          <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>EMAIL</label>
+          <input style={inp} type="email" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} />
+        </div>
+        {err && <div style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 12 }}>{err}</div>}
+        <div style={{ display: "flex", gap: 10 }}>
+          <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save Changes"}</Button>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function Row({ label, value }) {
   return (
@@ -229,7 +277,14 @@ export default function Settings() {
   const { user, setUser } = useAuth();
   const { loading, error, data, reload } = useResource(() => dataSource.getOrganization());
   const [show2FA, setShow2FA] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
   const [totpEnabled, setTotpEnabled] = useState(!!user?.totp_enabled);
+
+  function handleProfileSaved(updated) {
+    const merged = { ...user, name: updated.name || user?.name, email: updated.email || user?.email };
+    setUser(merged);
+    localStorage.setItem("callos_user", JSON.stringify(merged));
+  }
 
   if (loading) return <PageContainer><Card><LoadingState message="Loading settings..." /></Card></PageContainer>;
   if (error) return <PageContainer><Card><ErrorState title="Couldn't load settings" message={error.message} code={error.error_code} onRetry={reload} /></Card></PageContainer>;
@@ -282,7 +337,7 @@ export default function Settings() {
               <div style={{ fontSize: 12.5, color: "var(--text-muted)" }}>{user?.email || "—"}</div>
             </div>
           </div>
-          <Button variant="outline">Edit Profile</Button>
+          <Button variant="outline" onClick={() => setShowEditProfile(true)}>Edit Profile</Button>
         </Card>
 
         <Card>
@@ -327,6 +382,13 @@ export default function Settings() {
           user={{ ...user, totp_enabled: totpEnabled }}
           onClose={() => setShow2FA(false)}
           onSuccess={handle2FASuccess}
+        />
+      )}
+      {showEditProfile && (
+        <EditProfileModal
+          user={user}
+          onClose={() => setShowEditProfile(false)}
+          onSaved={handleProfileSaved}
         />
       )}
     </PageContainer>

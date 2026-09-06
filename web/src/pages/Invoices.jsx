@@ -3,6 +3,24 @@ import { PageContainer, Card, CardHeader, Badge, EmptyState, LoadingState, Error
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
 
+function downloadInvoice(inv) {
+  const lines = [
+    `CALLOS INVOICE`,
+    `Invoice #: ${inv.id}`,
+    `Period:    ${inv.period}`,
+    `Date:      ${new Date(inv.date).toLocaleDateString("en-IN")}`,
+    ``,
+    `Users:     ${inv.users}`,
+    `Amount:    ${inv.amount}`,
+    `Status:    ${inv.status}`,
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `invoice-${inv.id}.txt`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
 export default function Invoices() {
   const { loading, error, data, reload } = useResource(() => dataSource.getInvoices());
 
@@ -38,7 +56,7 @@ export default function Invoices() {
                     <td style={{ padding: "13px 16px" }}><Badge tone="success">{inv.status}</Badge></td>
                     <td style={{ padding: "13px 16px", color: "var(--text-muted)" }}>{new Date(inv.date).toLocaleDateString("en-IN")}</td>
                     <td style={{ padding: "13px 16px", textAlign: "right" }}>
-                      <button title="Download" style={{ border: "none", background: "transparent", color: "var(--accent)", cursor: "pointer" }}><Download size={16} /></button>
+                      <button title="Download" onClick={() => downloadInvoice(inv)} style={{ border: "none", background: "transparent", color: "var(--accent)", cursor: "pointer" }}><Download size={16} /></button>
                     </td>
                   </tr>
                 ))}

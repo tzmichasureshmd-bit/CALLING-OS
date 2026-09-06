@@ -7,9 +7,22 @@ import { PageContainer, Card, CardHeader, Button, ErrorState, SkeletonCard } fro
 import { formatTalkTime } from "../data/mockData.js";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
+import { useRange } from "../context/RangeContext.jsx";
+
+function exportCSV(leaderboard) {
+  const rows = [["Employee", "Calls", "Connected", "Connected %", "Talk Time (s)", "Missed"]];
+  leaderboard.forEach((e) => rows.push([e.name, e.calls, e.connected, e.connectedPct, e.talkTimeSeconds, e.missed]));
+  const csv = rows.map((r) => r.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `callos-report-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
 
 export default function Reports() {
-  const { loading, error, data, reload } = useResource(() => dataSource.getAnalytics());
+  const { range } = useRange();
+  const { loading, error, data, reload } = useResource(() => dataSource.getAnalytics(range), [range]);
   const axisColor = "var(--text-dim)";
 
   if (loading) return <PageContainer><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>{Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}</div></PageContainer>;
@@ -21,7 +34,7 @@ export default function Reports() {
   return (
     <PageContainer>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
-        <Button variant="outline" icon={Download}>Export Report (PDF)</Button>
+        <Button variant="outline" icon={Download} onClick={() => exportCSV(leaderboard)}>Export CSV</Button>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }} className="callos-grid-2">

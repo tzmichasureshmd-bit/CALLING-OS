@@ -1,33 +1,62 @@
 import { Platform, PermissionsAndroid } from "react-native";
 import * as Device from "expo-device";
 
+// ── Safe top-level requires for optional native modules ───────────────────────
+// These modules only exist in the custom EAS dev client build.
+// Top-level require with try/catch is intentional — these are OPTIONAL native
+// modules that don't exist in Expo Go. This is the correct pattern for
+// conditional native module loading in React Native.
+// eslint-disable-next-line import/no-extraneous-dependencies
+let _CallLog = null;
+// eslint-disable-next-line import/no-extraneous-dependencies
+let _SimCardsManager = null;
+
+try { _CallLog = require("react-native-call-log"); } catch { _CallLog = null; }
+try { _SimCardsManager = require("react-native-sim-cards-manager")?.default || null; } catch { _SimCardsManager = null; }
+
 // ── Call Log ──────────────────────────────────────────────────────────────────
-// Real call log reading requires a custom Expo dev client build with
-// react-native-call-log linked. This stub returns [] until that build is used.
-// The sync service falls back to mock data automatically.
-export async function readCallLog(_limitDays = 30) {
-  return [];
+export async function readCallLog(limitDays = 30) {
+  if (Platform.OS !== "android" || !_CallLog) return [];
+  try {
+    const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_CALL_LOG);
+    if (!granted) {
+      const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_CALL_LOG);
+      if (result !== PermissionsAndroid.RESULTS.GRANTED) return [];
+    }
+    const since = Date.now() - limitDays * 24 * 60 * 60 * 1000;
+    const logs = await _CallLog.loadAll(String(since));
+    return Array.isArray(logs) ? logs : [];
+  } catch {
+    return [];
+  }
 }
 
 // ── SIM Info ──────────────────────────────────────────────────────────────────
-// Real SIM detection requires react-native-sim-cards-manager in a custom build.
-// Returns [] until then — onboarding shows default "SIM 1 / SIM 2" labels.
 export async function readSimInfo() {
-  return [];
+  if (Platform.OS !== "android" || !_SimCardsManager) return [];
+  try {
+    const sims = await _SimCardsManager.getSimCards();
+    return Array.isArray(sims) ? sims.map((s, i) => ({
+      slot:        s.slotIndex ?? i,
+      phoneNumber: s.phoneNumber || null,
+      carrierName: s.carrierName || s.displayName || null,
+      countryIso:  s.countryIso || null,
+    })) : [];
+  } catch {
+    return [];
+  }
 }
 
 // ── Device Info ───────────────────────────────────────────────────────────────
-// expo-device works in all Expo builds including managed workflow.
 export function getDeviceInfo() {
   return {
-    manufacturer: Device.manufacturer || "Unknown",
-    model: Device.modelName || "Unknown",
-    androidVersion: Device.osVersion || String(Platform.Version || ""),
+    manufacturer:   Device.manufacturer  || "Unknown",
+    model:          Device.modelName     || "Unknown",
+    androidVersion: Device.osVersion     || String(Platform.Version || ""),
   };
 }
 
 // ── Permissions ───────────────────────────────────────────────────────────────
-
 export async function requestAllPermissions() {
   if (Platform.OS !== "android") {
     return { callLog: true, phoneState: true, contacts: true, storage: true, recording: true, allGranted: true };
@@ -43,11 +72,11 @@ export async function requestAllPermissions() {
     ]);
     const g = (p) => results[p] === PermissionsAndroid.RESULTS.GRANTED;
     return {
-      callLog: g(P.READ_CALL_LOG),
+      callLog:    g(P.READ_CALL_LOG),
       phoneState: g(P.READ_PHONE_STATE),
-      contacts: g(P.READ_CONTACTS),
-      storage: g(P.READ_EXTERNAL_STORAGE),
-      recording: g(P.RECORD_AUDIO),
+      contacts:   g(P.READ_CONTACTS),
+      storage:    g(P.READ_EXTERNAL_STORAGE),
+      recording:  g(P.RECORD_AUDIO),
       allGranted: g(P.READ_CALL_LOG) && g(P.READ_PHONE_STATE),
     };
   } catch {

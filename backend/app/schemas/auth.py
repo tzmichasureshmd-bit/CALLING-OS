@@ -38,6 +38,7 @@ class RefreshRequest(BaseModel):
 
 class MeResponse(BaseModel):
     id: str
+    name: Optional[str] = None
     email: str
     role: str
     organization_id: str

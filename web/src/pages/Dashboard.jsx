@@ -17,6 +17,7 @@ import { formatTalkTime } from "../data/mockData.js";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useRange } from "../context/RangeContext.jsx";
 import * as api from "../api/resources.js";
 
 const POLL_INTERVAL = 30000; // 30s live pulse refresh
@@ -39,7 +40,8 @@ function DashboardSkeleton() {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { loading, error, data, reload } = useResource(() => dataSource.getDashboard());
+  const { range } = useRange();
+  const { loading, error, data, reload } = useResource(() => dataSource.getDashboard(range), [range]);
   const [livePulse, setLivePulse] = useState(null);
   const pollRef = useRef(null);
 

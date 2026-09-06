@@ -7,9 +7,11 @@ import { PageContainer, Card, CardHeader, ChartTooltip, SkeletonCard, ErrorState
 import { formatTalkTime } from "../data/mockData.js";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
+import { useRange } from "../context/RangeContext.jsx";
 
 export default function Analytics() {
-  const { loading, error, data, reload } = useResource(() => dataSource.getAnalytics());
+  const { range } = useRange();
+  const { loading, error, data, reload } = useResource(() => dataSource.getAnalytics(range), [range]);
   const axis = "var(--text-dim)";
 
   if (loading) return <PageContainer><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>{Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}</div></PageContainer>;
