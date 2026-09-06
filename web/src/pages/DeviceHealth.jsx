@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Smartphone, Battery, CheckCircle2, XCircle, RefreshCw } from "lucide-react";
 import { PageContainer, Card, Badge, EmptyState, ErrorState, SkeletonRows } from "../components/ui.jsx";
 import { dataSource } from "../api/dataSource.js";
@@ -19,6 +20,12 @@ function PermPill({ ok, label }) {
 
 export default function DeviceHealth() {
   const { loading, error, data, reload } = useResource(() => dataSource.getDeviceHealth());
+
+  // Auto-refresh every 30s for real-time device status
+  useEffect(() => {
+    const t = setInterval(reload, 30_000);
+    return () => clearInterval(t);
+  }, [reload]);
 
   if (loading) return <PageContainer><Card><SkeletonRows rows={4} cols={4} /></Card></PageContainer>;
   if (error) return <PageContainer><Card><ErrorState title="Couldn't load device health" message={error.message} code={error.error_code} onRetry={reload} /></Card></PageContainer>;

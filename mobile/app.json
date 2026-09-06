@@ -39,7 +39,8 @@
       "expo-router",
       "expo-asset",
       "expo-font",
-      "expo-file-system"
+      "expo-file-system",
+      "expo-battery"
     ],
     "experiments": {
       "typedRoutes": false
