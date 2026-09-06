@@ -52,7 +52,12 @@ function normalizeEmployee(e) {
 
 function normalizeDevice(d) {
   const perms = d.permissions_status || {};
-  const allOk = perms.callLog && perms.phoneState && perms.contacts && perms.recording;
+  // allGranted is a computed helper key, not a real permission — ignore it
+  const callLog    = perms.callLog    ?? perms.call_log    ?? false;
+  const phoneState = perms.phoneState ?? perms.phone_state ?? false;
+  const contacts   = perms.contacts   ?? false;
+  const recording  = perms.recording  ?? false;
+  const allOk = callLog && phoneState && contacts && recording;
   const status = !d.is_online ? "offline" : !allOk ? "warning" : "healthy";
   const lastSeen = d.last_seen_at
     ? (() => {
@@ -72,10 +77,10 @@ function normalizeDevice(d) {
     battery: d.battery_level ?? 0,
     lastSync: lastSeen,
     permissions: {
-      callLog: !!perms.callLog,
-      phoneState: !!perms.phoneState,
-      contacts: !!perms.contacts,
-      recording: !!perms.recording,
+      callLog:    callLog,
+      phoneState: phoneState,
+      contacts:   contacts,
+      recording:  recording,
     },
     sim: "SIM 1",
     background: perms.background ? "ok" : "warning",

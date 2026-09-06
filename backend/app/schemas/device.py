@@ -32,6 +32,7 @@ class SIMOut(BaseModel):
 class DeviceOut(BaseModel):
     id: str
     employee_id: str
+    employee_name: Optional[str] = None
     device_identifier: str
     manufacturer: Optional[str] = None
     model: Optional[str] = None

@@ -95,7 +95,18 @@ def list_devices(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    query = db.query(Device).filter(Device.organization_id == user.organization_id)
+    from sqlalchemy.orm import joinedload
+    query = (
+        db.query(Device)
+        .options(joinedload(Device.employee))
+        .filter(Device.organization_id == user.organization_id)
+    )
     if employee_id:
         query = query.filter(Device.employee_id == employee_id)
-    return query.all()
+    devices = query.all()
+    result = []
+    for d in devices:
+        out = DeviceOut.model_validate(d)
+        out.employee_name = d.employee.name if d.employee else None
+        result.append(out)
+    return result
