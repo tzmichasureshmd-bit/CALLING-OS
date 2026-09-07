@@ -32,6 +32,10 @@ def _device_payload(d: Device, employee_name: str | None) -> dict:
         "battery_level":      d.battery_level,
         "is_online":          d.is_online,
         "permissions_status": d.permissions_status or {},
+        "latitude":           d.latitude,
+        "longitude":          d.longitude,
+        "location_accuracy":  d.location_accuracy,
+        "wifi_ssid":          d.wifi_ssid,
         "sims": [
             {"id": s.id, "slot": s.slot, "carrier": s.carrier,
              "phone_number": s.phone_number, "status": "active"}
@@ -152,6 +156,12 @@ async def heartbeat(
         device.permissions_status = body.permissions_status
     if body.app_version:
         device.app_version = body.app_version
+    if body.latitude is not None:
+        device.latitude = body.latitude
+        device.longitude = body.longitude
+        device.location_accuracy = body.location_accuracy
+    if body.wifi_ssid is not None:
+        device.wifi_ssid = body.wifi_ssid
     db.commit()
     db.refresh(device)
 

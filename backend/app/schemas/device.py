@@ -18,6 +18,10 @@ class DeviceHeartbeat(BaseModel):
     is_online: bool = True
     permissions_status: Optional[Dict[str, bool]] = None
     app_version: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    location_accuracy: Optional[float] = None
+    wifi_ssid: Optional[str] = None
 
 
 class SIMOut(BaseModel):
@@ -42,6 +46,10 @@ class DeviceOut(BaseModel):
     battery_level: Optional[int] = None
     is_online: bool
     permissions_status: Optional[Dict[str, Any]] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    location_accuracy: Optional[float] = None
+    wifi_ssid: Optional[str] = None
     sims: list[SIMOut] = []
     created_at: datetime
     model_config = {"from_attributes": True}

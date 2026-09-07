@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { AppState, Platform } from "react-native";
+import { AppState, Platform, NativeModules } from "react-native";
+import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { useAuth } from "./AuthContext";
@@ -82,6 +83,27 @@ async function processUploadQueue(token) {
   await saveUploadQueue(remaining);
 }
 
+// ── Location + WiFi ──────────────────────────────────────────────────────────
+async function getLocationAndWifi() {
+  const result = { latitude: null, longitude: null, location_accuracy: null, wifi_ssid: null };
+  try {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (status === "granted") {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      result.latitude          = loc.coords.latitude;
+      result.longitude         = loc.coords.longitude;
+      result.location_accuracy = loc.coords.accuracy;
+    }
+  } catch { /* silent */ }
+  try {
+    const wifi = NativeModules.WifiManager || NativeModules.RNWifi;
+    if (wifi?.getSSID) {
+      result.wifi_ssid = await new Promise((res) => wifi.getSSID(res, () => res(null)));
+    }
+  } catch { /* silent */ }
+  return result;
+}
+
 // ── Battery ───────────────────────────────────────────────────────────────────
 async function getBatteryLevel() {
   try {
@@ -112,9 +134,10 @@ export function useAutoSync() {
     // ── Heartbeat ──────────────────────────────────────────────────────────
     async function sendHeartbeat() {
       try {
-        const [perms, battery] = await Promise.all([
+        const [perms, battery, loc] = await Promise.all([
           checkPermissions(),
           getBatteryLevel(),
+          getLocationAndWifi(),
         ]);
         await api.heartbeat(deviceId, {
           is_online:          true,
@@ -125,6 +148,10 @@ export function useAutoSync() {
             contacts:   perms.contacts   ?? false,
             recording:  perms.recording  ?? false,
           },
+          latitude:          loc.latitude,
+          longitude:         loc.longitude,
+          location_accuracy: loc.location_accuracy,
+          wifi_ssid:         loc.wifi_ssid,
         });
       } catch { /* silent */ }
     }

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import {
-  Smartphone, Battery, BatteryLow, CheckCircle2, XCircle,
-  RefreshCw, WifiOff, Signal, ShieldCheck, ShieldAlert,
-  Clock, Cpu, Sim, ChevronRight, AlertTriangle,
+  Smartphone, Battery, CheckCircle2, XCircle,
+  RefreshCw, WifiOff, Wifi, ShieldCheck, ShieldAlert,
+  Cpu, AlertTriangle, MapPin,
 } from "lucide-react";
 import { SkeletonRows, ErrorState } from "../components/ui.jsx";
 import { useDeviceSocket } from "../api/useDeviceSocket.js";
@@ -224,6 +224,8 @@ function DeviceDetail({ d, connected }) {
           ["Android version", d.android],
           ["App version",     d.appVersion],
           ["SIM / Carrier",   d.sim],
+          ...(d.wifi_ssid ? [["WiFi", d.wifi_ssid]] : []),
+          ...(d.latitude  ? [["Last location", `${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`]] : []),
           ["Device ID",       d.id],
         ].map(([k, v]) => (
           <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--border)", fontSize: 13 }}>

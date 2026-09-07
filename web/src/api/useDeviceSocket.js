@@ -24,6 +24,9 @@ function normalizeDevice(d) {
     sim:         d.sims?.[0]?.carrier || d.sims?.[0]?.phone_number || "SIM 1",
     background:  perms.background ? "ok" : "warning",
     is_online:   !!d.is_online,
+    latitude:    d.latitude  ?? null,
+    longitude:   d.longitude ?? null,
+    wifi_ssid:   d.wifi_ssid || null,
     status,
   };
 }

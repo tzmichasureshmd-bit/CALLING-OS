@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, SmallInteger, Index, text
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, SmallInteger, Index, text, Float
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -22,6 +22,10 @@ class Device(Base):
     battery_level       = Column(SmallInteger, nullable=True)
     is_online           = Column(Boolean, default=False)
     permissions_status  = Column(JSONB, default=dict)
+    latitude            = Column(Float, nullable=True)
+    longitude           = Column(Float, nullable=True)
+    location_accuracy   = Column(Float, nullable=True)
+    wifi_ssid           = Column(String(100), nullable=True)
     created_at          = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at          = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                                  onupdate=lambda: datetime.now(timezone.utc))
