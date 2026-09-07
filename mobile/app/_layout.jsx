@@ -14,7 +14,7 @@ function AuthGate() {
     if (!ready) return;
     const inAuth = segments[0] === "login";
     const inOnboarding = segments[0] === "onboarding";
-    if (!isAuthed && !inAuth) {
+    if (!isAuthed && !inAuth && !inOnboarding) {
       router.replace("/login");
     } else if (isAuthed && inAuth) {
       router.replace("/(tabs)");

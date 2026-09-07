@@ -63,11 +63,18 @@ export async function requestAllPermissions() {
   }
   try {
     const P = PermissionsAndroid.PERMISSIONS;
+    const androidVersion = parseInt(Platform.Version, 10);
+
+    // Android 13+ uses READ_MEDIA_AUDIO instead of READ_EXTERNAL_STORAGE
+    const storagePermission = androidVersion >= 33
+      ? P.READ_MEDIA_AUDIO
+      : P.READ_EXTERNAL_STORAGE;
+
     const results = await PermissionsAndroid.requestMultiple([
       P.READ_CALL_LOG,
       P.READ_PHONE_STATE,
       P.READ_CONTACTS,
-      P.READ_EXTERNAL_STORAGE,
+      storagePermission,
       P.RECORD_AUDIO,
     ]);
     const g = (p) => results[p] === PermissionsAndroid.RESULTS.GRANTED;
@@ -75,7 +82,7 @@ export async function requestAllPermissions() {
       callLog:    g(P.READ_CALL_LOG),
       phoneState: g(P.READ_PHONE_STATE),
       contacts:   g(P.READ_CONTACTS),
-      storage:    g(P.READ_EXTERNAL_STORAGE),
+      storage:    g(storagePermission),
       recording:  g(P.RECORD_AUDIO),
       allGranted: g(P.READ_CALL_LOG) && g(P.READ_PHONE_STATE),
     };
@@ -90,11 +97,16 @@ export async function checkPermissions() {
   }
   try {
     const P = PermissionsAndroid.PERMISSIONS;
+    const androidVersion = parseInt(Platform.Version, 10);
+    const storagePermission = androidVersion >= 33
+      ? P.READ_MEDIA_AUDIO
+      : P.READ_EXTERNAL_STORAGE;
+
     const [callLog, phoneState, contacts, storage, recording] = await Promise.all([
       PermissionsAndroid.check(P.READ_CALL_LOG),
       PermissionsAndroid.check(P.READ_PHONE_STATE),
       PermissionsAndroid.check(P.READ_CONTACTS),
-      PermissionsAndroid.check(P.READ_EXTERNAL_STORAGE),
+      PermissionsAndroid.check(storagePermission),
       PermissionsAndroid.check(P.RECORD_AUDIO),
     ]);
     return { callLog, phoneState, contacts, storage, recording, allGranted: callLog && phoneState };

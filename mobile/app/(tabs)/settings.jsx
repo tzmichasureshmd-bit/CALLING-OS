@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   View, Text, ScrollView, Pressable, ActivityIndicator,
-  Alert, Modal, TextInput, Image, RefreshControl, Linking,
+  Alert, Modal, TextInput, Image, RefreshControl, Linking, Switch,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -13,49 +13,44 @@ import { useAuth } from "../../src/AuthContext";
 import { checkPermissions, requestAllPermissions, readSimInfo, getDeviceInfo } from "../../src/nativeModules";
 import { api } from "../../src/api";
 
-const LAST_SYNC_KEY = "callos_last_sync_ts";
+const LAST_SYNC_KEY      = "callos_last_sync_ts";
+const RECORDING_PREF_KEY = "callos_recording_enabled";
 
 export default function Profile() {
   const { theme, mode, toggle, shadowSoft } = useTheme();
   const router = useRouter();
   const { user, setUser, logout, syncCalls, deviceId } = useAuth();
-  const [syncing, setSyncing]         = useState(false);
-  const [syncResult, setSyncResult]   = useState(null);
-  const [lastSync, setLastSync]       = useState(null);
-  const [permissions, setPermissions] = useState({});
-  const [sims, setSims]               = useState([]);
-  const [deviceInfo, setDeviceInfo]   = useState({});
-  const [stats, setStats]             = useState({ totalCalls: "—", connectedPct: "—", talkTime: "—" });
-  const [editOpen, setEditOpen]       = useState(false);
-  const [simOpen, setSimOpen]         = useState(false);
-  const [refreshing, setRefreshing]   = useState(false);
+  const [syncing, setSyncing]             = useState(false);
+  const [syncResult, setSyncResult]       = useState(null);
+  const [lastSync, setLastSync]           = useState(null);
+  const [permissions, setPermissions]     = useState({});
+  const [sims, setSims]                   = useState([]);
+  const [deviceInfo, setDeviceInfo]       = useState({});
+  const [stats, setStats]                 = useState({ totalCalls: "—", connectedPct: "—", talkTime: "—" });
+  const [editOpen, setEditOpen]           = useState(false);
+  const [simOpen, setSimOpen]             = useState(false);
+  const [refreshing, setRefreshing]       = useState(false);
+  const [recordingEnabled, setRecordingEnabled] = useState(false);
 
   const loadAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
-
-    const [perms, simList, ts] = await Promise.all([
+    const [perms, simList, ts, recPref] = await Promise.all([
       checkPermissions(),
       readSimInfo(),
       AsyncStorage.getItem(LAST_SYNC_KEY),
+      AsyncStorage.getItem(RECORDING_PREF_KEY),
     ]);
-
     setPermissions(perms);
     if (simList.length) setSims(simList);
     setDeviceInfo(getDeviceInfo());
-
+    setRecordingEnabled(recPref === "true");
     if (ts) {
       const d = new Date(parseInt(ts, 10));
       setLastSync(d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" }));
     }
-
-    // Send heartbeat with latest permissions + SIM
     if (deviceId) {
-      api.heartbeat(deviceId, {
-        is_online: true,
-        permissions_status: perms,
-      }).catch(() => {});
+      api.heartbeat(deviceId, { is_online: true, permissions_status: perms }).catch(() => {});
     }
-
     api.getAnalytics("today")
       .then((res) => {
         const k = res.kpis || {};
@@ -107,12 +102,29 @@ export default function Profile() {
     }
   }
 
+  async function toggleRecording(val) {
+    if (val && !permissions.recording) {
+      // Request microphone permission first
+      const result = await requestAllPermissions();
+      setPermissions(result);
+      if (!result.recording) {
+        Alert.alert(
+          "Microphone Permission Required",
+          "Go to Settings → Apps → CallNexa → Permissions → Microphone and enable it.",
+          [{ text: "Open Settings", onPress: () => Linking.openSettings() }, { text: "Cancel", style: "cancel" }]
+        );
+        return;
+      }
+    }
+    setRecordingEnabled(val);
+    await AsyncStorage.setItem(RECORDING_PREF_KEY, String(val));
+  }
+
   async function handleSignOut() {
     await logout();
     router.replace("/login");
   }
 
-  // Called by EditProfileModal on save — updates context + storage
   function handleProfileSaved(updated) {
     const merged = { ...user, ...updated };
     setUser(merged);
@@ -130,15 +142,18 @@ export default function Profile() {
   const card    = { backgroundColor: theme.card, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: theme.border };
   const iconBox = (bg) => ({ width: 38, height: 38, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: bg });
 
+  // Storage: Android 13+ uses READ_MEDIA_AUDIO, older uses READ_EXTERNAL_STORAGE
+  // Both are requested automatically based on Android version
   const PERM_LIST = [
-    { key: "callLog",    icon: "call-outline",           label: "Call Log",    desc: "Read call history" },
-    { key: "phoneState", icon: "phone-portrait-outline", label: "Phone State", desc: "Detect active calls" },
-    { key: "contacts",   icon: "people-outline",         label: "Contacts",    desc: "Match caller names" },
-    { key: "recording",  icon: "mic-outline",            label: "Microphone",  desc: "Record audio" },
-    { key: "storage",    icon: "folder-outline",         label: "Storage",     desc: "Access recordings" },
+    { key: "callLog",    icon: "call-outline",           label: "Call Log",    desc: "Read call history",          required: true },
+    { key: "phoneState", icon: "phone-portrait-outline", label: "Phone State", desc: "Detect active calls & SIM",   required: true },
+    { key: "contacts",   icon: "people-outline",         label: "Contacts",    desc: "Match caller names",         required: true },
+    { key: "storage",    icon: "folder-outline",         label: "Storage",     desc: "Access call recordings",     required: true },
+    { key: "recording",  icon: "mic-outline",            label: "Microphone",  desc: "Record calls (optional)",   required: false },
   ];
 
-  const allGranted = PERM_LIST.every((p) => permissions[p.key]);
+  const requiredGranted = PERM_LIST.filter((p) => p.required).every((p) => permissions[p.key]);
+  const allGranted      = PERM_LIST.every((p) => permissions[p.key]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }} edges={["top"]}>
@@ -153,7 +168,6 @@ export default function Profile() {
             <Pressable onPress={() => setEditOpen(true)} style={{ position: "absolute", top: 16, right: 16, width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" }}>
               <Ionicons name="create-outline" size={17} color="#fff" />
             </Pressable>
-
             <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
               <View style={{ width: 62, height: 62, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.35)" }}>
                 <Text style={{ fontSize: 22, fontWeight: "800", color: "#fff" }}>
@@ -169,7 +183,6 @@ export default function Profile() {
                 </View>
               </View>
             </View>
-
             <View style={{ flexDirection: "row", marginTop: 18, backgroundColor: "rgba(255,255,255,0.14)", borderRadius: 14, paddingVertical: 12 }}>
               {[
                 { label: "Calls",     value: stats.totalCalls },
@@ -222,13 +235,13 @@ export default function Profile() {
           {/* ── Permission Health ── */}
           <View style={[card, shadowSoft]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
-              <View style={iconBox(allGranted ? palette.emerald + "1f" : palette.red + "1f")}>
-                <Ionicons name="shield-checkmark-outline" size={18} color={allGranted ? palette.emerald : palette.red} />
+              <View style={iconBox(requiredGranted ? palette.emerald + "1f" : palette.red + "1f")}>
+                <Ionicons name="shield-checkmark-outline" size={18} color={requiredGranted ? palette.emerald : palette.red} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Permission Health</Text>
-                <Text style={{ fontSize: 12.5, color: allGranted ? theme.success : theme.danger, marginTop: 1 }}>
-                  {allGranted ? "All permissions granted" : "Some permissions missing — tap to fix"}
+                <Text style={{ fontSize: 12.5, color: requiredGranted ? theme.success : theme.danger, marginTop: 1 }}>
+                  {requiredGranted ? "Required permissions granted ✓" : "Required permissions missing — tap to fix"}
                 </Text>
               </View>
             </View>
@@ -238,7 +251,14 @@ export default function Profile() {
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 9 }}>
                   <Ionicons name={p.icon} size={16} color={theme.muted} />
                   <View>
-                    <Text style={{ fontSize: 13.5, color: theme.secondary }}>{p.label}</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                      <Text style={{ fontSize: 13.5, color: theme.secondary }}>{p.label}</Text>
+                      {p.required && (
+                        <View style={{ backgroundColor: palette.red + "22", borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 }}>
+                          <Text style={{ fontSize: 9, fontWeight: "700", color: palette.red }}>REQUIRED</Text>
+                        </View>
+                      )}
+                    </View>
                     <Text style={{ fontSize: 11, color: theme.dim }}>{p.desc}</Text>
                   </View>
                 </View>
@@ -248,21 +268,45 @@ export default function Profile() {
                       <Text style={{ fontSize: 12, color: permissions[p.key] ? theme.success : theme.danger, fontWeight: "600" }}>
                         {permissions[p.key] ? "Allowed" : "Denied"}
                       </Text>
-                      <Ionicons
-                        name={permissions[p.key] ? "checkmark-circle" : "alert-circle"}
-                        size={16}
-                        color={permissions[p.key] ? theme.success : theme.danger}
-                      />
+                      <Ionicons name={permissions[p.key] ? "checkmark-circle" : "alert-circle"} size={16} color={permissions[p.key] ? theme.success : theme.danger} />
                     </>
                   ) : <ActivityIndicator size="small" color={theme.muted} />}
                 </View>
               </Pressable>
             ))}
-            {!allGranted && (
+            {!requiredGranted && (
               <Pressable onPress={() => requestAllPermissions().then(setPermissions)}
                 style={{ marginTop: 10, backgroundColor: palette.teal + "1a", borderRadius: 10, padding: 10, alignItems: "center" }}>
-                <Text style={{ fontSize: 13, fontWeight: "700", color: palette.teal }}>Request All Permissions</Text>
+                <Text style={{ fontSize: 13, fontWeight: "700", color: palette.teal }}>Grant Required Permissions</Text>
               </Pressable>
+            )}
+          </View>
+
+          {/* ── Call Recording Toggle ── */}
+          <View style={[card, shadowSoft]}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                <View style={iconBox(palette.violet + "1f")}><Ionicons name="mic-outline" size={18} color={palette.violet} /></View>
+                <View>
+                  <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Call Recording</Text>
+                  <Text style={{ fontSize: 12, color: theme.muted, marginTop: 1 }}>
+                    {recordingEnabled ? "Recording enabled · saves to dashboard" : "Off · calls not recorded"}
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={recordingEnabled}
+                onValueChange={toggleRecording}
+                trackColor={{ false: theme.border, true: palette.violet + "88" }}
+                thumbColor={recordingEnabled ? palette.violet : theme.muted}
+              />
+            </View>
+            {recordingEnabled && (
+              <View style={{ marginTop: 10, backgroundColor: palette.violet + "12", borderRadius: 10, padding: 10 }}>
+                <Text style={{ fontSize: 12, color: palette.violet, lineHeight: 18 }}>
+                  ✓ Recorded calls will be saved and available for AI transcription on the web dashboard.{"\n"}Only calls with recordings will be transcribed — saves storage & DB space.
+                </Text>
+              </View>
             )}
           </View>
 
@@ -281,7 +325,7 @@ export default function Profile() {
                     ? `✓ ${syncResult.accepted} new · ${syncResult.duplicates} duplicates`
                     : lastSync
                       ? `Last synced: ${lastSync}`
-                      : "Auto-syncs on open · tap to sync now"}
+                      : "Auto-syncs every 5s · tap to sync now"}
               </Text>
             </View>
             {!syncing && <Ionicons name="chevron-forward" size={20} color={palette.teal} />}
@@ -318,13 +362,7 @@ export default function Profile() {
         </View>
       </ScrollView>
 
-      <EditProfileModal
-        visible={editOpen}
-        onClose={() => setEditOpen(false)}
-        onSaved={handleProfileSaved}
-        user={user}
-        theme={theme}
-      />
+      <EditProfileModal visible={editOpen} onClose={() => setEditOpen(false)} onSaved={handleProfileSaved} user={user} theme={theme} />
       <SimConfigModal visible={simOpen} onClose={() => setSimOpen(false)} sims={sims} theme={theme} />
     </SafeAreaView>
   );
@@ -337,26 +375,22 @@ function EditProfileModal({ visible, onClose, onSaved, user, theme }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setName(user?.name || "");
-    setEmail(user?.email || "");
-  }, [user, visible]);
+    if (visible) {
+      setName(user?.name || "");
+      setEmail(user?.email || "");
+    }
+  }, [visible, user]);
 
   async function save() {
     if (!name.trim()) { Alert.alert("Error", "Name cannot be empty"); return; }
     setSaving(true);
     try {
       const updated = await api.updateProfile({ name: name.trim(), email: email.trim() });
-      const newData = {
-        name:  updated.name  || name.trim(),
-        email: updated.email || email.trim(),
-      };
-      // Persist to storage
+      const newData = { name: updated.name || name.trim(), email: updated.email || email.trim() };
       const stored = await AsyncStorage.getItem("callos_user");
-      if (stored) {
-        await AsyncStorage.setItem("callos_user", JSON.stringify({ ...JSON.parse(stored), ...newData }));
-      }
-      onSaved(newData); // updates AuthContext setUser
-      Alert.alert("Saved", "Profile updated successfully.");
+      if (stored) await AsyncStorage.setItem("callos_user", JSON.stringify({ ...JSON.parse(stored), ...newData }));
+      onSaved(newData);
+      Alert.alert("Saved ✓", "Profile updated successfully.");
       onClose();
     } catch (err) {
       Alert.alert("Error", err.message || "Could not update profile.");
@@ -374,9 +408,23 @@ function EditProfileModal({ visible, onClose, onSaved, user, theme }) {
             <Pressable onPress={onClose}><Ionicons name="close" size={24} color={theme.muted} /></Pressable>
           </View>
           <Text style={{ fontSize: 12, fontWeight: "600", color: theme.muted }}>FULL NAME</Text>
-          <TextInput value={name} onChangeText={setName} style={inp} placeholderTextColor={theme.dim} />
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="Your full name"
+            placeholderTextColor={theme.dim}
+            style={inp}
+          />
           <Text style={{ fontSize: 12, fontWeight: "600", color: theme.muted, marginTop: 14 }}>EMAIL</Text>
-          <TextInput value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" style={inp} placeholderTextColor={theme.dim} />
+          <TextInput
+            value={email}
+            onChangeText={setEmail}
+            placeholder="your@email.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            placeholderTextColor={theme.dim}
+            style={inp}
+          />
           <Pressable onPress={save} disabled={saving} style={{ marginTop: 24 }}>
             <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
               style={{ height: 50, borderRadius: 13, alignItems: "center", justifyContent: "center" }}>
@@ -400,9 +448,13 @@ function SimConfigModal({ visible, onClose, sims, theme }) {
             <Pressable onPress={onClose}><Ionicons name="close" size={24} color={theme.muted} /></Pressable>
           </View>
           {sims.length === 0 ? (
-            <Text style={{ color: theme.muted, textAlign: "center", paddingVertical: 24 }}>
-              SIM info available after custom APK build.{"\n"}Install via: eas build --profile customClient
-            </Text>
+            <View style={{ alignItems: "center", paddingVertical: 32, gap: 12 }}>
+              <Ionicons name="phone-portrait-outline" size={48} color={theme.dim} />
+              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>No SIM detected</Text>
+              <Text style={{ fontSize: 13, color: theme.muted, textAlign: "center", lineHeight: 20 }}>
+                SIM details will appear here once the app reads your device SIM cards.{"\n"}Make sure Phone State permission is granted.
+              </Text>
+            </View>
           ) : sims.map((s, i) => (
             <View key={i} style={{ backgroundColor: theme.surface, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: theme.border }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>

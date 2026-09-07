@@ -12,12 +12,12 @@ import { useAuth } from "../src/AuthContext";
 import { requestAllPermissions, readSimInfo } from "../src/nativeModules";
 import { BASE_URL } from "../src/api";
 
-// NEW user:      Company Code → Sign Up → Permissions → SIM Select → SIM Verify → Done
-// RETURNING user: Permissions → SIM Verify → Done
-const NEW_STEPS     = ["Company","Sign Up","Permissions","SIM","Verify","Done"];
-const RETURN_STEPS  = ["Permissions","SIM","Verify","Done"];
-const NEW_ICONS     = ["shield-key-outline","person-add-outline","shield-checkmark-outline","phone-portrait-outline","keypad-outline","checkmark-done-outline"];
-const RETURN_ICONS  = ["shield-checkmark-outline","phone-portrait-outline","keypad-outline","checkmark-done-outline"];
+// NEW user:      Company Code → Sign Up → Permissions → SIM Select → Done
+// RETURNING user: Permissions → SIM Select → Done
+const NEW_STEPS     = ["Company","Sign Up","Permissions","SIM","Done"];
+const RETURN_STEPS  = ["Permissions","SIM","Done"];
+const NEW_ICONS     = ["shield-key-outline","person-add-outline","shield-checkmark-outline","phone-portrait-outline","checkmark-done-outline"];
+const RETURN_ICONS  = ["shield-checkmark-outline","phone-portrait-outline","checkmark-done-outline"];
 
 export default function Onboarding() {
   const router = useRouter();
@@ -44,15 +44,13 @@ export default function Onboarding() {
     if (returning) {
       if (step === 0) return <PermissionsStep onDone={goNext} />;
       if (step === 1) return <SimDetectStep onDone={goNext} />;
-      if (step === 2) return <SimVerifyStep simData={simData} onDone={goNext} />;
-      if (step === 3) return <DoneStep onDone={goNext} />;
+      if (step === 2) return <DoneStep onDone={goNext} />;
     } else {
       if (step === 0) return <CompanyCodeStep onDone={goNext} />;
       if (step === 1) return <SignUpStep companyCode={companyCode} onDone={goNext} />;
       if (step === 2) return <PermissionsStep onDone={goNext} />;
       if (step === 3) return <SimDetectStep onDone={goNext} />;
-      if (step === 4) return <SimVerifyStep simData={simData} onDone={goNext} />;
-      if (step === 5) return <DoneStep onDone={goNext} />;
+      if (step === 4) return <DoneStep onDone={goNext} />;
     }
   };
 
@@ -108,8 +106,8 @@ export default function Onboarding() {
 
           <View style={{ flex: 1, minHeight: 20 }} />
 
-          {/* Skip only on SIM steps */}
-          {((!returning && (step === 3 || step === 4)) || (returning && (step === 1 || step === 2))) && (
+          {/* Skip only on SIM step */}
+          {((!returning && step === 3) || (returning && step === 1)) && (
             <Pressable onPress={() => goNext({})} style={{ alignItems: "center", marginTop: 14 }}>
               <Text style={{ fontSize: 12.5, color: theme.muted }}>Skip this step</Text>
             </Pressable>

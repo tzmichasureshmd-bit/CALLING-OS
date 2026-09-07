@@ -96,6 +96,12 @@ function LoginForm({ setError }) {
 function RegisterForm({ setError }) {
   const router = useRouter();
   const { theme } = useTheme();
+  const { logout, isAuthed } = useAuth();
+
+  async function startWizard() {
+    if (isAuthed) await logout();
+    router.replace("/onboarding");
+  }
 
   // Register just redirects to onboarding — all steps happen there
   return (
@@ -128,7 +134,7 @@ function RegisterForm({ setError }) {
         ))}
       </View>
 
-      <Pressable onPress={() => router.replace("/onboarding")} style={{ marginTop: 4 }}>
+      <Pressable onPress={startWizard} style={{ marginTop: 4 }}>
         <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={{ height: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 }}>
           <Ionicons name="arrow-forward-circle" size={20} color="#fff" />

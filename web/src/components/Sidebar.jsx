@@ -123,6 +123,7 @@ export default function Sidebar({ open, onClose }) {
           </div>
           <button
             onClick={handleLogout}
+            title="Sign out"
             style={{
               display: "flex", alignItems: "center", gap: 12,
               padding: "0 14px", height: 40, borderRadius: 12,
@@ -135,7 +136,7 @@ export default function Sidebar({ open, onClose }) {
             onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-muted)"; }}
           >
             <LogOut size={18} style={{ flexShrink: 0 }} />
-            <span style={{ fontSize: 13.5, fontWeight: 600, opacity: expanded ? 1 : 0, transition: "opacity 0.2s" }}>
+            <span style={{ fontSize: 13.5, fontWeight: 600, opacity: expanded ? 1 : 0, width: expanded ? "auto" : 0, transition: "opacity 0.2s, width 0.2s", overflow: "hidden" }}>
               Sign out
             </span>
           </button>

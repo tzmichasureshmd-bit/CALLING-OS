@@ -9,11 +9,9 @@
       "distribution": "internal"
     },
     "customClient": {
-      "developmentClient": true,
       "distribution": "internal",
       "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug"
+        "buildType": "apk"
       },
       "env": {
         "EXPO_PUBLIC_CUSTOM_BUILD": "true"

@@ -66,6 +66,17 @@ export function AuthProvider({ children }) {
         setUser(u);
         const d = await getDeviceId();
         setDeviceId(d);
+        // Auto-refresh token on app start to prevent timeout logout
+        try {
+          const refresh = await AsyncStorage.getItem("callos_refresh_token");
+          if (refresh) {
+            const newTokens = await api.refresh(refresh);
+            await AsyncStorage.setItem("callos_token", newTokens.access_token);
+            if (newTokens.refresh_token) {
+              await AsyncStorage.setItem("callos_refresh_token", newTokens.refresh_token);
+            }
+          }
+        } catch { /* token refresh failed — user stays logged in until actual 401 */ }
       }
       setReady(true);
     })();
