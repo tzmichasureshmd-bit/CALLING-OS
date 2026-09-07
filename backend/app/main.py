@@ -81,6 +81,20 @@ async def startup():
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables ready.")
 
+    # Run pending column migrations (safe / idempotent)
+    from sqlalchemy import text as _text
+    _DEVICE_COLS = [
+        ("latitude",          "DOUBLE PRECISION"),
+        ("longitude",         "DOUBLE PRECISION"),
+        ("location_accuracy", "DOUBLE PRECISION"),
+        ("wifi_ssid",         "VARCHAR(100)"),
+    ]
+    with engine.connect() as _conn:
+        for _col, _typ in _DEVICE_COLS:
+            _conn.execute(_text(f"ALTER TABLE devices ADD COLUMN IF NOT EXISTS {_col} {_typ}"))
+        _conn.commit()
+    logger.info("Device location columns ensured.")
+
     # Start background task that marks devices offline after 90s of silence
     from .routers.devices import start_offline_watcher
     start_offline_watcher()
