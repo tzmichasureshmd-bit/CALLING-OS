@@ -313,7 +313,7 @@ export default function Topbar({ title, onMenu }) {
   // Load on mount + poll every 60s
   useEffect(() => {
     loadNotifs();
-    const t = setInterval(loadNotifs, 60000);
+    const t = setInterval(loadNotifs, 30000);  // 30s — catches device permission changes quickly
     return () => clearInterval(t);
   }, [loadNotifs]);
 
@@ -479,6 +479,13 @@ export default function Topbar({ title, onMenu }) {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 13, fontWeight: n.read ? 500 : 700, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.title}</div>
                           <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{n.sub}</div>
+                          {n.actionLabel && (
+                            <div style={{ marginTop: 5 }}>
+                              <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--accent)", background: "var(--accent-soft)", padding: "2px 8px", borderRadius: 6 }}>
+                                {n.actionLabel} →
+                              </span>
+                            </div>
+                          )}
                         </div>
                         {!n.read && <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", flexShrink: 0, marginTop: 6 }} />}
                       </div>

@@ -1,7 +1,7 @@
-// Real notifications — sourced from backend needs-attention + recent missed calls.
+// Real notifications — sourced from backend needs-attention + recent missed calls + device alerts.
 // Read state persisted in localStorage so it survives page refresh.
 
-import { notificationsApi } from "./resources.js";
+import { notificationsApi, devicesApi } from "./resources.js";
 
 const STORAGE_KEY = "callos_read_notifs";
 
@@ -100,6 +100,38 @@ export async function fetchNotifications() {
       ts: c.start_time || c.date,
     });
   }
+
+  // 4. Device permission warnings — sourced live from /devices
+  try {
+    const devRes = await devicesApi.list();
+    const devList = Array.isArray(devRes) ? devRes : devRes?.items || [];
+    for (const d of devList) {
+      const perms = d.permissions_status || {};
+      const callLog    = perms.callLog    ?? perms.call_log    ?? false;
+      const phoneState = perms.phoneState ?? perms.phone_state ?? false;
+      const contacts   = perms.contacts   ?? false;
+      const recording  = perms.recording  ?? false;
+      const missing = [
+        !callLog    && "Call Log",
+        !phoneState && "Phone State",
+        !contacts   && "Contacts",
+        !recording  && "Recording",
+      ].filter(Boolean);
+      if (missing.length === 0) continue;
+      const name = d.employee_name || d.employee_id || "Unknown";
+      const id = `device-perm-${d.id}`;
+      notifs.push({
+        id,
+        type: "warning",
+        title: `${name} — permission${missing.length > 1 ? "s" : ""} missing`,
+        sub: missing.join(", "),
+        to: "/device-health",
+        read: readIds.has(id),
+        ts: d.last_seen_at || null,
+        actionLabel: "View Device",
+      });
+    }
+  } catch { /* silent — don't break other notifs */ }
 
   // Sort: unread first, then by ts desc
   notifs.sort((a, b) => {
