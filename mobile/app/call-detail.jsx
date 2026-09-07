@@ -5,9 +5,9 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { palette, useTheme } from "../../src/theme";
-import { api } from "../../src/api";
-import { getCallStatus, STATUS, STATUS_LABEL } from "../../src/callStatusStore";
+import { palette, useTheme } from "../src/theme";
+import { api } from "../src/api";
+import { getCallStatus, STATUS, STATUS_LABEL } from "../src/callStatusStore";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtDur(s) {
