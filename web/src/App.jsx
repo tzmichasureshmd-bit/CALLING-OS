@@ -7,6 +7,7 @@ import { RouteFallback } from "./components/ui.jsx";
 import { LayoutDashboard, Phone, Users, BarChart3, Settings } from "lucide-react";
 
 const Login = lazy(() => import("./pages/Login.jsx"));
+const AdminLogin = lazy(() => import("./pages/AdminLogin.jsx"));
 const SuperAdmin = lazy(() => import("./pages/SuperAdmin.jsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
 const Analytics = lazy(() => import("./pages/Analytics.jsx"));
@@ -52,6 +53,7 @@ export default function App() {
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/admin" element={<AdminLogin />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>
