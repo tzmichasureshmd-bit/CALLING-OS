@@ -243,6 +243,7 @@ function DeviceDetail({ d, connected }) {
 export default function DeviceHealth() {
   const { devices, connected, error, refetch } = useDeviceSocket();
   const [selectedId, setSelectedId] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Auto-select first device
   useEffect(() => {
@@ -287,8 +288,12 @@ export default function DeviceHealth() {
                   <WifiOff size={10} /> Reconnecting
                 </span>
               )}
-              <button onClick={refetch} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-dim)", padding: 4, display: "flex" }}>
-                <RefreshCw size={13} />
+              <button
+                onClick={async () => { setRefreshing(true); await refetch(); setRefreshing(false); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-dim)", padding: 4, display: "flex" }}
+                title="Refresh devices"
+              >
+                <RefreshCw size={13} style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }} />
               </button>
             </div>
           </div>
@@ -339,6 +344,10 @@ export default function DeviceHealth() {
         @keyframes ws-pulse {
           0%,100% { opacity: 1; }
           50%      { opacity: 0.35; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
         }
       `}</style>
     </div>
