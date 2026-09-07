@@ -81,6 +81,11 @@ async def startup():
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables ready.")
 
+    # Start background task that marks devices offline after 90s of silence
+    from .routers.devices import start_offline_watcher
+    start_offline_watcher()
+    logger.info("Device offline watcher started.")
+
     # Auto-seed demo data if enabled
     if settings.SEED_DEMO_DATA:
         from .seed import seed_demo_data
