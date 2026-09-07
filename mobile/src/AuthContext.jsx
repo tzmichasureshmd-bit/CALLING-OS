@@ -5,16 +5,63 @@ import {
   api, saveSession, clearSession, getStoredUser,
   getDeviceId, saveDeviceId, getRefreshToken, updateAccessToken,
 } from "./api";
-import { getDeviceInfo, requestAllPermissions } from "./nativeModules";
+import { getDeviceInfo, requestAllPermissions, checkPermissions, readSimInfo } from "./nativeModules";
 import {
   getRealCallLog, getNewCallsSinceLastSync,
-  markCallsSynced, getPrimarySimInfo, getAllSimInfo,
+  markCallsSynced,
 } from "./callLogService";
-import { syncSimInventory, getStoredSimInventory } from "./simInventoryService";
+import { syncSimInventory } from "./simInventoryService";
 
 const AuthContext = createContext(null);
 
 const FIRST_SYNC_KEY = "callos_first_sync_done";
+
+// ── Live device heartbeat ─────────────────────────────────────────────────────
+/**
+ * Reads CURRENT state from Android OS (not cache) and POSTs heartbeat.
+ * Called after login, register, app-start, and AppState→active.
+ */
+export async function sendHeartbeat(deviceId) {
+  if (!deviceId) return;
+  try {
+    const perms = await checkPermissions().catch(() => ({}));
+
+    let simItems = [];
+    try {
+      const rawSims = await readSimInfo();
+      simItems = rawSims.map((s) => ({
+        slot:            s.slot + 1,
+        carrier:         s.carrierName    || null,
+        phone_number:    s.phoneNumber    || null,
+        mcc:             s.mcc            || null,
+        mnc:             s.mnc            || null,
+        country_iso:     s.countryIso     || null,
+        subscription_id: s.subscriptionId || null,
+        network_type:    s.networkType    || null,
+        is_active:       s.isActive !== false,
+      }));
+    } catch {}
+
+    let networkType = "unknown";
+    try {
+      const NetInfo = require("@react-native-community/netinfo");
+      const state = await NetInfo.default.fetch();
+      if (!state.isConnected) networkType = "none";
+      else if (state.type === "wifi") networkType = "wifi";
+      else if (state.type === "cellular") networkType = "mobile";
+      else networkType = state.type || "unknown";
+    } catch {}
+
+    await api.heartbeat(deviceId, {
+      is_online:              true,
+      permissions_status:     perms,
+      sims:                   simItems,
+      network_type:           networkType,
+      background_sync_status: "limited",
+      app_version:            "1.0.0",
+    });
+  } catch {}
+}
 
 // ── Hardware-bound device identifier ─────────────────────────────────────────
 async function getStableDeviceId() {
@@ -61,8 +108,7 @@ async function ensureDevice(user) {
     } catch {}
 
     if (deviceId) {
-      // Update SIM inventory on existing device via heartbeat
-      api.heartbeat(deviceId, { is_online: true, sims: simItems }).catch(() => {});
+      sendHeartbeat(deviceId);
       return deviceId;
     }
 
@@ -146,10 +192,10 @@ export function AuthProvider({ children }) {
           }
         } catch { /* token refresh failed — user stays logged in until actual 401 */ }
 
-        // App-start reconciliation — runs every time app opens
         if (d) {
+          sendHeartbeat(d).catch(() => {});
           doStartReconciliation(d).catch(() => {});
-          syncSimInventory(d).catch(() => {});  // periodic SIM rescan
+          syncSimInventory(d).catch(() => {});
         }
       }
       setReady(true);
@@ -166,17 +212,15 @@ export function AuthProvider({ children }) {
     await saveSession(tokenData, userData);
     setUser(userData);
 
-    // Request permissions immediately after login
     if (Platform.OS === "android") {
       requestAllPermissions().catch(() => {});
     }
 
-    // Register device + first sync in background
     ensureDevice(userData).then(async (dId) => {
       if (dId) {
         setDeviceId(dId);
+        await sendHeartbeat(dId).catch(() => {});
         doFirstFullSync(dId);
-        // Sync full SIM inventory after device registration
         syncSimInventory(dId, true).catch(() => {});
       }
     }).catch(() => {});

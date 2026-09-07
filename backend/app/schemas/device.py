@@ -61,16 +61,18 @@ class DeviceRegister(BaseModel):
 
 
 class DeviceHeartbeat(BaseModel):
-    battery_level:      Optional[int] = None
-    is_online:          bool = True
-    permissions_status: Optional[Dict[str, bool]] = None
-    app_version:        Optional[str] = None
-    latitude:           Optional[float] = None
-    longitude:          Optional[float] = None
-    location_accuracy:  Optional[float] = None
-    wifi_ssid:          Optional[str] = None
+    battery_level:          Optional[int] = None
+    is_online:              bool = True
+    permissions_status:     Optional[Dict[str, Any]] = None
+    app_version:            Optional[str] = None
+    network_type:           Optional[str] = None   # wifi | mobile | none | unknown
+    background_sync_status: Optional[str] = None   # limited | restricted | unknown
+    latitude:               Optional[float] = None
+    longitude:              Optional[float] = None
+    location_accuracy:      Optional[float] = None
+    wifi_ssid:              Optional[str] = None
     # Optional SIM update on heartbeat
-    sims:               List[SIMSyncItem] = []
+    sims:                   List[SIMSyncItem] = []
 
 
 class DeviceOut(BaseModel):
@@ -85,6 +87,8 @@ class DeviceOut(BaseModel):
     last_seen_at:       Optional[datetime] = None
     battery_level:      Optional[int] = None
     is_online:          bool
+    network_type:       Optional[str] = None
+    background_sync_status: Optional[str] = None
     permissions_status: Optional[Dict[str, Any]] = None
     latitude:           Optional[float] = None
     longitude:          Optional[float] = None

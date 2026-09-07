@@ -21,6 +21,8 @@ class Device(Base):
     last_seen_at        = Column(DateTime, nullable=True)
     battery_level       = Column(SmallInteger, nullable=True)
     is_online           = Column(Boolean, default=False)
+    network_type        = Column(String(20), nullable=True)   # wifi | mobile | none | unknown
+    background_sync_status = Column(String(50), nullable=True) # limited | restricted | unknown
     permissions_status  = Column(JSONB, default=dict)
     latitude            = Column(Float, nullable=True)
     longitude           = Column(Float, nullable=True)

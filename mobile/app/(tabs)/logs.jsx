@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, ScrollView, TextInput, Pressable, Linking,
-  RefreshControl, ToastAndroid, Platform, Clipboard, Modal, FlatList,
+  RefreshControl, ToastAndroid, Platform, Clipboard, Modal, Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -11,6 +11,7 @@ import { palette, gradientBrand, useTheme } from "../../src/theme";
 import { AppHeader } from "../../src/components";
 import { api } from "../../src/api";
 import { getAllCallStatuses, STATUS } from "../../src/callStatusStore";
+import { getRealCallLog } from "../../src/callLogService";
 
 const CHIPS = ["All", "In", "Out", "Missed", "Recorded"];
 
@@ -131,7 +132,63 @@ function DialPad({ visible, onClose, theme }) {
   );
 }
 
-// ── Main screen ───────────────────────────────────────────────────────────────
+// ── Sync Progress Bar ─────────────────────────────────────────────────────────────────────────────────
+/**
+ * Shows a floating bar at the top when calls are pending/syncing.
+ * Disappears automatically after all calls are synced.
+ */
+function SyncProgressBar({ localStatuses, theme }) {
+  const slideY = useRef(new Animated.Value(-60)).current;
+  const entries = Object.values(localStatuses);
+  const pending  = entries.filter((e) => [STATUS.DETECTED, STATUS.LOCAL_SAVED, STATUS.SYNC_QUEUED, STATUS.SYNCING].includes(e.sync_status)).length;
+  const synced   = entries.filter((e) => e.sync_status === STATUS.SYNCED).length;
+  const failed   = entries.filter((e) => e.sync_status === STATUS.SYNC_FAILED).length;
+  const total    = entries.length;
+  const visible  = pending > 0 || failed > 0;
+
+  useEffect(() => {
+    Animated.spring(slideY, {
+      toValue: visible ? 0 : -60,
+      useNativeDriver: true,
+      tension: 80,
+      friction: 10,
+    }).start();
+  }, [visible]);
+
+  const isSyncing = entries.some((e) => e.sync_status === STATUS.SYNCING);
+  const color  = failed > 0 ? palette.red : isSyncing ? palette.teal : palette.amber;
+  const label  = isSyncing
+    ? `Syncing ${pending} call${pending !== 1 ? "s" : ""}...`
+    : failed > 0
+    ? `${failed} call${failed !== 1 ? "s" : ""} failed to sync`
+    : `${pending} call${pending !== 1 ? "s" : ""} queued to sync`;
+
+  return (
+    <Animated.View style={{
+      transform: [{ translateY: slideY }],
+      backgroundColor: color + "ee",
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    }}>
+      <Ionicons
+        name={isSyncing ? "sync" : failed > 0 ? "alert-circle" : "time"}
+        size={16}
+        color="#fff"
+      />
+      <Text style={{ flex: 1, fontSize: 13, fontWeight: "700", color: "#fff" }}>{label}</Text>
+      {total > 0 && (
+        <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.85)" }}>
+          {synced}/{total} done
+        </Text>
+      )}
+    </Animated.View>
+  );
+}
+
+// ── Main screen ───────────────────────────────────────────────────────────────────────────────────────────
 export default function Calls() {
   const [query, setQuery]       = useState("");
   const [chip, setChip]         = useState("All");
@@ -143,36 +200,74 @@ export default function Calls() {
   const [dialOpen, setDialOpen] = useState(false);
   const { theme, shadowSoft } = useTheme();
   const router = useRouter();
-
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      // Load server calls + local statuses in parallel
-      const [res, statuses] = await Promise.all([
-        api.getCalls({ page_size: 100 }),
+      // Load local Android call log + server calls + local statuses in parallel
+      const [localRaw, serverRes, statuses] = await Promise.all([
+        getRealCallLog(30).catch(() => []),
+        api.getCalls({ page_size: 200 }).catch(() => ({ items: [] })),
         getAllCallStatuses(),
       ]);
 
-      // Build a map of client_event_id → status entry
+      // Build status map
       const statusMap = {};
       statuses.forEach((s) => { statusMap[s.client_event_id] = s; });
       setLocalStatuses(statusMap);
 
-      const items = (res.items || []).map((c) => ({
-        id:           c.id,
-        clientEventId: c.client_event_id,
-        type:         c.call_type || "incoming",
-        name:         c.contact_name || "Unknown",
-        phone:        c.phone_number,
-        duration:     fmtDur(c.duration_seconds),
-        durationSec:  c.duration_seconds,
-        time:         new Date(c.start_time).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
-        ago:          relTime(c.start_time),
-        group:        groupLabel(c.start_time),
-        sim:          c.source || "SIM 1",
-        recording:    c.recording_available,
-      }));
-      setAllCalls(items);
+      // Build server call map keyed by client_event_id for dedup
+      const serverMap = {};
+      (serverRes.items || []).forEach((c) => {
+        if (c.client_event_id) serverMap[c.client_event_id] = c;
+      });
+
+      // Map local calls — prefer server data if already synced
+      const localItems = localRaw.map((c) => {
+        const server = serverMap[c.client_event_id];
+        return {
+          id:            server?.id || c.client_event_id,
+          clientEventId: c.client_event_id,
+          type:          c.call_type || "incoming",
+          name:          server?.contact_name || c.contact_name || "Unknown",
+          phone:         c.phone_number,
+          duration:      fmtDur(c.duration_seconds),
+          durationSec:   c.duration_seconds,
+          time:          new Date(c._start_ms || c.start_time).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+          ago:           relTime(c.start_time),
+          group:         groupLabel(c.start_time),
+          sim:           c.source || "SIM 1",
+          recording:     !!c.recording_path || server?.recording_available || false,
+          _ts:           c._start_ms || new Date(c.start_time).getTime(),
+          _fromLocal:    true,
+        };
+      });
+
+      // Add any server calls not in local log (older than 30 days or from other devices)
+      const localIds = new Set(localRaw.map((c) => c.client_event_id));
+      const serverOnly = (serverRes.items || [])
+        .filter((c) => !localIds.has(c.client_event_id))
+        .map((c) => ({
+          id:            c.id,
+          clientEventId: c.client_event_id,
+          type:          c.call_type || "incoming",
+          name:          c.contact_name || "Unknown",
+          phone:         c.phone_number,
+          duration:      fmtDur(c.duration_seconds),
+          durationSec:   c.duration_seconds,
+          time:          new Date(c.start_time).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+          ago:           relTime(c.start_time),
+          group:         groupLabel(c.start_time),
+          sim:           c.source || "SIM 1",
+          recording:     c.recording_available,
+          _ts:           new Date(c.start_time).getTime(),
+          _fromLocal:    false,
+        }));
+
+      // Merge + sort newest first
+      const merged = [...localItems, ...serverOnly]
+        .sort((a, b) => b._ts - a._ts);
+
+      setAllCalls(merged);
     } catch { /* silent — show stale data */ } finally {
       setLoading(false);
       setRefreshing(false);
@@ -180,6 +275,17 @@ export default function Calls() {
   }, []);
 
   useEffect(() => { load(); }, []);
+
+  // Refresh local sync statuses every 3s so progress bar stays live
+  useEffect(() => {
+    const t = setInterval(async () => {
+      const statuses = await getAllCallStatuses();
+      const statusMap = {};
+      statuses.forEach((s) => { statusMap[s.client_event_id] = s; });
+      setLocalStatuses(statusMap);
+    }, 3000);
+    return () => clearInterval(t);
+  }, []);
 
   const filtered = allCalls.filter((c) => {
     const q = [c.name, c.phone].join(" ").toLowerCase().includes(query.toLowerCase());
@@ -267,6 +373,7 @@ export default function Calls() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }} edges={["top"]}>
+      <SyncProgressBar localStatuses={localStatuses} theme={theme} />
       <AppHeader title="Calls" right={
         <Pressable onPress={() => load(true)} style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="refresh-outline" size={18} color={theme.secondary} />

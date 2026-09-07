@@ -62,18 +62,82 @@ function _mapNetworkType(raw) {
 }
 
 // ── Call Log ──────────────────────────────────────────────────────────────────
+/**
+ * Read Android system call log.
+ *
+ * react-native-call-log API:
+ *   CallLog.loadAll(filter) where filter = { minTimestamp: "<ms>" }
+ *   OR some versions accept a string timestamp directly.
+ *   We try both forms and fall back gracefully.
+ *
+ * Returns raw Android CallLog entries. Fields vary by device/Android version:
+ *   id, number, date, duration, type, name, simSlot, subscriptionId
+ *
+ * CALL TYPES (Android constants):
+ *   1 = INCOMING   (answered)
+ *   2 = OUTGOING   (answered or unanswered)
+ *   3 = MISSED     (duration always 0)
+ *   4 = VOICEMAIL
+ *   5 = REJECTED   (declined by user)
+ *   6 = BLOCKED
+ *   7 = ANSWERED_EXTERNALLY
+ *
+ * IMPORTANT: duration=0 is VALID for missed/rejected/unanswered calls.
+ * Never filter out zero-duration calls.
+ */
 export async function readCallLog(limitDays = 30) {
-  if (Platform.OS !== "android" || !_CallLog) return [];
+  if (Platform.OS !== "android") return [];
+  if (!_CallLog) {
+    console.warn("[CallNexa] CALLLOG_MODULE_MISSING: react-native-call-log native module not loaded. Ensure custom dev build.");
+    return [];
+  }
   try {
     const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_CALL_LOG);
     if (!granted) {
       const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_CALL_LOG);
-      if (result !== PermissionsAndroid.RESULTS.GRANTED) return [];
+      if (result !== PermissionsAndroid.RESULTS.GRANTED) {
+        console.warn("[CallNexa] CALLLOG_PERMISSION_DENIED");
+        return [];
+      }
     }
-    const since = Date.now() - limitDays * 24 * 60 * 60 * 1000;
-    const logs = await _CallLog.loadAll(String(since));
-    return Array.isArray(logs) ? logs : [];
-  } catch {
+    const sinceMs = Date.now() - limitDays * 24 * 60 * 60 * 1000;
+    const sinceStr = String(sinceMs);
+
+    let logs = null;
+
+    // Try object filter form first (newer versions of react-native-call-log)
+    try {
+      const result = await _CallLog.loadAll({ minTimestamp: sinceStr });
+      if (Array.isArray(result)) logs = result;
+    } catch { /* fall through */ }
+
+    // Try string form (older versions)
+    if (!logs) {
+      try {
+        const result = await _CallLog.loadAll(sinceStr);
+        if (Array.isArray(result)) logs = result;
+      } catch { /* fall through */ }
+    }
+
+    // Try with no filter (get all, then filter by date)
+    if (!logs) {
+      try {
+        const result = await _CallLog.loadAll();
+        if (Array.isArray(result)) {
+          logs = result.filter((c) => parseInt(c.date, 10) >= sinceMs);
+        }
+      } catch { /* give up */ }
+    }
+
+    if (!logs) {
+      console.warn("[CallNexa] CALLLOG_QUERY_FAILED: all API forms failed");
+      return [];
+    }
+
+    console.log(`[CallNexa] CALLLOG_QUERY_RESULT: ${logs.length} entries in last ${limitDays} days`);
+    return logs;
+  } catch (err) {
+    console.warn("[CallNexa] CALLLOG_QUERY_ERROR:", err?.message);
     return [];
   }
 }

@@ -150,8 +150,20 @@ async def sync_calls(
         # Sanitize call_type
         call_type = item.call_type if item.call_type in VALID_CALL_TYPES else "incoming"
 
-        # Duration sanity
+        # Duration sanity — 0 is VALID for missed/rejected calls, never reject on duration alone
         duration = max(0, item.duration_seconds or 0)
+
+        # Derive call_status from call_type (not duration)
+        if call_type == "missed":
+            call_status = "missed"
+        elif call_type == "rejected":
+            call_status = "rejected"
+        elif call_type == "outgoing" and duration == 0:
+            call_status = "no_answer"
+        elif duration > 0:
+            call_status = "connected"
+        else:
+            call_status = "unknown"
 
         # Timestamp sanity — reject obviously wrong timestamps
         try:
@@ -206,7 +218,7 @@ async def sync_calls(
                 phone_number_normalized=normalize_phone(item.phone_number or ""),
                 contact_name=item.contact_name or "Unknown",
                 call_type=call_type,
-                call_status="connected" if duration > 0 else "missed",
+                call_status=call_status,
                 start_time=start,
                 end_time=end,
                 duration_seconds=duration,

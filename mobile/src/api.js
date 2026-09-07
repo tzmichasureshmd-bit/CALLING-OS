@@ -43,20 +43,42 @@ async function getToken() {
 
 // ── HTTP client ───────────────────────────────────────────────────────────────
 
+// Retry fetch with exponential backoff — works on both WiFi and mobile data
+async function fetchWithRetry(url, options, retries = 3) {
+  let lastErr;
+  for (let i = 0; i < retries; i++) {
+    const controller = new AbortController();
+    // Longer timeout on retries to handle slow mobile data
+    const timeout = 20000 + i * 10000; // 20s, 30s, 40s
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      if (e.name === "AbortError" && i < retries - 1) {
+        // Wait before retry: 1s, 2s
+        await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
 async function request(method, path, body = null) {
   const token = await getToken();
   const headers = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
-
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const res = await fetchWithRetry(`${BASE_URL}${path}`, {
       method,
       headers,
-      body:   body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
+      body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
@@ -64,8 +86,6 @@ async function request(method, path, body = null) {
   } catch (e) {
     if (e.name === "AbortError") throw new Error("Request timed out. Check your connection.");
     throw e;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

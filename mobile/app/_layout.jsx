@@ -1,10 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { AppState } from "react-native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Notifications from "expo-notifications";
 import { ThemeProvider, useTheme } from "../src/theme";
 import { AuthProvider, useAuth } from "../src/AuthContext";
+import { sendHeartbeat } from "../src/AuthContext";
 
 // ── Notification tap handler ──────────────────────────────────────────────────
 function NotificationHandler() {
@@ -31,6 +33,25 @@ function NotificationHandler() {
     });
     return () => sub.remove();
   }, [router]);
+
+  return null;
+}
+
+// ── AppState foreground listener ──────────────────────────────────────────────
+function ForegroundWatcher() {
+  const { deviceId } = useAuth();
+  const appState = useRef(AppState.currentState);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (appState.current !== "active" && nextState === "active") {
+        // App came to foreground (e.g. user returned from Android Settings)
+        if (deviceId) sendHeartbeat(deviceId).catch(() => {});
+      }
+      appState.current = nextState;
+    });
+    return () => sub.remove();
+  }, [deviceId]);
 
   return null;
 }
@@ -62,6 +83,7 @@ function Shell() {
     <>
       <StatusBar style={mode === "dark" ? "light" : "dark"} />
       <AuthGate />
+      <ForegroundWatcher />
       <NotificationHandler />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
         <Stack.Screen name="login" />

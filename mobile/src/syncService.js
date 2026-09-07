@@ -53,21 +53,25 @@ const SYNC_FAIL_COUNT_KEY = "callos_sync_fail_count";
 const MAX_UPLOAD_RETRIES  = 5;
 
 // ── Network check ─────────────────────────────────────────────────────────────
+// Tries the actual API base URL — works on WiFi AND mobile data.
+// Uses a short 5s timeout so sync doesn't stall waiting for connectivity.
 async function isOnline() {
-  try {
-    // Lightweight check — attempt to reach the API health endpoint
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(
-      (process.env.EXPO_PUBLIC_API_URL || "https://api.callingos.tzmicha.com/api/v1")
-        .replace("/api/v1", "") + "/health",
-      { method: "GET", signal: controller.signal }
-    );
-    clearTimeout(timer);
-    return res.ok;
-  } catch {
-    return false;
+  const urls = [
+    (process.env.EXPO_PUBLIC_API_URL || "https://api.callingos.tzmicha.com/api/v1")
+      .replace("/api/v1", "") + "/health",
+    // Fallback: try the API v1 root directly
+    process.env.EXPO_PUBLIC_API_URL || "https://api.callingos.tzmicha.com/api/v1",
+  ];
+  for (const url of urls) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(url, { method: "GET", signal: controller.signal });
+      clearTimeout(timer);
+      if (res.ok || res.status < 500) return true; // any non-server-error = reachable
+    } catch { /* try next */ }
   }
+  return false;
 }
 
 // ── Battery ───────────────────────────────────────────────────────────────────
@@ -159,149 +163,100 @@ async function processUploadQueue(token) {
  * 7. Process recording upload queue
  */
 export async function runSyncCycle(deviceId) {
-  // ── Step 1: Read new calls ────────────────────────────────────────────────
   let newCalls;
   try {
     newCalls = await getNewCallsSinceLastSync();
   } catch {
-    return; // CallLog read failed — permissions likely missing
+    return;
   }
 
   if (!newCalls.length) return;
 
-  // ── Step 2: DETECTED → LOCAL_SAVED → SYNC_QUEUED ─────────────────────────
+  console.log(`[CallNexa] CALL_SYNC_START: ${newCalls.length} calls to sync`);
+
+  // DETECTED → SYNC_QUEUED — save locally first, never lose a call
   for (const call of newCalls) {
     await upsertCallStatus(call.client_event_id, {
-      sync_status:       STATUS.SYNC_QUEUED,
-      recording_status:  call.recording_path
-        ? STATUS.RECORDING_QUEUED
-        : STATUS.RECORDING_NOT_AVAILABLE,
+      sync_status:      STATUS.SYNC_QUEUED,
+      recording_status: call.recording_path ? STATUS.RECORDING_QUEUED : STATUS.RECORDING_NOT_AVAILABLE,
       transcript_status: null,
-      phone_number:      call.phone_number,
-      contact_name:      call.contact_name,
-      call_type:         call.call_type,
-      duration_seconds:  call.duration_seconds,
-      start_time:        call.start_time,
-      recording_path:    call.recording_path || null,
-      sync_attempts:     0,
+      phone_number:     call.phone_number,
+      contact_name:     call.contact_name,
+      call_type:        call.call_type,
+      duration_seconds: call.duration_seconds,
+      start_time:       call.start_time,
+      recording_path:   call.recording_path || null,
+      sync_attempts:    0,
     });
-    // Notify: call detected (only for calls not previously seen)
     await notifyCallDetected(call);
   }
 
-  // ── Step 3: Check connectivity ────────────────────────────────────────────
-  const online = await isOnline();
-  if (!online) {
-    for (const call of newCalls) {
-      await notifyWaitingForConnection(call);
-    }
-    // Increment failure counter
-    const raw = await AsyncStorage.getItem(SYNC_FAIL_COUNT_KEY);
-    const count = parseInt(raw || "0", 10) + 1;
-    await AsyncStorage.setItem(SYNC_FAIL_COUNT_KEY, String(count));
-    await notifySystemSyncAlert(count);
-    return;
-  }
-
-  // ── Step 4: SYNCING ───────────────────────────────────────────────────────
+  // Mark SYNCING
   for (const call of newCalls) {
     await updateSyncStatus(call.client_event_id, STATUS.SYNCING);
     await notifyCallSyncing(call);
   }
 
-  // ── Step 5: POST /calls/sync ──────────────────────────────────────────────
+  // POST to backend — no pre-flight isOnline() check, just try directly
+  // fetchWithRetry in api.js handles WiFi + mobile data + retries
   let result;
   try {
     result = await api.syncCalls(deviceId, newCalls);
+    console.log(`[CallNexa] CALL_SYNC_SUCCESS: accepted=${result.accepted} dup=${result.duplicates} failed=${result.failed}`);
   } catch (err) {
-    // Network/API failure — mark all as SYNC_FAILED
+    console.warn(`[CallNexa] CALL_SYNC_FAILED: ${err?.message}`);
+    // Keep as SYNC_QUEUED (not SYNC_FAILED) so next poll retries automatically
     for (const call of newCalls) {
-      const raw = await AsyncStorage.getItem(SYNC_FAIL_COUNT_KEY);
-      const attempts = parseInt(raw || "0", 10) + 1;
-      await updateSyncStatus(call.client_event_id, STATUS.SYNC_FAILED, {
-        last_error:    err?.message || "network_error",
-        sync_attempts: attempts,
+      await updateSyncStatus(call.client_event_id, STATUS.SYNC_QUEUED, {
+        last_error: err?.message || "network_error",
+        sync_attempts: (await AsyncStorage.getItem(SYNC_FAIL_COUNT_KEY).then(v => parseInt(v||"0",10))) + 1,
         last_sync_attempt: new Date().toISOString(),
       });
       await notifyCallSyncFailed(call, err?.message);
     }
-    const raw = await AsyncStorage.getItem(SYNC_FAIL_COUNT_KEY);
-    const count = parseInt(raw || "0", 10) + 1;
-    await AsyncStorage.setItem(SYNC_FAIL_COUNT_KEY, String(count));
-    await notifySystemSyncAlert(count);
+    const cnt = parseInt((await AsyncStorage.getItem(SYNC_FAIL_COUNT_KEY)) || "0", 10) + 1;
+    await AsyncStorage.setItem(SYNC_FAIL_COUNT_KEY, String(cnt));
+    if (cnt >= 3) await notifySystemSyncAlert(cnt);
     return;
   }
 
-  // ── Step 6: Process per-call results ─────────────────────────────────────
-  // Reset failure counter on any successful API response
   await AsyncStorage.setItem(SYNC_FAIL_COUNT_KEY, "0");
 
   const resultMap = {};
-  (result.results || []).forEach((r) => {
-    resultMap[r.client_event_id] = r;
-  });
+  (result.results || []).forEach((r) => { resultMap[r.client_event_id] = r; });
 
   const syncedCalls = [];
-
   for (const call of newCalls) {
     const r = resultMap[call.client_event_id];
-
     if (!r) {
-      // No result entry — treat as synced if accepted > 0 (batch fallback)
-      if (result.accepted > 0) {
-        await updateSyncStatus(call.client_event_id, STATUS.SYNCED, {
-          last_sync_attempt: new Date().toISOString(),
-        });
+      if (result.accepted > 0 || result.duplicates > 0) {
+        await updateSyncStatus(call.client_event_id, STATUS.SYNCED, { last_sync_attempt: new Date().toISOString() });
         await notifyCallSynced(call);
         syncedCalls.push(call);
       }
       continue;
     }
-
     if (r.status === "accepted") {
-      await updateSyncStatus(call.client_event_id, STATUS.SYNCED, {
-        call_id:           r.call_id,
-        last_sync_attempt: new Date().toISOString(),
-      });
+      await updateSyncStatus(call.client_event_id, STATUS.SYNCED, { call_id: r.call_id, last_sync_attempt: new Date().toISOString() });
       await notifyCallSynced({ ...call, call_id: r.call_id });
       syncedCalls.push(call);
     } else if (r.status === "duplicate") {
-      // Already on server — mark synced locally too
-      await updateSyncStatus(call.client_event_id, STATUS.SYNCED, {
-        call_id: r.call_id,
-      });
+      await updateSyncStatus(call.client_event_id, STATUS.SYNCED, { call_id: r.call_id });
       syncedCalls.push(call);
     } else {
-      // failed
-      await updateSyncStatus(call.client_event_id, STATUS.SYNC_FAILED, {
-        last_error:    "server_rejected",
-        last_sync_attempt: new Date().toISOString(),
-      });
+      await updateSyncStatus(call.client_event_id, STATUS.SYNC_FAILED, { last_error: "server_rejected", last_sync_attempt: new Date().toISOString() });
       await notifyCallSyncFailed(call, "server_rejected");
     }
   }
 
-  // Mark confirmed synced calls in the sliding-window set
-  if (syncedCalls.length > 0) {
-    await markCallsSynced(syncedCalls);
-  }
+  if (syncedCalls.length > 0) await markCallsSynced(syncedCalls);
 
-  // ── Step 7: Recording upload queue ───────────────────────────────────────
+  // Recording upload — non-blocking, runs after sync confirms
   await enqueueRecordings(newCalls);
-  // Use secure token storage (not plain AsyncStorage)
-  const accessToken = await getRefreshToken().then(() => null).catch(() => null);
-  // getRefreshToken returns refresh token — we need access token
-  // Import secureGet pattern from api.js
   let token = null;
-  try {
-    const SecureStore = require("expo-secure-store");
-    token = await SecureStore.getItemAsync("callos_token");
-  } catch {
-    token = await AsyncStorage.getItem("callos_token").catch(() => null);
-  }
-  if (token) {
-    await processUploadQueue(token);
-  }
+  try { token = await (require("expo-secure-store")).getItemAsync("callos_token"); } catch {}
+  if (!token) token = await AsyncStorage.getItem("callos_token").catch(() => null);
+  if (token) processUploadQueue(token).catch(() => {}); // fire-and-forget
 }
 
 // ── useAutoSync hook ──────────────────────────────────────────────────────────

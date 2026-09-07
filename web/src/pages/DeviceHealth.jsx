@@ -12,8 +12,30 @@ import { useDeviceSocket } from "../api/useDeviceSocket.js";
 const STATUS = {
   healthy: { label: "Healthy",  color: "var(--success)", soft: "var(--success-soft)" },
   warning: { label: "Warning",  color: "var(--warning)", soft: "var(--warning-soft)" },
+  stale:   { label: "Stale",    color: "var(--warning)", soft: "var(--warning-soft)" },
   offline: { label: "Offline",  color: "var(--danger)",  soft: "var(--danger-soft)"  },
 };
+
+// Background sync is NOT a runtime permission — show accurate capability label
+function BgSyncRow({ status }) {
+  // status: "limited" | "restricted" | null
+  const label = status === "restricted" ? "Restricted" : "Limited";
+  const desc  = status === "restricted"
+    ? "Android battery optimization is restricting background execution"
+    : "Background execution not guaranteed — sync runs while app is open";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0" }}>
+      <div style={{ width: 32, height: 32, borderRadius: 9, background: "var(--warning-soft)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <AlertTriangle size={16} color="var(--warning)" />
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Background Sync</div>
+        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 1 }}>{desc}</div>
+      </div>
+      <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--warning)" }}>{label}</span>
+    </div>
+  );
+}
 
 function useTick(iso, interval = 5000) {
   const fmt = (i) => {
@@ -48,19 +70,24 @@ function BatteryBar({ level }) {
   );
 }
 
-function PermRow({ ok, label, desc }) {
+function PermRow({ status, label, desc }) {
+  // status: true=granted, false=denied, null=unknown
+  const isGranted = status === true;
+  const isUnknown = status === null || status === undefined;
+  const color = isGranted ? "var(--success)" : isUnknown ? "var(--text-muted)" : "var(--danger)";
+  const bg    = isGranted ? "var(--success-soft)" : isUnknown ? "var(--bg-hover)" : "var(--danger-soft)";
+  const icon  = isGranted ? <CheckCircle2 size={16} color="var(--success)" /> : isUnknown ? <AlertTriangle size={16} color="var(--text-muted)" /> : <XCircle size={16} color="var(--danger)" />;
+  const text  = isGranted ? "Granted" : isUnknown ? "Unknown" : "Denied";
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
-      <div style={{ width: 32, height: 32, borderRadius: 9, background: ok ? "var(--success-soft)" : "var(--danger-soft)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-        {ok ? <CheckCircle2 size={16} color="var(--success)" /> : <XCircle size={16} color="var(--danger)" />}
+      <div style={{ width: 32, height: 32, borderRadius: 9, background: bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        {icon}
       </div>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{label}</div>
         {desc && <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 1 }}>{desc}</div>}
       </div>
-      <span style={{ fontSize: 11.5, fontWeight: 700, color: ok ? "var(--success)" : "var(--danger)" }}>
-        {ok ? "Granted" : "Denied"}
-      </span>
+      <span style={{ fontSize: 11.5, fontWeight: 700, color }}>{text}</span>
     </div>
   );
 }
@@ -79,7 +106,7 @@ function StatBox({ label, value, sub }) {
 
 function DeviceRow({ d, active, onClick }) {
   const lastSeen = useTick(d.lastSeenAt);
-  const s = STATUS[d.status];
+  const s = STATUS[d.status] || STATUS.offline;
   return (
     <div
       onClick={onClick}
@@ -127,8 +154,8 @@ function DeviceRow({ d, active, onClick }) {
 
 function DeviceDetail({ d, connected }) {
   const lastSeen = useTick(d.lastSeenAt, 1000);
-  const s = STATUS[d.status];
-  const allPermsOk = d.permissions.callLog && d.permissions.phoneState && d.permissions.contacts && d.permissions.recording;
+  const s = STATUS[d.status] || STATUS.offline;
+  const allPermsOk = d.permissions.callLog === true && d.permissions.phoneState === true && d.permissions.contacts === true && d.permissions.recording === true;
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
@@ -204,12 +231,12 @@ function DeviceDetail({ d, connected }) {
           {allPermsOk ? <ShieldCheck size={16} color="var(--success)" /> : <ShieldAlert size={16} color="var(--warning)" />}
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Permissions</span>
         </div>
-        <PermRow ok={d.permissions.callLog}    label="Call Log"     desc="Read device call history" />
-        <PermRow ok={d.permissions.phoneState} label="Phone State"  desc="Detect active calls" />
-        <PermRow ok={d.permissions.contacts}   label="Contacts"     desc="Match numbers to names" />
-        <PermRow ok={d.permissions.recording}  label="Recordings"   desc="Access call recordings" />
+        <PermRow status={d.permissions.callLog}    label="Call Log"     desc="Read device call history" />
+        <PermRow status={d.permissions.phoneState} label="Phone State"  desc="Detect active calls" />
+        <PermRow status={d.permissions.contacts}   label="Contacts"     desc="Match numbers to names" />
+        <PermRow status={d.permissions.recording}  label="Recordings"   desc="Access call recordings" />
         <div style={{ paddingTop: 10 }}>
-          <PermRow ok={d.background === "ok"}  label="Background Sync" desc="Run sync when app is closed" />
+          <BgSyncRow status={d.backgroundStatus} />
         </div>
       </div>
 

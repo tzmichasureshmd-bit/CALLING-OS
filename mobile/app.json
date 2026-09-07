@@ -44,6 +44,8 @@
       "expo-font",
       "expo-file-system",
       "expo-secure-store",
+      "react-native-call-log",
+      "react-native-sim-cards-manager",
       ["expo-location", { "locationAlwaysAndWhenInUsePermission": "Allow CallNexa to track device location for manager dashboard." }],
       [
         "expo-notifications",

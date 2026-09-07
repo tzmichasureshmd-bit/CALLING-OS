@@ -54,6 +54,8 @@ def _device_payload(d: Device, employee_name: str | None) -> dict:
         "last_seen_at":       d.last_seen_at.isoformat() if d.last_seen_at else None,
         "battery_level":      d.battery_level,
         "is_online":          d.is_online,
+        "network_type":       d.network_type,
+        "background_sync_status": d.background_sync_status,
         "permissions_status": d.permissions_status or {},
         "latitude":           d.latitude,
         "longitude":          d.longitude,
@@ -301,10 +303,14 @@ async def heartbeat(
     device.is_online    = body.is_online
     if body.battery_level is not None:
         device.battery_level = body.battery_level
-    if body.permissions_status:
+    if body.permissions_status is not None:
         device.permissions_status = body.permissions_status
     if body.app_version:
         device.app_version = body.app_version
+    if body.network_type is not None:
+        device.network_type = body.network_type
+    if body.background_sync_status is not None:
+        device.background_sync_status = body.background_sync_status
     if body.latitude is not None:
         device.latitude          = body.latitude
         device.longitude         = body.longitude

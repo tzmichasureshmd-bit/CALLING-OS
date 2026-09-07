@@ -6,27 +6,38 @@ const WS_BASE  = API_BASE.replace(/^http/, "ws");
 
 function normalizeDevice(d) {
   const perms = d.permissions_status || {};
-  const callLog    = perms.callLog    ?? perms.call_log    ?? false;
-  const phoneState = perms.phoneState ?? perms.phone_state ?? false;
-  const contacts   = perms.contacts   ?? false;
-  const recording  = perms.recording  ?? false;
-  const allOk = callLog && phoneState && contacts && recording;
-  const status = !d.is_online ? "offline" : !allOk ? "warning" : "healthy";
+  const callLog    = perms.callLog    ?? perms.call_log    ?? null;
+  const phoneState = perms.phoneState ?? perms.phone_state ?? null;
+  const contacts   = perms.contacts   ?? null;
+  const recording  = perms.recording  ?? null;
+  const allOk = !!(callLog && phoneState && contacts && recording);
+  // Online/stale/offline based on heartbeat freshness
+  const lastSeen = d.last_seen_at ? new Date(d.last_seen_at) : null;
+  const ageMs = lastSeen ? Date.now() - lastSeen.getTime() : Infinity;
+  const isOnline = ageMs < 2 * 60 * 1000;          // < 2 min
+  const isStale  = ageMs < 10 * 60 * 1000;         // 2-10 min
+  const status = !d.is_online || !isStale ? "offline"
+    : !isOnline ? "stale"
+    : !allOk    ? "warning"
+    : "healthy";
+  // background_sync_status is NOT a runtime permission — never derive from perms bool
+  const bgStatus = d.background_sync_status || perms.backgroundSync || null;
   return {
-    id:          d.id,
-    employee:    d.employee_name || d.employee_id,
-    device:      d.model || "Unknown",
-    android:     d.android_version || "—",
-    appVersion:  d.app_version || "—",
-    battery:     d.battery_level ?? 0,
-    lastSeenAt:  d.last_seen_at || null,
-    permissions: { callLog, phoneState, contacts, recording },
-    sim:         d.sims?.[0]?.carrier || d.sims?.[0]?.phone_number || "SIM 1",
-    background:  perms.background ? "ok" : "warning",
-    is_online:   !!d.is_online,
-    latitude:    d.latitude  ?? null,
-    longitude:   d.longitude ?? null,
-    wifi_ssid:   d.wifi_ssid || null,
+    id:                  d.id,
+    employee:            d.employee_name || d.employee_id,
+    device:              d.model || "Unknown",
+    android:             d.android_version || "—",
+    appVersion:          d.app_version || "—",
+    battery:             d.battery_level ?? 0,
+    lastSeenAt:          d.last_seen_at || null,
+    permissions:         { callLog, phoneState, contacts, recording },
+    sim:                 d.sims?.[0]?.carrier || d.sims?.[0]?.phone_number || "SIM 1",
+    backgroundStatus:    bgStatus,   // "limited" | "restricted" | null
+    network_type:        d.network_type || null,
+    is_online:           !!d.is_online,
+    latitude:            d.latitude  ?? null,
+    longitude:           d.longitude ?? null,
+    wifi_ssid:           d.wifi_ssid || null,
     status,
   };
 }
