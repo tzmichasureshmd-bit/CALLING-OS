@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { devicesApi } from "./resources.js";
 
-const WS_BASE = (import.meta.env.VITE_API_URL || "https://api.callingos.tzmicha.com/api/v1")
-  .replace(/^http/, "ws");
+const API_BASE = import.meta.env.VITE_API_URL || "https://api.callingos.tzmicha.com/api/v1";
+const WS_BASE  = API_BASE.replace(/^http/, "ws");
 
 function normalizeDevice(d) {
   const perms = d.permissions_status || {};
@@ -31,54 +31,122 @@ function normalizeDevice(d) {
   };
 }
 
-/**
- * Real-time device list via WebSocket.
- * Falls back to 10s HTTP polling if WS is unavailable.
- *
- * Returns: { devices, connected, error, refetch }
- */
+function getCredentials() {
+  const token   = localStorage.getItem("callos_token");
+  const userRaw = localStorage.getItem("callos_user");
+  if (!token || !userRaw) return null;
+  try {
+    const orgId = JSON.parse(userRaw).organization_id;
+    if (!orgId) return null;
+    return { token, orgId };
+  } catch { return null; }
+}
+
+function applyMessage(msg, setDevices) {
+  if (msg.event === "snapshot") {
+    setDevices(msg.devices.map(normalizeDevice));
+  } else if (msg.event === "device_update") {
+    const updated = normalizeDevice(msg.device);
+    setDevices((prev) => {
+      if (!prev) return [updated];
+      const idx = prev.findIndex((d) => d.id === updated.id);
+      if (idx === -1) return [...prev, updated];
+      const next = [...prev];
+      next[idx] = updated;
+      return next;
+    });
+  }
+}
+
 export function useDeviceSocket() {
-  const [devices, setDevices]     = useState(null);   // null = first load
+  const [devices, setDevices]     = useState(null);
   const [connected, setConnected] = useState(false);
   const [error, setError]         = useState(null);
-  const wsRef      = useRef(null);
-  const retryRef   = useRef(null);
-  const pingRef    = useRef(null);
-  const fallbackRef = useRef(null);
-  const retryCount = useRef(0);
 
-  // HTTP fallback fetch
+  const wsRef       = useRef(null);
+  const sseRef      = useRef(null);
+  const pingRef     = useRef(null);
+  const retryRef    = useRef(null);
+  const pollRef     = useRef(null);
+  const retryCount  = useRef(0);
+  const useSse      = useRef(false);   // true once WS has failed once
+
+  // ── HTTP fallback ──────────────────────────────────────────────────────────
   const refetch = useCallback(async () => {
     try {
       const res = await devicesApi.list();
-      const items = (Array.isArray(res) ? res : res?.items || []).map(normalizeDevice);
-      setDevices(items);
+      setDevices((Array.isArray(res) ? res : res?.items || []).map(normalizeDevice));
       setError(null);
-    } catch (e) {
-      setError(e);
-    }
+    } catch (e) { setError(e); }
   }, []);
 
-  const connect = useCallback(() => {
-    const token   = localStorage.getItem("callos_token");
-    const userRaw = localStorage.getItem("callos_user");
-    if (!token || !userRaw) return;
+  const startPollFallback = useCallback(() => {
+    if (pollRef.current) return;
+    refetch();
+    pollRef.current = setInterval(refetch, 10_000);
+  }, [refetch]);
 
-    let orgId;
-    try { orgId = JSON.parse(userRaw).organization_id; } catch { return; }
-    if (!orgId) return;
+  const stopPollFallback = useCallback(() => {
+    clearInterval(pollRef.current);
+    pollRef.current = null;
+  }, []);
 
-    const url = `${WS_BASE}/devices/ws/${orgId}?token=${token}`;
-    const ws  = new WebSocket(url);
-    wsRef.current = ws;
+  // ── SSE connection ─────────────────────────────────────────────────────────
+  const connectSSE = useCallback(() => {
+    const creds = getCredentials();
+    if (!creds) return;
+    const { token, orgId } = creds;
 
-    ws.onopen = () => {
+    sseRef.current?.close();
+    const es = new EventSource(`${API_BASE}/devices/sse/${orgId}?token=${token}`);
+    sseRef.current = es;
+
+    es.onopen = () => {
       setConnected(true);
       setError(null);
       retryCount.current = 0;
-      // Clear HTTP fallback if WS is up
-      clearInterval(fallbackRef.current);
-      // Ping every 25s to keep connection alive
+      stopPollFallback();
+    };
+
+    es.onmessage = (e) => {
+      try { applyMessage(JSON.parse(e.data), setDevices); } catch { /* ignore */ }
+    };
+
+    es.onerror = () => {
+      setConnected(false);
+      es.close();
+      // Retry SSE with backoff
+      const delay = Math.min(2000 * 2 ** retryCount.current, 30_000);
+      retryCount.current += 1;
+      retryRef.current = setTimeout(connectSSE, delay);
+      startPollFallback();
+    };
+  }, [startPollFallback, stopPollFallback]);
+
+  // ── WebSocket connection ───────────────────────────────────────────────────
+  const connectWS = useCallback(() => {
+    const creds = getCredentials();
+    if (!creds) return;
+    const { token, orgId } = creds;
+
+    const ws = new WebSocket(`${WS_BASE}/devices/ws/${orgId}?token=${token}`);
+    wsRef.current = ws;
+
+    // If WS doesn't open within 4s, assume proxy blocks it → switch to SSE
+    const wsTimeout = setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        ws.close();
+        useSse.current = true;
+        connectSSE();
+      }
+    }, 4000);
+
+    ws.onopen = () => {
+      clearTimeout(wsTimeout);
+      setConnected(true);
+      setError(null);
+      retryCount.current = 0;
+      stopPollFallback();
       pingRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send("ping");
       }, 25_000);
@@ -88,58 +156,50 @@ export function useDeviceSocket() {
       try {
         const msg = JSON.parse(e.data);
         if (msg === "pong") return;
-
-        if (msg.event === "snapshot") {
-          setDevices(msg.devices.map(normalizeDevice));
-        } else if (msg.event === "device_update") {
-          const updated = normalizeDevice(msg.device);
-          setDevices((prev) => {
-            if (!prev) return [updated];
-            const idx = prev.findIndex((d) => d.id === updated.id);
-            if (idx === -1) return [...prev, updated];
-            const next = [...prev];
-            next[idx] = updated;
-            return next;
-          });
-        }
-      } catch { /* ignore malformed */ }
+        applyMessage(msg, setDevices);
+      } catch { /* ignore */ }
     };
 
     ws.onerror = () => {
+      clearTimeout(wsTimeout);
       setConnected(false);
     };
 
     ws.onclose = (e) => {
-      setConnected(false);
+      clearTimeout(wsTimeout);
       clearInterval(pingRef.current);
+      setConnected(false);
 
-      if (e.code === 4001 || e.code === 4003) return; // auth failure — don't retry
+      // 403 from proxy or auth failure → switch permanently to SSE
+      if (e.code === 4001 || e.code === 4003 || e.code === 1006) {
+        useSse.current = true;
+        connectSSE();
+        return;
+      }
 
-      // Exponential backoff: 2s, 4s, 8s … max 30s
+      // Normal retry with backoff
       const delay = Math.min(2000 * 2 ** retryCount.current, 30_000);
       retryCount.current += 1;
-      retryRef.current = setTimeout(connect, delay);
-
-      // While disconnected, fall back to HTTP polling every 10s
-      if (!fallbackRef.current) {
-        refetch();
-        fallbackRef.current = setInterval(refetch, 10_000);
-      }
+      retryRef.current = setTimeout(() => {
+        useSse.current ? connectSSE() : connectWS();
+      }, delay);
+      startPollFallback();
     };
-  }, [refetch]);
+  }, [connectSSE, startPollFallback, stopPollFallback]);
 
+  // ── Mount ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    // Initial HTTP fetch so the page isn't blank while WS handshakes
-    refetch();
-    connect();
+    refetch();          // immediate HTTP load while connection handshakes
+    connectWS();        // try WS first, auto-falls to SSE on failure
 
     return () => {
       wsRef.current?.close();
+      sseRef.current?.close();
       clearTimeout(retryRef.current);
       clearInterval(pingRef.current);
-      clearInterval(fallbackRef.current);
+      clearInterval(pollRef.current);
     };
-  }, [connect, refetch]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { devices, connected, error, refetch };
 }

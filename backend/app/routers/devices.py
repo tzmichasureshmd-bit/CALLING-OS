@@ -217,7 +217,8 @@ async def device_ws(
     if not payload:
         await websocket.close(code=4001)
         return
-    if payload.get("organization_id") != org_id:
+    # JWT uses "org" key (not "organization_id")
+    if payload.get("org") != org_id:
         await websocket.close(code=4003)
         return
 
@@ -245,3 +246,71 @@ async def device_ws(
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
         manager.disconnect(org_id, websocket)
+
+
+# ── SSE endpoint (fallback for proxies that block WS) ─────────────────────────
+
+from fastapi.responses import StreamingResponse
+
+@router.get("/sse/{org_id}")
+async def device_sse(
+    org_id: str,
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """
+    SSE fallback — works through all reverse proxies.
+    Streams device_update events over plain HTTP.
+    """
+    import json
+    from ..auth.jwt import decode_token
+
+    payload = decode_token(token)
+    if not payload or payload.get("org") != org_id:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    # Use a simple asyncio.Queue per SSE connection
+    queue: asyncio.Queue = asyncio.Queue()
+
+    # Register as a pseudo-WS using a queue-backed adapter
+    class QueueAdapter:
+        async def send_text(self, text: str):
+            await queue.put(text)
+        async def close(self, code=None):
+            await queue.put(None)  # sentinel
+
+    adapter = QueueAdapter()
+    manager.connect(org_id, adapter)
+
+    # Send snapshot immediately
+    devices_snap = db.query(Device).filter(Device.organization_id == org_id).all()
+    snapshot_data = json.dumps({"event": "snapshot", "devices": [
+        _device_payload(d, d.employee.name if d.employee else None)
+        for d in devices_snap
+    ]})
+
+    async def event_stream():
+        # Send snapshot first
+        yield f"data: {snapshot_data}\n\n"
+        try:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=25)
+                    if msg is None:
+                        break
+                    yield f"data: {msg}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"  # keep-alive comment
+        finally:
+            manager.disconnect(org_id, adapter)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable Nginx buffering
+            "Connection": "keep-alive",
+        },
+    )
