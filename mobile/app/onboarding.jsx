@@ -385,7 +385,17 @@ function SimDetectStep({ onDone }) {
     readSimInfo().then((s) => { setSims(s); setDetecting(false); }).catch(() => setDetecting(false));
   }, []);
 
-  const display = sims.length ? sims : [{ slot: 0, carrierName: "SIM 1 — Primary", phoneNumber: null }, { slot: 1, carrierName: "SIM 2 — Secondary", phoneNumber: null }];
+  const display = sims.length
+    ? sims
+    : [{ slot: 0, carrierName: null, phoneNumber: null }, { slot: 1, carrierName: null, phoneNumber: null }];
+
+  // Label helper
+  function simLabel(s) {
+    if (s.carrierName && s.phoneNumber) return `${s.carrierName} · ${s.phoneNumber}`;
+    if (s.carrierName) return s.carrierName;
+    if (s.phoneNumber) return s.phoneNumber;
+    return `SIM ${s.slot + 1}`;
+  }
 
   return (
     <View style={{ gap: 14 }}>
@@ -409,8 +419,8 @@ function SimDetectStep({ onDone }) {
               <Ionicons name="phone-portrait-outline" size={22} color={on ? palette.teal : theme.muted} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, fontWeight: "700", color: on ? palette.teal : theme.primary }}>{s.carrierName || `SIM ${s.slot + 1}`}</Text>
-              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 2 }}>{s.phoneNumber || "Number not available"}</Text>
+              <Text style={{ fontSize: 15, fontWeight: "700", color: on ? palette.teal : theme.primary }}>{simLabel(s)}</Text>
+              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 2 }}>{s.phoneNumber ? s.phoneNumber : s.carrierName ? "Number not shared by carrier" : "Grant Phone State permission"}</Text>
             </View>
             <Ionicons name={on ? "checkmark-circle" : "ellipse-outline"} size={22} color={on ? palette.teal : theme.dim} />
           </Pressable>

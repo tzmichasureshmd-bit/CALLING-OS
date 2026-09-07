@@ -467,8 +467,8 @@ function SimConfigModal({ visible, onClose, sims, theme }) {
                 </View>
               </View>
               {[
-                { label: "Phone Number", value: s.phoneNumber || "Not available" },
-                { label: "Carrier",      value: s.carrierName || "Unknown" },
+                { label: "Phone Number", value: s.phoneNumber || "Reading from device..." },
+                { label: "Carrier",      value: s.carrierName || "Reading from device..." },
                 { label: "Country",      value: s.countryIso?.toUpperCase() || "—" },
               ].map((r) => (
                 <View key={r.label} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 4 }}>
