@@ -13,6 +13,7 @@ export function AuthProvider({ children }) {
   const _saveSession = useCallback(async (tokenData) => {
     setAccessToken(tokenData.access_token);
     localStorage.setItem("callos_token", tokenData.access_token);
+    if (tokenData.refresh_token) localStorage.setItem("callos_refresh_token", tokenData.refresh_token);
     const me = await authApi.me();
     localStorage.setItem("callos_user", JSON.stringify(me));
     setUser(me);
@@ -46,6 +47,7 @@ export function AuthProvider({ children }) {
     await firebaseSignOut().catch(() => {});
     setAccessToken(null);
     localStorage.removeItem("callos_token");
+    localStorage.removeItem("callos_refresh_token");
     localStorage.removeItem("callos_user");
     setUser(null);
   }, []);
