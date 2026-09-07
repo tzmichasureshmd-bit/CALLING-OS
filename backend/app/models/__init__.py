@@ -7,5 +7,9 @@ from .lead import Lead
 from .opportunity import Opportunity
 from .excluded_number import ExcludedNumber
 from .invoice import Invoice
+from .audit_log import AuditLog
 
-__all__ = ["Organization", "User", "Employee", "Device", "SIM", "Call", "Lead", "Opportunity", "ExcludedNumber", "Invoice"]
+__all__ = [
+    "Organization", "User", "Employee", "Device", "SIM",
+    "Call", "Lead", "Opportunity", "ExcludedNumber", "Invoice", "AuditLog",
+]

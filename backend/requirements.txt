@@ -16,3 +16,4 @@ email-validator==2.2.0
 pyotp==2.9.0
 qrcode[pil]==8.0
 faster-whisper==1.0.3
+slowapi==0.1.9

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { devicesApi } from "./resources.js";
+import { devicesApi, callsApi } from "./resources.js";
 
 const API_BASE = import.meta.env.VITE_API_URL || "https://api.callingos.tzmicha.com/api/v1";
 const WS_BASE  = API_BASE.replace(/^http/, "ws");
@@ -42,7 +42,7 @@ function getCredentials() {
   } catch { return null; }
 }
 
-function applyMessage(msg, setDevices) {
+function applyMessage(msg, setDevices, setNewCallEvent) {
   if (msg.event === "snapshot") {
     setDevices(msg.devices.map(normalizeDevice));
   } else if (msg.event === "device_update") {
@@ -55,13 +55,17 @@ function applyMessage(msg, setDevices) {
       next[idx] = updated;
       return next;
     });
+  } else if (msg.event === "calls_synced" || msg.event === "recording_uploaded" || msg.event === "transcript_updated") {
+    // Signal to consumers that call data has changed
+    setNewCallEvent({ event: msg.event, ts: Date.now(), ...msg });
   }
 }
 
-export function useDeviceSocket() {
+export function useDeviceSocket(onCallsUpdated) {
   const [devices, setDevices]     = useState(null);
   const [connected, setConnected] = useState(false);
   const [error, setError]         = useState(null);
+  const [newCallEvent, setNewCallEvent] = useState(null);  // fires when calls_synced received
 
   const wsRef       = useRef(null);
   const sseRef      = useRef(null);
@@ -109,7 +113,7 @@ export function useDeviceSocket() {
     };
 
     es.onmessage = (e) => {
-      try { applyMessage(JSON.parse(e.data), setDevices); } catch { /* ignore */ }
+      try { applyMessage(JSON.parse(e.data), setDevices, setNewCallEvent); } catch { /* ignore */ }
     };
 
     es.onerror = () => {
@@ -156,7 +160,7 @@ export function useDeviceSocket() {
       try {
         const msg = JSON.parse(e.data);
         if (msg === "pong") return;
-        applyMessage(msg, setDevices);
+        applyMessage(msg, setDevices, setNewCallEvent);
       } catch { /* ignore */ }
     };
 
@@ -201,5 +205,5 @@ export function useDeviceSocket() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { devices, connected, error, refetch };
+  return { devices, connected, error, refetch, newCallEvent };
 }

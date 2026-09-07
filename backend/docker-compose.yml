@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       - DATABASE_URL=postgresql+psycopg://postgres.gjfohkxocurrzbdpybuu:TzMicha%40123@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres
-      - JWT_SECRET_KEY=callingos-production-secret-change-this-now
+      - JWT_SECRET_KEY=69f88fc2d17716c5ddc6e94517dd5a1dc316d1d7f59374c5ece99f5390c4af99
       - JWT_ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=60
       - REFRESH_TOKEN_EXPIRE_DAYS=30

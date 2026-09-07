@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import {
   FileSpreadsheet, PhoneIncoming, PhoneOutgoing, PhoneMissed, PhoneOff,
-  Play, RotateCcw, FilterX, Phone, Sparkles, Target, TrendingUp,
-  Pause, User, MessageSquare, Calendar,
+  Play, RotateCcw, FilterX, Phone, Sparkles, Target,
+  Pause, User, MessageSquare, Calendar, RefreshCw,
 } from "lucide-react";
 import {
   PageContainer, Card, Button, SearchInput, EmptyState, ErrorState, SkeletonRows,
@@ -10,7 +10,9 @@ import {
 } from "../components/ui.jsx";
 import { formatDuration, formatDateTime } from "../data/mockData.js";
 import { dataSource } from "../api/dataSource.js";
+import { callsApi } from "../api/resources.js";
 import { useResource } from "../api/useResource.js";
+import { useDeviceSocket } from "../api/useDeviceSocket.js";
 
 function exportCallsCSV(calls) {
   const rows = [["Date", "Type", "Customer", "Phone", "Employee", "Duration (s)", "SIM", "Device", "Recording"]];
@@ -23,35 +25,41 @@ function exportCallsCSV(calls) {
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = `call-logs-${new Date().toISOString().slice(0,10)}.csv`;
+  a.href = url; a.download = `call-logs-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click(); URL.revokeObjectURL(url);
 }
 
 const TYPE_META = {
-  incoming: { label: "Incoming", color: "var(--success)", icon: PhoneIncoming },
-  outgoing: { label: "Outgoing", color: "var(--accent)", icon: PhoneOutgoing },
-  missed: { label: "Missed", color: "var(--danger)", icon: PhoneMissed },
-  blocked: { label: "Blocked", color: "var(--warning)", icon: PhoneOff },
-  rejected: { label: "Rejected", color: "var(--text-muted)", icon: PhoneOff },
+  incoming: { label: "Incoming", color: "var(--success)",    icon: PhoneIncoming },
+  outgoing: { label: "Outgoing", color: "var(--accent)",     icon: PhoneOutgoing },
+  missed:   { label: "Missed",   color: "var(--danger)",     icon: PhoneMissed   },
+  blocked:  { label: "Blocked",  color: "var(--warning)",    icon: PhoneOff      },
+  rejected: { label: "Rejected", color: "var(--text-muted)", icon: PhoneOff      },
 };
 
 const FILTERS = ["All", "Incoming", "Outgoing", "Missed", "Blocked", "Recorded"];
 
 export default function CallLogs() {
-  const [query, setQuery] = useState("");
+  const [query, setQuery]   = useState("");
   const [filter, setFilter] = useState("All");
   const [selected, setSelected] = useState(null);
   const { loading, error, data, reload } = useResource(() => dataSource.getCalls());
 
+  // Auto-refresh when WebSocket signals new calls synced
+  const { newCallEvent } = useDeviceSocket();
+  useEffect(() => {
+    if (newCallEvent?.event === "calls_synced") reload();
+  }, [newCallEvent]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (loading) return <PageContainer><Card><SkeletonRows rows={8} cols={6} /></Card></PageContainer>;
-  if (error) return <PageContainer><Card><ErrorState title="Sync interrupted" message={error.message} hint="Last successful sync: 12:41 PM" code={error.error_code} onRetry={reload} /></Card></PageContainer>;
+  if (error)   return <PageContainer><Card><ErrorState title="Sync interrupted" message={error.message} code={error.error_code} onRetry={reload} /></Card></PageContainer>;
 
   const CALL_LOGS = data.items || [];
   const filtered = CALL_LOGS.filter((c) => {
     const q = [c.phone, c.contact, c.employee].join(" ").toLowerCase().includes(query.toLowerCase());
     let f = true;
-    if (filter === "Recorded") f = !!c.recordingUrl;
-    else if (filter !== "All") f = TYPE_META[c.type]?.label === filter;
+    if (filter === "Recorded")    f = !!c.recordingUrl;
+    else if (filter !== "All")    f = TYPE_META[c.type]?.label === filter;
     return q && f;
   });
 
@@ -61,8 +69,8 @@ export default function CallLogs() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", gap: 12, flexWrap: "wrap", borderBottom: "1px solid var(--border)" }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Button variant="outline" icon={FileSpreadsheet} onClick={() => exportCallsCSV(filtered)}>Export CSV</Button>
-            <Button variant="ghost" icon={RotateCcw} onClick={reload}>Reset</Button>
-            <Button variant="ghost" icon={FilterX} onClick={() => { setFilter("All"); setQuery(""); }}>Clear</Button>
+            <Button variant="ghost"   icon={RotateCcw}       onClick={reload}>Refresh</Button>
+            <Button variant="ghost"   icon={FilterX}         onClick={() => { setFilter("All"); setQuery(""); }}>Clear</Button>
           </div>
           <SearchInput value={query} onChange={setQuery} placeholder="Search customer or number..." />
         </div>
@@ -113,25 +121,57 @@ export default function CallLogs() {
 }
 
 function CallIntelligenceDrawer({ call, onClose }) {
-  const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [playing, setPlaying]     = useState(false);
+  const [progress, setProgress]   = useState(0);
+  const [signedUrl, setSignedUrl] = useState(null);
+  const [loadingUrl, setLoadingUrl] = useState(false);
+  const [urlError, setUrlError]   = useState(null);
   const audioRef = useRef(null);
 
+  // Reset state when a different call is selected
   useEffect(() => {
     setPlaying(false);
     setProgress(0);
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+    setSignedUrl(null);
+    setUrlError(null);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
   }, [call?.id]);
 
-  function togglePlay() {
-    if (!call?.recordingUrl) return;
-    if (!audioRef.current) audioRef.current = new Audio(call.recordingUrl);
+  async function togglePlay() {
+    if (!call?.id || !call?.recordingUrl) return;
+
+    // Fetch a fresh signed URL on first play (or if previous expired)
+    if (!signedUrl) {
+      setLoadingUrl(true);
+      setUrlError(null);
+      try {
+        const res = await callsApi.getRecordingUrl(call.id);
+        setSignedUrl(res.signed_url);
+        audioRef.current = new Audio(res.signed_url);
+      } catch {
+        setUrlError("Could not load recording. Try again.");
+        setLoadingUrl(false);
+        return;
+      }
+      setLoadingUrl(false);
+    }
+
+    if (!audioRef.current) return;
+
     if (playing) {
       audioRef.current.pause();
     } else {
-      audioRef.current.play();
+      audioRef.current.play().catch(() => {
+        setUrlError("Playback failed. The signed URL may have expired.");
+        setSignedUrl(null);
+        audioRef.current = null;
+      });
       audioRef.current.ontimeupdate = () => {
-        const pct = audioRef.current.duration
+        const pct = audioRef.current?.duration
           ? (audioRef.current.currentTime / audioRef.current.duration) * 100
           : 0;
         setProgress(pct);
@@ -157,38 +197,57 @@ function CallIntelligenceDrawer({ call, onClose }) {
 
       {/* Detail grid */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 }}>
-        <Detail icon={User} label="Employee" value={call.employee} />
-        <Detail icon={Calendar} label="Date" value={formatDateTime(call.date)} />
-        <Detail label="Type" value={<span style={{ color: meta.color, fontWeight: 600 }}>{meta.label}</span>} />
+        <Detail icon={User}     label="Employee" value={call.employee} />
+        <Detail icon={Calendar} label="Date"     value={formatDateTime(call.date)} />
+        <Detail label="Type"     value={<span style={{ color: meta.color, fontWeight: 600 }}>{meta.label}</span>} />
         <Detail label="Duration" value={formatDuration(call.durationSeconds)} />
-        <Detail label="SIM" value={call.source} />
-        <Detail label="Device" value={call.device} />
+        <Detail label="SIM"      value={call.source} />
+        <Detail label="Device"   value={call.device} />
       </div>
 
       {/* Recording player */}
       <div style={{ background: "var(--bg-hover)", borderRadius: 12, padding: 14, marginBottom: 18, display: "flex", alignItems: "center", gap: 12 }}>
-        <button onClick={togglePlay} disabled={!call.recordingUrl} style={{ width: 40, height: 40, borderRadius: 20, border: "none", cursor: call.recordingUrl ? "pointer" : "not-allowed", background: call.recordingUrl ? "var(--grad-brand)" : "var(--border)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          {playing ? <Pause size={18} /> : <Play size={18} />}
+        <button
+          onClick={togglePlay}
+          disabled={!call.recordingUrl || loadingUrl}
+          style={{ width: 40, height: 40, borderRadius: 20, border: "none", cursor: call.recordingUrl && !loadingUrl ? "pointer" : "not-allowed", background: call.recordingUrl ? "var(--grad-brand)" : "var(--border)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+        >
+          {loadingUrl
+            ? <RefreshCw size={16} style={{ animation: "spin 1s linear infinite" }} />
+            : playing ? <Pause size={18} /> : <Play size={18} />}
         </button>
         <div style={{ flex: 1 }}>
-          <div style={{ height: 5, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}><div style={{ width: `${progress}%`, height: "100%", background: "var(--grad-brand)", transition: "width 0.4s" }} /></div>
-          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 6 }}>{call.recordingUrl ? (playing ? "Playing…" : "Recording available · click to play") : "No recording for this call"}</div>
+          <div style={{ height: 5, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
+            <div style={{ width: `${progress}%`, height: "100%", background: "var(--grad-brand)", transition: "width 0.4s" }} />
+          </div>
+          <div style={{ fontSize: 11.5, color: urlError ? "var(--danger)" : "var(--text-muted)", marginTop: 6 }}>
+            {urlError
+              ? urlError
+              : call.recordingUrl
+                ? (playing ? "Playing…" : "Recording available · click to play")
+                : "No recording for this call"}
+          </div>
         </div>
       </div>
 
-      {/* AI summary — requires backend transcript endpoint */}
+      {/* AI summary */}
       <div style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
           <Sparkles size={15} color="var(--accent-2)" />
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>AI Summary</span>
-          <Badge tone="violet">Coming soon</Badge>
+          <Badge tone="violet">Beta</Badge>
         </div>
-        <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.55, margin: 0 }}>AI transcription and call scoring will appear here once the recording is processed by the backend.</p>
+        <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.55, margin: 0 }}>
+          AI transcription and call scoring will appear here once the recording is processed.
+        </p>
       </div>
 
       {/* Next action */}
       <div style={{ background: "var(--grad-brand-soft)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}><Target size={15} color="var(--accent)" /><span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Next Best Action</span></div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <Target size={15} color="var(--accent)" />
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Next Best Action</span>
+        </div>
         <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
           <Button icon={Calendar}>Schedule follow-up</Button>
           <Button variant="outline" icon={MessageSquare}>WhatsApp</Button>
@@ -206,4 +265,5 @@ function Detail({ icon: Icon, label, value }) {
     </div>
   );
 }
+
 const th = { textAlign: "left", padding: "11px 16px", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: "0.03em" };

@@ -10,3 +10,4 @@ from .excluded_numbers import router as excluded_numbers_router
 from .billing import router as billing_router
 from .transcripts import router as transcripts_router
 from .superadmin import router as superadmin_router
+from .audit import router as audit_router

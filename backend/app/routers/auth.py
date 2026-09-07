@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from ..database import get_db
@@ -7,6 +7,7 @@ from ..schemas import LoginRequest, TokenResponse, RefreshRequest, MeResponse
 from ..schemas.auth import RegisterRequest, EmployeeRegisterRequest
 from ..auth import create_access_token, create_refresh_token, decode_token, verify_password, get_current_user
 from ..auth.password import hash_password
+from .. import audit
 from pydantic import BaseModel
 import re, random, string
 import pyotp, qrcode, qrcode.image.svg, io, base64
@@ -125,11 +126,13 @@ def otp_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest, db: Session = Depends(get_db)):
+def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == body.email, User.status == "active").first()
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     user.last_login_at = datetime.now(timezone.utc)
+    audit.log(db, organization_id=user.organization_id, action=audit.LOGIN,
+              actor=user, request=request)
     db.commit()
     token_data = {"sub": user.id, "org": user.organization_id, "role": user.role}
     return TokenResponse(
@@ -317,7 +320,11 @@ def verify_company_code(body: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/logout")
-def logout():
+def logout(request: Request, db: Session = Depends(get_db),
+           user: User = Depends(get_current_user)):
+    audit.log(db, organization_id=user.organization_id, action=audit.LOGOUT,
+              actor=user, request=request)
+    db.commit()
     return {"message": "Logged out successfully"}
 
 
@@ -370,6 +377,7 @@ def verify_2fa(body: TotpVerifyRequest, user: User = Depends(get_current_user), 
     if not totp.verify(body.code.strip(), valid_window=1):
         raise HTTPException(status_code=400, detail="Invalid code. Please try again.")
     user.totp_enabled = True
+    audit.log(db, organization_id=user.organization_id, action=audit.TWO_FA_ENABLE, actor=user)
     db.commit()
     return {"enabled": True}
 
@@ -384,5 +392,6 @@ def disable_2fa(body: TotpVerifyRequest, user: User = Depends(get_current_user),
         raise HTTPException(status_code=400, detail="Invalid code.")
     user.totp_enabled = False
     user.totp_secret = None
+    audit.log(db, organization_id=user.organization_id, action=audit.TWO_FA_DISABLE, actor=user)
     db.commit()
     return {"enabled": False}

@@ -19,6 +19,8 @@ export const organizationApi = {
   list: () => client.get("/organizations").then((r) => r.data),
   create: (payload) => client.post("/organizations", payload).then((r) => r.data),
   switch: (id) => client.post(`/organizations/${id}/switch`).then((r) => r.data),
+  update: (payload) => client.patch("/organizations/current", payload).then((r) => r.data),
+  regenerateCode: () => client.post("/organizations/current/regenerate-code").then((r) => r.data),
 };
 
 export const employeesApi = {
@@ -37,6 +39,8 @@ export const callsApi = {
   list: (params) => client.get("/calls", { params }).then((r) => r.data),
   get: (id) => client.get(`/calls/${id}`).then((r) => r.data),
   sync: (payload) => client.post("/calls/sync", payload).then((r) => r.data),
+  // Get a short-lived signed URL for recording playback (ADMIN only)
+  getRecordingUrl: (callId) => client.get(`/calls/${callId}/recording-url`).then((r) => r.data),
 };
 
 export const analyticsApi = {
@@ -73,6 +77,12 @@ export const subscriptionApi = {
 
 export const transcriptsApi = {
   list: (params) => client.get("/transcripts", { params }).then((r) => r.data),
+  transcribe: (callId) => client.post(`/transcripts/${callId}/transcribe`).then((r) => r.data),
+  retry: (callId) => client.post(`/transcripts/${callId}/transcribe/retry`).then((r) => r.data),
+};
+
+export const auditApi = {
+  list: (params) => client.get("/audit-logs", { params }).then((r) => r.data),
 };
 
 export const twoFaApi = {

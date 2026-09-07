@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, SmallInteger, Index, text, Float
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, SmallInteger, Index, text, Float, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -43,13 +43,28 @@ class Device(Base):
 class SIM(Base):
     __tablename__ = "sims"
 
-    id           = Column(String(50), primary_key=True, server_default=text("generate_prefixed_id('tzm','sim')"))
-    device_id    = Column(String(50), ForeignKey("devices.id", ondelete="CASCADE"),
-                          nullable=False, index=True)
-    slot         = Column(SmallInteger, default=1)
-    carrier      = Column(String(100))
-    phone_number = Column(String(30))
-    is_active    = Column(Boolean, default=True)
-    created_at   = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    id                 = Column(String(50), primary_key=True, server_default=text("generate_prefixed_id('tzm','sim')"))
+    device_id          = Column(String(50), ForeignKey("devices.id", ondelete="CASCADE"),
+                                nullable=False, index=True)
+    slot               = Column(SmallInteger, nullable=False)   # 1-indexed (SIM 1, SIM 2)
+    carrier            = Column(String(100))
+    phone_number       = Column(String(30))
+    mcc                = Column(String(10))
+    mnc                = Column(String(10))
+    country_iso        = Column(String(5))
+    subscription_id    = Column(String(50))                     # Android subscription ID where available
+    network_type       = Column(String(20))                     # 2G | 3G | 4G | 5G | UNKNOWN
+    is_active          = Column(Boolean, default=True)
+    first_detected_at  = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_detected_at   = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at         = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at         = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                                onupdate=lambda: datetime.now(timezone.utc))
 
     device = relationship("Device", back_populates="sims")
+
+    __table_args__ = (
+        UniqueConstraint("device_id", "slot", name="uq_sims_device_slot"),
+        Index("ix_sims_subscription_id", "subscription_id"),
+        Index("ix_sims_last_detected", "device_id", "last_detected_at"),
+    )

@@ -12,6 +12,12 @@ import { useRouter } from "expo-router";
 import { useAuth } from "../../src/AuthContext";
 import { checkPermissions, requestAllPermissions, readSimInfo, getDeviceInfo } from "../../src/nativeModules";
 import { api } from "../../src/api";
+import { getSyncHealthSummary } from "../../src/callStatusStore";
+import {
+  getNotificationPreferences,
+  setNotificationPreference,
+  getNotificationPermissionStatus,
+} from "../../src/notificationManager";
 
 const LAST_SYNC_KEY      = "callos_last_sync_ts";
 const RECORDING_PREF_KEY = "callos_recording_enabled";
@@ -31,19 +37,28 @@ export default function Profile() {
   const [simOpen, setSimOpen]             = useState(false);
   const [refreshing, setRefreshing]       = useState(false);
   const [recordingEnabled, setRecordingEnabled] = useState(false);
+  const [syncHealth, setSyncHealth]       = useState(null);
+  const [notifPerms, setNotifPerms]       = useState("undetermined");
+  const [notifPrefs, setNotifPrefs]       = useState({ calls: true, sync: true, recording: true, transcription: true });
 
   const loadAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
-    const [perms, simList, ts, recPref] = await Promise.all([
+    const [perms, simList, ts, recPref, health, np, nprefs] = await Promise.all([
       checkPermissions(),
       readSimInfo(),
       AsyncStorage.getItem(LAST_SYNC_KEY),
       AsyncStorage.getItem(RECORDING_PREF_KEY),
+      getSyncHealthSummary(),
+      getNotificationPermissionStatus(),
+      getNotificationPreferences(),
     ]);
     setPermissions(perms);
     if (simList.length) setSims(simList);
     setDeviceInfo(getDeviceInfo());
     setRecordingEnabled(recPref === "true");
+    setSyncHealth(health);
+    setNotifPerms(np);
+    setNotifPrefs(nprefs);
     if (ts) {
       const d = new Date(parseInt(ts, 10));
       setLastSync(d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" }));
@@ -308,6 +323,71 @@ export default function Profile() {
                 </Text>
               </View>
             )}
+          </View>
+
+          {/* ── Sync Health ── */}
+          {syncHealth && (
+            <View style={[card, shadowSoft]}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <View style={iconBox(palette.teal + "1a")}><Ionicons name="pulse-outline" size={18} color={palette.teal} /></View>
+                <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Sync Health</Text>
+              </View>
+              {[
+                { label: "Total tracked",       value: syncHealth.total,             color: theme.primary },
+                { label: "Synced",              value: syncHealth.synced,            color: palette.emerald },
+                { label: "Pending",             value: syncHealth.pending,           color: palette.amber },
+                { label: "Failed",              value: syncHealth.failed,            color: syncHealth.failed > 0 ? palette.red : theme.muted },
+                { label: "Recordings uploaded", value: syncHealth.recordingUploaded, color: palette.violet },
+                { label: "Recordings pending",  value: syncHealth.recordingPending,  color: palette.amber },
+                { label: "Transcribed",         value: syncHealth.transcribed,       color: palette.cyan },
+              ].map((r) => (
+                <View key={r.label} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 5, borderTopWidth: 1, borderTopColor: theme.border }}>
+                  <Text style={{ fontSize: 13, color: theme.muted }}>{r.label}</Text>
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: r.color }}>{r.value}</Text>
+                </View>
+              ))}
+              <Text style={{ fontSize: 11, color: theme.dim, marginTop: 8 }}>Last sync: {lastSync || "Never"}</Text>
+            </View>
+          )}
+
+          {/* ── Notification Preferences ── */}
+          <View style={[card, shadowSoft]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <View style={iconBox(palette.amber + "1f")}><Ionicons name="notifications-outline" size={18} color={palette.amber} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Notifications</Text>
+                <Text style={{ fontSize: 12, color: notifPerms === "granted" ? theme.success : theme.danger, marginTop: 1 }}>
+                  {notifPerms === "granted" ? "Allowed ✓" : notifPerms === "denied" ? "Blocked — open Settings" : "Not yet requested"}
+                </Text>
+              </View>
+              {notifPerms !== "granted" && (
+                <Pressable onPress={() => Linking.openSettings()} style={{ backgroundColor: palette.amber + "22", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
+                  <Text style={{ fontSize: 12, fontWeight: "700", color: palette.amber }}>Fix</Text>
+                </Pressable>
+              )}
+            </View>
+            {[
+              { key: "calls",         label: "Call detected / synced",   icon: "call-outline" },
+              { key: "sync",          label: "Sync progress",            icon: "sync-outline" },
+              { key: "recording",     label: "Recording upload",         icon: "mic-outline" },
+              { key: "transcription", label: "Transcription complete",   icon: "sparkles-outline" },
+            ].map((p) => (
+              <View key={p.key} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 9 }}>
+                  <Ionicons name={p.icon} size={15} color={theme.muted} />
+                  <Text style={{ fontSize: 13.5, color: theme.secondary }}>{p.label}</Text>
+                </View>
+                <Switch
+                  value={notifPrefs[p.key]}
+                  onValueChange={async (val) => {
+                    await setNotificationPreference(p.key, val);
+                    setNotifPrefs((prev) => ({ ...prev, [p.key]: val }));
+                  }}
+                  trackColor={{ false: theme.border, true: palette.teal + "88" }}
+                  thumbColor={notifPrefs[p.key] ? palette.teal : theme.muted}
+                />
+              </View>
+            ))}
           </View>
 
           {/* ── Sync Now ── */}

@@ -1,23 +1,46 @@
 import uuid
 import asyncio
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone, timedelta
+
 from ..database import get_db, SessionLocal
 from ..models import User, Device, Employee, SIM
 from ..schemas import DeviceRegister, DeviceHeartbeat, DeviceOut
+from ..schemas.device import SIMSyncItem, SIMOut, SIMChangeEvent
 from ..auth import get_current_user
 from ..ws_manager import manager
 
+logger = logging.getLogger("callnexa.devices")
+
 router = APIRouter(prefix="/devices", tags=["devices"])
 
-OFFLINE_AFTER_SECONDS = 90  # mark offline if no heartbeat for 90s
+OFFLINE_AFTER_SECONDS = 90
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# ── SIM serializer ────────────────────────────────────────────────────────────
+
+def _sim_dict(s: SIM) -> dict:
+    return {
+        "id":              s.id,
+        "slot":            s.slot,
+        "carrier":         s.carrier,
+        "phone_number":    s.phone_number,
+        "mcc":             s.mcc,
+        "mnc":             s.mnc,
+        "country_iso":     s.country_iso,
+        "subscription_id": s.subscription_id,
+        "network_type":    s.network_type,
+        "is_active":       s.is_active,
+        "last_detected_at": s.last_detected_at.isoformat() if s.last_detected_at else None,
+    }
+
+
+# ── Device payload for WebSocket ──────────────────────────────────────────────
 
 def _device_payload(d: Device, employee_name: str | None) -> dict:
-    """Serialize a Device ORM object to the dict we broadcast over WS."""
     sims = getattr(d, "sims", []) or []
     return {
         "id":                 d.id,
@@ -36,22 +59,135 @@ def _device_payload(d: Device, employee_name: str | None) -> dict:
         "longitude":          d.longitude,
         "location_accuracy":  d.location_accuracy,
         "wifi_ssid":          d.wifi_ssid,
-        "sims": [
-            {"id": s.id, "slot": s.slot, "carrier": s.carrier,
-             "phone_number": s.phone_number, "status": "active"}
-            for s in sims
-        ],
-        "created_at": d.created_at.isoformat() if d.created_at else None,
+        "sims":               [_sim_dict(s) for s in sims],
+        "created_at":         d.created_at.isoformat() if d.created_at else None,
     }
 
 
-# ── background offline watcher ────────────────────────────────────────────────
+# ── SIM upsert helper ─────────────────────────────────────────────────────────
+
+def _upsert_sims(
+    db: Session,
+    device: Device,
+    sim_items: list[SIMSyncItem],
+    org_id: str,
+) -> list[dict]:
+    """
+    Upsert SIM records for a device.
+    Returns a list of change events (empty if nothing changed).
+    Uniqueness: device_id + slot.
+    """
+    now = datetime.now(timezone.utc)
+    changes = []
+
+    for item in sim_items:
+        existing = db.query(SIM).filter(
+            SIM.device_id == device.id,
+            SIM.slot == item.slot,
+        ).first()
+
+        if existing:
+            # Detect changes
+            carrier_changed = (
+                item.carrier and existing.carrier and
+                item.carrier.strip() != existing.carrier.strip()
+            )
+            sub_changed = (
+                item.subscription_id and existing.subscription_id and
+                item.subscription_id != existing.subscription_id
+            )
+
+            if carrier_changed or sub_changed:
+                change_type = "REPLACED" if sub_changed else "CARRIER_CHANGED"
+                changes.append({
+                    "device_id":                device.id,
+                    "slot":                     item.slot,
+                    "change_type":              change_type,
+                    "previous_carrier":         existing.carrier,
+                    "new_carrier":              item.carrier,
+                    "previous_subscription_id": existing.subscription_id,
+                    "new_subscription_id":      item.subscription_id,
+                    "timestamp":                now.isoformat(),
+                })
+                logger.info(
+                    "SIM change detected device=%s slot=%d type=%s %s→%s",
+                    device.id, item.slot, change_type,
+                    existing.carrier, item.carrier,
+                )
+
+            # Update all fields
+            if item.carrier        is not None: existing.carrier         = item.carrier
+            if item.phone_number   is not None: existing.phone_number    = item.phone_number
+            if item.mcc            is not None: existing.mcc             = item.mcc
+            if item.mnc            is not None: existing.mnc             = item.mnc
+            if item.country_iso    is not None: existing.country_iso     = item.country_iso
+            if item.subscription_id is not None: existing.subscription_id = item.subscription_id
+            if item.network_type   is not None: existing.network_type    = item.network_type
+            existing.is_active       = item.is_active
+            existing.last_detected_at = now
+            existing.updated_at      = now
+
+        else:
+            # New SIM slot
+            sim = SIM(
+                id=str(uuid.uuid4()),
+                device_id=device.id,
+                slot=item.slot,
+                carrier=item.carrier,
+                phone_number=item.phone_number,
+                mcc=item.mcc,
+                mnc=item.mnc,
+                country_iso=item.country_iso,
+                subscription_id=item.subscription_id,
+                network_type=item.network_type,
+                is_active=item.is_active,
+                first_detected_at=now,
+                last_detected_at=now,
+            )
+            db.add(sim)
+            changes.append({
+                "device_id":    device.id,
+                "slot":         item.slot,
+                "change_type":  "INSERTED",
+                "new_carrier":  item.carrier,
+                "new_subscription_id": item.subscription_id,
+                "timestamp":    now.isoformat(),
+            })
+
+    # Mark SIMs not in the current inventory as inactive
+    current_slots = {item.slot for item in sim_items}
+    for existing_sim in (getattr(device, "sims", []) or []):
+        if existing_sim.slot not in current_slots and existing_sim.is_active:
+            existing_sim.is_active = False
+            existing_sim.updated_at = now
+            changes.append({
+                "device_id":   device.id,
+                "slot":        existing_sim.slot,
+                "change_type": "REMOVED",
+                "previous_carrier": existing_sim.carrier,
+                "timestamp":   now.isoformat(),
+            })
+
+    return changes
+
+
+def _build_sim_items_from_legacy(body: DeviceRegister) -> list[SIMSyncItem]:
+    """Convert legacy sim_phone_number/sim_carrier fields to SIMSyncItem list."""
+    if body.sims:
+        return body.sims
+    if body.sim_phone_number or body.sim_carrier:
+        return [SIMSyncItem(
+            slot=1,
+            carrier=body.sim_carrier,
+            phone_number=body.sim_phone_number,
+            is_active=True,
+        )]
+    return []
+
+
+# ── Background offline watcher ────────────────────────────────────────────────
 
 async def _offline_watcher():
-    """
-    Runs forever. Every 30s checks for devices whose last_seen_at is older
-    than OFFLINE_AFTER_SECONDS and marks them is_online=False, then broadcasts.
-    """
     while True:
         await asyncio.sleep(30)
         try:
@@ -75,17 +211,17 @@ async def _offline_watcher():
                     )
             db.close()
         except Exception:
-            pass  # never crash the watcher
+            pass
 
 
 def start_offline_watcher():
     asyncio.create_task(_offline_watcher())
 
 
-# ── REST endpoints ────────────────────────────────────────────────────────────
+# ── Register device ───────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=DeviceOut, status_code=201)
-def register_device(
+async def register_device(
     body: DeviceRegister,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -117,22 +253,35 @@ def register_device(
     device.app_version     = body.app_version
     device.last_seen_at    = datetime.now(timezone.utc)
     device.is_online       = True
-    db.flush()
+    db.flush()  # ensure device.id is set before SIM upsert
 
-    if body.sim_phone_number:
-        sim = db.query(SIM).filter(SIM.device_id == device.id, SIM.slot == 1).first()
-        if not sim:
-            sim = SIM(id=str(uuid.uuid4()), device_id=device.id, slot=1)
-            db.add(sim)
-        sim.phone_number = body.sim_phone_number
-        sim.carrier      = body.sim_carrier or ""
+    # Upsert full SIM inventory
+    sim_items = _build_sim_items_from_legacy(body)
+    changes = []
+    if sim_items:
+        changes = _upsert_sims(db, device, sim_items, user.organization_id)
 
     db.commit()
     db.refresh(device)
+
+    # Broadcast device update + any SIM changes
+    emp_name = emp.name
+    await manager.broadcast(
+        user.organization_id,
+        {"event": "device_update", "device": _device_payload(device, emp_name)},
+    )
+    for change in changes:
+        await manager.broadcast(
+            user.organization_id,
+            {"event": "sim_changed", **change},
+        )
+
     out = DeviceOut.model_validate(device)
-    out.employee_name = emp.name
+    out.employee_name = emp_name
     return out
 
+
+# ── Heartbeat ─────────────────────────────────────────────────────────────────
 
 @router.post("/{device_id}/heartbeat")
 async def heartbeat(
@@ -157,23 +306,77 @@ async def heartbeat(
     if body.app_version:
         device.app_version = body.app_version
     if body.latitude is not None:
-        device.latitude = body.latitude
-        device.longitude = body.longitude
+        device.latitude          = body.latitude
+        device.longitude         = body.longitude
         device.location_accuracy = body.location_accuracy
     if body.wifi_ssid is not None:
         device.wifi_ssid = body.wifi_ssid
+
+    # Update SIM inventory if provided
+    changes = []
+    if body.sims:
+        changes = _upsert_sims(db, device, body.sims, user.organization_id)
+
     db.commit()
     db.refresh(device)
 
     emp_name = device.employee.name if device.employee else None
-    # Broadcast to all web clients watching this org
     await manager.broadcast(
         user.organization_id,
         {"event": "device_update", "device": _device_payload(device, emp_name)},
     )
+    for change in changes:
+        await manager.broadcast(
+            user.organization_id,
+            {"event": "sim_changed", **change},
+        )
 
     return {"status": "ok", "last_seen": device.last_seen_at}
 
+
+# ── Dedicated SIM sync endpoint ───────────────────────────────────────────────
+
+@router.post("/{device_id}/sims/sync")
+async def sync_sims(
+    device_id: str,
+    sims: list[SIMSyncItem],
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Dedicated endpoint for SIM inventory synchronization.
+    Called when SIM change is detected on the mobile app.
+    """
+    device = db.query(Device).filter(
+        Device.id == device_id,
+        Device.organization_id == user.organization_id,
+    ).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    changes = _upsert_sims(db, device, sims, user.organization_id)
+    db.commit()
+    db.refresh(device)
+
+    emp_name = device.employee.name if device.employee else None
+    await manager.broadcast(
+        user.organization_id,
+        {"event": "device_update", "device": _device_payload(device, emp_name)},
+    )
+    for change in changes:
+        await manager.broadcast(
+            user.organization_id,
+            {"event": "sim_changed", **change},
+        )
+
+    return {
+        "status": "ok",
+        "changes": len(changes),
+        "sims": [_sim_dict(s) for s in (getattr(device, "sims", []) or [])],
+    }
+
+
+# ── List devices ──────────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[DeviceOut])
 def list_devices(
@@ -197,7 +400,7 @@ def list_devices(
     return result
 
 
-# ── WebSocket endpoint ────────────────────────────────────────────────────────
+# ── WebSocket ─────────────────────────────────────────────────────────────────
 
 @router.websocket("/ws/{org_id}")
 async def device_ws(
@@ -206,18 +409,13 @@ async def device_ws(
     token: str = Query(...),
     db: Session = Depends(get_db),
 ):
-    """
-    Web dashboard connects here to receive real-time device updates.
-    Auth: ?token=<access_token> query param (browsers can't set WS headers).
-    """
     from ..auth.jwt import decode_token
+    import json
 
-    # Validate token
     payload = decode_token(token)
-    if not payload:
+    if not payload or payload.get("type") != "access":
         await websocket.close(code=4001)
         return
-    # JWT uses "org" key (not "organization_id")
     if payload.get("org") != org_id:
         await websocket.close(code=4003)
         return
@@ -225,22 +423,12 @@ async def device_ws(
     await websocket.accept()
     manager.connect(org_id, websocket)
 
-    # Send current snapshot immediately on connect
-    devices = (
-        db.query(Device)
-        .filter(Device.organization_id == org_id)
-        .all()
-    )
-    snapshot = [
-        _device_payload(d, d.employee.name if d.employee else None)
-        for d in devices
-    ]
-    import json
+    devices = db.query(Device).filter(Device.organization_id == org_id).all()
+    snapshot = [_device_payload(d, d.employee.name if d.employee else None) for d in devices]
     await websocket.send_text(json.dumps({"event": "snapshot", "devices": snapshot}))
 
     try:
         while True:
-            # Keep connection alive — client sends ping every 25s
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
@@ -248,9 +436,7 @@ async def device_ws(
         manager.disconnect(org_id, websocket)
 
 
-# ── SSE endpoint (fallback for proxies that block WS) ─────────────────────────
-
-from fastapi.responses import StreamingResponse
+# ── SSE fallback ──────────────────────────────────────────────────────────────
 
 @router.get("/sse/{org_id}")
 async def device_sse(
@@ -258,10 +444,6 @@ async def device_sse(
     token: str = Query(...),
     db: Session = Depends(get_db),
 ):
-    """
-    SSE fallback — works through all reverse proxies.
-    Streams device_update events over plain HTTP.
-    """
     import json
     from ..auth.jwt import decode_token
 
@@ -270,20 +452,17 @@ async def device_sse(
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
-    # Use a simple asyncio.Queue per SSE connection
     queue: asyncio.Queue = asyncio.Queue()
 
-    # Register as a pseudo-WS using a queue-backed adapter
     class QueueAdapter:
         async def send_text(self, text: str):
             await queue.put(text)
         async def close(self, code=None):
-            await queue.put(None)  # sentinel
+            await queue.put(None)
 
     adapter = QueueAdapter()
     manager.connect(org_id, adapter)
 
-    # Send snapshot immediately
     devices_snap = db.query(Device).filter(Device.organization_id == org_id).all()
     snapshot_data = json.dumps({"event": "snapshot", "devices": [
         _device_payload(d, d.employee.name if d.employee else None)
@@ -291,7 +470,6 @@ async def device_sse(
     ]})
 
     async def event_stream():
-        # Send snapshot first
         yield f"data: {snapshot_data}\n\n"
         try:
             while True:
@@ -301,7 +479,7 @@ async def device_sse(
                         break
                     yield f"data: {msg}\n\n"
                 except asyncio.TimeoutError:
-                    yield ": ping\n\n"  # keep-alive comment
+                    yield ": ping\n\n"
         finally:
             manager.disconnect(org_id, adapter)
 
@@ -310,7 +488,7 @@ async def device_sse(
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # disable Nginx buffering
+            "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
         },
     )
