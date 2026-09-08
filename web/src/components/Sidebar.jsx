@@ -2,7 +2,7 @@ import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, BarChart3, Phone, Users, Target,
-  TrendingUp, FileBarChart, Settings, Smartphone, LogOut, ShieldCheck,
+  TrendingUp, FileBarChart, Settings, Smartphone, LogOut,
 } from "lucide-react";
 import { Logo } from "./ui.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -93,11 +93,8 @@ export default function Sidebar({ open, onClose }) {
           }}>CallNexa</span>
         </div>
 
-        {/* Nav */}
+        {/* Nav — manager pages only, no super admin link here */}
         <nav style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
-          {user?.role === "SUPER_ADMIN" && (
-            <NavItem to="/superadmin" icon={ShieldCheck} label="Super Admin" expanded={expanded} />
-          )}
           {NAV.map((n) => <NavItem key={n.to} {...n} expanded={expanded} />)}
         </nav>
 

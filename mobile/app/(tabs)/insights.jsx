@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { View, Text, ScrollView, useWindowDimensions, RefreshControl, Modal, Pressable } from "react-native";
+import { View, Text, ScrollView, useWindowDimensions, RefreshControl, Modal, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { palette, useTheme } from "../../src/theme";
 import { AppHeader, Card } from "../../src/components";
 import { LineChart, StackedBars, Donut, ProgressBar } from "../../src/charts";
 import { api } from "../../src/api";
+import { useAuth } from "../../src/AuthContext";
 
 const RANGE_MAP = { "Today": "today", "7 Days": "7d", "30 Days": "30d" };
 const RANGES = ["Today", "7 Days", "30 Days"];
@@ -17,10 +18,12 @@ export default function Insights() {
   const [dropOpen, setDropOpen] = useState(false);
   const { width } = useWindowDimensions();
   const { theme } = useTheme();
+  const { syncCalls } = useAuth();
   const w = width - 64;
   const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback((r = range, isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
@@ -61,6 +64,16 @@ export default function Insights() {
   }, [range]);
 
   useEffect(() => { load(range); }, [range]);
+
+  async function handleSyncAndReload() {
+    setSyncing(true);
+    try {
+      await syncCalls();
+    } catch { /* silent */ } finally {
+      setSyncing(false);
+      load(range, true);
+    }
+  }
 
   const RangeDrop = () => (
     <>
@@ -124,8 +137,17 @@ export default function Insights() {
           <Text style={{ fontSize: 40, marginBottom: 16 }}>📊</Text>
           <Text style={{ fontSize: 16, fontWeight: "700", color: theme.primary, textAlign: "center" }}>No data for {range}</Text>
           <Text style={{ fontSize: 13, color: theme.muted, textAlign: "center", marginTop: 8 }}>
-            Sync your call logs from the Profile tab to see insights here.
+            Sync your call logs to see insights here.
           </Text>
+          <Pressable onPress={handleSyncAndReload} disabled={syncing}
+            style={{ marginTop: 20, backgroundColor: palette.teal, borderRadius: 13, paddingHorizontal: 28, paddingVertical: 13, flexDirection: "row", alignItems: "center", gap: 8 }}>
+            {syncing
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Ionicons name="sync-outline" size={18} color="#fff" />}
+            <Text style={{ fontSize: 14, fontWeight: "700", color: "#fff" }}>
+              {syncing ? "Syncing..." : "Sync & Reload"}
+            </Text>
+          </Pressable>
         </ScrollView>
       </SafeAreaView>
     );

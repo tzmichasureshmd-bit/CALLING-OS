@@ -26,11 +26,18 @@ export async function sendHeartbeat(deviceId) {
   try {
     const perms = await checkPermissions().catch(() => ({}));
 
+    // Read selected SIM slot from user's SIM Configuration choice
+    let selectedSlot = null;
+    try {
+      const saved = await AsyncStorage.getItem("callos_selected_sim_slot");
+      if (saved !== null && saved !== "") selectedSlot = parseInt(saved, 10); // 0-indexed Android slot
+    } catch {}
+
     let simItems = [];
     try {
       const rawSims = await readSimInfo();
       simItems = rawSims.map((s) => ({
-        slot:            s.slot + 1,
+        slot:            s.slot + 1,           // backend is 1-indexed
         carrier:         s.carrierName    || null,
         phone_number:    s.phoneNumber    || null,
         mcc:             s.mcc            || null,
@@ -39,6 +46,8 @@ export async function sendHeartbeat(deviceId) {
         subscription_id: s.subscriptionId || null,
         network_type:    s.networkType    || null,
         is_active:       s.isActive !== false,
+        // Mark the user-selected SIM so backend knows which number to use
+        is_selected:     selectedSlot !== null ? s.slot === selectedSlot : s.slot === 0,
       }));
     } catch {}
 
@@ -57,7 +66,7 @@ export async function sendHeartbeat(deviceId) {
       permissions_status:     perms,
       sims:                   simItems,
       network_type:           networkType,
-      background_sync_status: "limited",
+      background_sync_status: "active",
       app_version:            "1.0.0",
     });
   } catch {}
@@ -128,18 +137,27 @@ async function ensureDevice(user) {
 }
 
 // ── First-time full sync ──────────────────────────────────────────────────────
-async function doFirstFullSync(deviceId) {
+// Always reads 90 days and syncs. FIRST_SYNC_KEY only set on confirmed success.
+// Retries on every login/app-start until backend confirms at least 1 accepted.
+export async function doFirstFullSync(deviceId) {
   try {
-    const done = await AsyncStorage.getItem(FIRST_SYNC_KEY);
-    if (done) return;
     const allCalls = await getRealCallLog(90);
-    if (!allCalls.length) return;
+    if (!allCalls.length) {
+      console.log("[CallNexa] FIRST_SYNC: 0 calls in last 90 days");
+      return { accepted: 0, total: 0 };
+    }
+    console.log(`[CallNexa] FIRST_SYNC: syncing ${allCalls.length} calls`);
     const result = await api.syncCalls(deviceId, allCalls);
+    console.log(`[CallNexa] FIRST_SYNC_RESULT: accepted=${result.accepted} dup=${result.duplicates}`);
     if (result.accepted > 0 || result.duplicates > 0) {
       await markCallsSynced(allCalls);
       await AsyncStorage.setItem(FIRST_SYNC_KEY, "1");
     }
-  } catch { /* silent — will retry on next open */ }
+    return result;
+  } catch (e) {
+    console.warn("[CallNexa] FIRST_SYNC_ERROR:", e?.message);
+    return { accepted: 0, total: 0, error: e?.message };
+  }
 }
 
 // ── App-start reconciliation ──────────────────────────────────────────────────
@@ -216,14 +234,18 @@ export function AuthProvider({ children }) {
       requestAllPermissions().catch(() => {});
     }
 
-    ensureDevice(userData).then(async (dId) => {
+    // Register device, then immediately sync 90 days of calls.
+    // Awaited so calls are synced BEFORE the user reaches the dashboard.
+    try {
+      const dId = await ensureDevice(userData);
       if (dId) {
         setDeviceId(dId);
         await sendHeartbeat(dId).catch(() => {});
-        doFirstFullSync(dId);
         syncSimInventory(dId, true).catch(() => {});
+        // Sync 90 days — this is the critical path. User sees real calls immediately.
+        await doFirstFullSync(dId);
       }
-    }).catch(() => {});
+    } catch { /* device/sync failure must not block login */ }
 
     return userData;
   }, []);

@@ -85,6 +85,7 @@ export function useDeviceSocket(onCallsUpdated) {
   const pollRef     = useRef(null);
   const retryCount  = useRef(0);
   const useSse      = useRef(false);   // true once WS has failed once
+  const mountedRef  = useRef(true);
 
   // ── HTTP fallback ──────────────────────────────────────────────────────────
   const refetch = useCallback(async () => {
@@ -177,12 +178,13 @@ export function useDeviceSocket(onCallsUpdated) {
 
     ws.onerror = () => {
       clearTimeout(wsTimeout);
-      setConnected(false);
+      if (mountedRef.current) setConnected(false);
     };
 
     ws.onclose = (e) => {
       clearTimeout(wsTimeout);
       clearInterval(pingRef.current);
+      if (!mountedRef.current) return;   // unmounted — stop all retries
       setConnected(false);
 
       // 403 from proxy or auth failure → switch permanently to SSE
@@ -196,7 +198,7 @@ export function useDeviceSocket(onCallsUpdated) {
       const delay = Math.min(2000 * 2 ** retryCount.current, 30_000);
       retryCount.current += 1;
       retryRef.current = setTimeout(() => {
-        useSse.current ? connectSSE() : connectWS();
+        if (mountedRef.current) useSse.current ? connectSSE() : connectWS();
       }, delay);
       startPollFallback();
     };
@@ -204,15 +206,17 @@ export function useDeviceSocket(onCallsUpdated) {
 
   // ── Mount ──────────────────────────────────────────────────────────────────
   useEffect(() => {
+    mountedRef.current = true;
     refetch();          // immediate HTTP load while connection handshakes
     connectWS();        // try WS first, auto-falls to SSE on failure
 
     return () => {
-      wsRef.current?.close();
-      sseRef.current?.close();
+      mountedRef.current = false;
       clearTimeout(retryRef.current);
       clearInterval(pingRef.current);
       clearInterval(pollRef.current);
+      wsRef.current?.close();
+      sseRef.current?.close();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

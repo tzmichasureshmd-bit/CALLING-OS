@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback } from "react";
 import {
   View, Text, ScrollView, Pressable, ActivityIndicator,
   Alert, Modal, TextInput, Image, RefreshControl, Linking, Switch,
@@ -31,8 +31,9 @@ export default function Profile() {
   const [lastSync, setLastSync]           = useState(null);
   const [permissions, setPermissions]     = useState({});
   const [sims, setSims]                   = useState([]);
+  const [selectedSim, setSelectedSim]     = useState(null); // null = all SIMs
   const [deviceInfo, setDeviceInfo]       = useState({});
-  const [stats, setStats]                 = useState({ totalCalls: "—", connectedPct: "—", talkTime: "—" });
+  const [stats, setStats]                 = useState({ totalCalls: "â€”", connectedPct: "â€”", talkTime: "â€”" });
   const [editOpen, setEditOpen]           = useState(false);
   const [simOpen, setSimOpen]             = useState(false);
   const [refreshing, setRefreshing]       = useState(false);
@@ -53,7 +54,11 @@ export default function Profile() {
       getNotificationPreferences(),
     ]);
     setPermissions(perms);
-    if (simList.length) setSims(simList);
+    if (simList.length) {
+      setSims(simList);
+      const saved = await AsyncStorage.getItem("callos_selected_sim_slot");
+      setSelectedSim(saved !== null && saved !== "" ? parseInt(saved, 10) : null);
+    }
     setDeviceInfo(getDeviceInfo());
     setRecordingEnabled(recPref === "true");
     setSyncHealth(health);
@@ -91,12 +96,26 @@ export default function Profile() {
     if (!deviceId) { Alert.alert("Not Ready", "Device not registered. Sign out and back in."); return; }
     setSyncing(true); setSyncResult(null);
     try {
-      const result = await syncCalls();
+      const { getRealCallLog, markCallsSynced } = require("../../src/callLogService");
+      const { api: _api } = require("../../src/api");
+      let allCalls = await getRealCallLog(90);
+      if (selectedSim !== null) {
+        allCalls = allCalls.filter((c) => (c.sim_slot !== undefined ? c.sim_slot - 1 : null) === selectedSim);
+      }
+      if (!allCalls.length) {
+        setSyncResult({ accepted: 0, duplicates: 0, failed: 0 });
+        Alert.alert("No Calls Found", selectedSim !== null
+          ? `No calls for SIM ${selectedSim + 1} in last 90 days.`
+          : "No calls found in last 90 days.");
+        return;
+      }
+      const result = await _api.syncCalls(deviceId, allCalls);
+      if (result.accepted > 0 || result.duplicates > 0) await markCallsSynced(allCalls);
       setSyncResult(result);
       const now = Date.now();
       await AsyncStorage.setItem(LAST_SYNC_KEY, String(now));
       setLastSync(new Date(now).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" }));
-      Alert.alert("Sync Complete", `✓ ${result.accepted} new · ${result.duplicates} duplicates`);
+      Alert.alert("Sync Complete", `${result.accepted} new  ${result.duplicates} duplicates  ${allCalls.length} total read`);
     } catch (e) {
       Alert.alert("Sync Failed", e.message);
     } finally { setSyncing(false); }
@@ -108,7 +127,7 @@ export default function Profile() {
     if (!result[key]) {
       Alert.alert(
         "Permission Required",
-        "Please enable this permission in your device Settings → Apps → CallNexa → Permissions.",
+        "Please enable this permission in your device Settings â†’ Apps â†’ CallNexa â†’ Permissions.",
         [
           { text: "Open Settings", onPress: () => Linking.openSettings() },
           { text: "Cancel", style: "cancel" },
@@ -125,7 +144,7 @@ export default function Profile() {
       if (!result.recording) {
         Alert.alert(
           "Microphone Permission Required",
-          "Go to Settings → Apps → CallNexa → Permissions → Microphone and enable it.",
+          "Go to Settings â†’ Apps â†’ CallNexa â†’ Permissions â†’ Microphone and enable it.",
           [{ text: "Open Settings", onPress: () => Linking.openSettings() }, { text: "Cancel", style: "cancel" }]
         );
         return;
@@ -157,8 +176,6 @@ export default function Profile() {
   const card    = { backgroundColor: theme.card, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: theme.border };
   const iconBox = (bg) => ({ width: 38, height: 38, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: bg });
 
-  // Storage: Android 13+ uses READ_MEDIA_AUDIO, older uses READ_EXTERNAL_STORAGE
-  // Both are requested automatically based on Android version
   const PERM_LIST = [
     { key: "callLog",    icon: "call-outline",           label: "Call Log",    desc: "Read call history",          required: true },
     { key: "phoneState", icon: "phone-portrait-outline", label: "Phone State", desc: "Detect active calls & SIM",   required: true },
@@ -177,7 +194,7 @@ export default function Profile() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadAll(true)} tintColor={palette.teal} />}
       >
-        {/* ── Profile header ── */}
+        {/* â”€â”€ Profile header â”€â”€ */}
         <View style={{ padding: 16 }}>
           <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ borderRadius: 22, padding: 20 }}>
             <Pressable onPress={() => setEditOpen(true)} style={{ position: "absolute", top: 16, right: 16, width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" }}>
@@ -215,30 +232,32 @@ export default function Profile() {
 
         <View style={{ paddingHorizontal: 16, gap: 12 }}>
 
-          {/* ── SIM Configuration ── */}
+          {/* â”€â”€ SIM Configuration â”€â”€ */}
           <Pressable onPress={() => setSimOpen(true)} style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16 }]}>
             <View style={iconBox(palette.teal + "1a")}><Ionicons name="phone-portrait-outline" size={18} color={theme.accent} /></View>
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>SIM Configuration</Text>
               <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>
                 {sims.length
-                  ? sims.map((s) => `SIM ${s.slot + 1}${s.carrierName ? ` · ${s.carrierName}` : ""}${s.phoneNumber ? ` (${s.phoneNumber})` : ""}`).join("   ")
+                  ? selectedSim !== null
+                    ? `Tracking SIM ${selectedSim + 1} only  ${sims.length} SIM${sims.length > 1 ? "s" : ""} detected`
+                    : `All SIMs  ${sims.length} SIM${sims.length > 1 ? "s" : ""} detected`
                   : "Tap to view SIM details"}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={theme.dim} />
           </Pressable>
 
-          {/* ── Device Info ── */}
+          {/* â”€â”€ Device Info â”€â”€ */}
           <View style={[card, shadowSoft]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <View style={iconBox(palette.violet + "1f")}><Ionicons name="hardware-chip-outline" size={18} color={palette.violet} /></View>
               <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Device</Text>
             </View>
             {[
-              { label: "Model",        value: deviceInfo.model || "—" },
-              { label: "Manufacturer", value: deviceInfo.manufacturer || "—" },
-              { label: "Android",      value: deviceInfo.androidVersion || "—" },
+              { label: "Model",        value: deviceInfo.model || "â€”" },
+              { label: "Manufacturer", value: deviceInfo.manufacturer || "â€”" },
+              { label: "Android",      value: deviceInfo.androidVersion || "â€”" },
             ].map((r) => (
               <View key={r.label} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 }}>
                 <Text style={{ fontSize: 13, color: theme.muted }}>{r.label}</Text>
@@ -247,7 +266,7 @@ export default function Profile() {
             ))}
           </View>
 
-          {/* ── Permission Health ── */}
+          {/* â”€â”€ Permission Health â”€â”€ */}
           <View style={[card, shadowSoft]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <View style={iconBox(requiredGranted ? palette.emerald + "1f" : palette.red + "1f")}>
@@ -256,7 +275,7 @@ export default function Profile() {
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Permission Health</Text>
                 <Text style={{ fontSize: 12.5, color: requiredGranted ? theme.success : theme.danger, marginTop: 1 }}>
-                  {requiredGranted ? "Required permissions granted ✓" : "Required permissions missing — tap to fix"}
+                  {requiredGranted ? "Required permissions granted âœ“" : "Required permissions missing â€” tap to fix"}
                 </Text>
               </View>
             </View>
@@ -297,7 +316,23 @@ export default function Profile() {
             )}
           </View>
 
-          {/* ── Call Recording Toggle ── */}
+          {/* â”€â”€ Battery Optimization Warning â”€â”€ */}
+          <Pressable
+            onPress={() => Linking.openSettings()}
+            style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16, borderColor: palette.amber + "55" }]}>
+            <View style={iconBox(palette.amber + "1f")}>
+              <Ionicons name="battery-charging-outline" size={18} color={palette.amber} />
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Battery Optimization</Text>
+              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>
+                Disable battery optimization for reliable background sync. Tap â†’ Apps â†’ CallNexa â†’ Battery â†’ Unrestricted
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={palette.amber} />
+          </Pressable>
+
+          {/* â”€â”€ Call Recording Toggle â”€â”€ */}
           <View style={[card, shadowSoft]}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -305,7 +340,7 @@ export default function Profile() {
                 <View>
                   <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Call Recording</Text>
                   <Text style={{ fontSize: 12, color: theme.muted, marginTop: 1 }}>
-                    {recordingEnabled ? "Recording enabled · saves to dashboard" : "Off · calls not recorded"}
+                    {recordingEnabled ? "Recording enabled Â· saves to dashboard" : "Off Â· calls not recorded"}
                   </Text>
                 </View>
               </View>
@@ -319,13 +354,13 @@ export default function Profile() {
             {recordingEnabled && (
               <View style={{ marginTop: 10, backgroundColor: palette.violet + "12", borderRadius: 10, padding: 10 }}>
                 <Text style={{ fontSize: 12, color: palette.violet, lineHeight: 18 }}>
-                  ✓ Recorded calls will be saved and available for AI transcription on the web dashboard.{"\n"}Only calls with recordings will be transcribed — saves storage & DB space.
+                  âœ“ Recorded calls will be saved and available for AI transcription on the web dashboard.{"\n"}Only calls with recordings will be transcribed â€” saves storage & DB space.
                 </Text>
               </View>
             )}
           </View>
 
-          {/* ── Sync Health ── */}
+          {/* â”€â”€ Sync Health â”€â”€ */}
           {syncHealth && (
             <View style={[card, shadowSoft]}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -350,14 +385,14 @@ export default function Profile() {
             </View>
           )}
 
-          {/* ── Notification Preferences ── */}
+          {/* â”€â”€ Notification Preferences â”€â”€ */}
           <View style={[card, shadowSoft]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <View style={iconBox(palette.amber + "1f")}><Ionicons name="notifications-outline" size={18} color={palette.amber} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Notifications</Text>
                 <Text style={{ fontSize: 12, color: notifPerms === "granted" ? theme.success : theme.danger, marginTop: 1 }}>
-                  {notifPerms === "granted" ? "Allowed ✓" : notifPerms === "denied" ? "Blocked — open Settings" : "Not yet requested"}
+                  {notifPerms === "granted" ? "Allowed âœ“" : notifPerms === "denied" ? "Blocked â€” open Settings" : "Not yet requested"}
                 </Text>
               </View>
               {notifPerms !== "granted" && (
@@ -390,7 +425,7 @@ export default function Profile() {
             ))}
           </View>
 
-          {/* ── Sync Now ── */}
+          {/* â”€â”€ Sync Now â”€â”€ */}
           <Pressable onPress={handleSync} disabled={syncing}
             style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16, borderColor: syncing ? theme.border : palette.teal + "55" }]}>
             <View style={iconBox(palette.teal + "1a")}>
@@ -402,16 +437,16 @@ export default function Profile() {
                 {syncing
                   ? "Syncing all call logs..."
                   : syncResult
-                    ? `✓ ${syncResult.accepted} new · ${syncResult.duplicates} duplicates`
+                    ? `âœ“ ${syncResult.accepted} new Â· ${syncResult.duplicates} duplicates`
                     : lastSync
                       ? `Last synced: ${lastSync}`
-                      : "Auto-syncs every 5s · tap to sync now"}
+                      : "Auto-syncs every 5s Â· tap to sync now"}
               </Text>
             </View>
             {!syncing && <Ionicons name="chevron-forward" size={20} color={palette.teal} />}
           </Pressable>
 
-          {/* ── Theme toggle ── */}
+          {/* â”€â”€ Theme toggle â”€â”€ */}
           <View style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16 }]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
               <View style={iconBox(palette.violet + "1f")}><Ionicons name={dark ? "moon" : "sunny"} size={18} color={palette.violet} /></View>
@@ -425,16 +460,16 @@ export default function Profile() {
             </Pressable>
           </View>
 
-          {/* ── App info ── */}
+          {/* â”€â”€ App info â”€â”€ */}
           <View style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16 }]}>
             <Image source={require("../../assets/logo.png")} style={{ width: 38, height: 38, borderRadius: 10 }} resizeMode="contain" />
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>CallNexa</Text>
-              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>v1.0.0 · {e.companyName}</Text>
+              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>v1.0.0 Â· {e.companyName}</Text>
             </View>
           </View>
 
-          {/* ── Sign out ── */}
+          {/* â”€â”€ Sign out â”€â”€ */}
           <Pressable onPress={handleSignOut} style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 15, borderColor: theme.dangerSoft }]}>
             <Ionicons name="log-out-outline" size={18} color={theme.danger} />
             <Text style={{ fontSize: 14.5, fontWeight: "700", color: theme.danger }}>Sign Out</Text>
@@ -443,12 +478,12 @@ export default function Profile() {
       </ScrollView>
 
       <EditProfileModal visible={editOpen} onClose={() => setEditOpen(false)} onSaved={handleProfileSaved} user={user} theme={theme} />
-      <SimConfigModal visible={simOpen} onClose={() => setSimOpen(false)} sims={sims} theme={theme} />
+      <SimConfigModal visible={simOpen} onClose={() => setSimOpen(false)} sims={sims} selectedSim={selectedSim} onSelectSim={async (slot) => { setSelectedSim(slot); await AsyncStorage.setItem("callos_selected_sim_slot", slot === null ? "" : String(slot)); }} theme={theme} />
     </SafeAreaView>
   );
 }
 
-// ── Edit Profile Modal ────────────────────────────────────────────────────────
+// â”€â”€ Edit Profile Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function EditProfileModal({ visible, onClose, onSaved, user, theme }) {
   const [name, setName]     = useState(user?.name || "");
   const [email, setEmail]   = useState(user?.email || "");
@@ -470,7 +505,7 @@ function EditProfileModal({ visible, onClose, onSaved, user, theme }) {
       const stored = await AsyncStorage.getItem("callos_user");
       if (stored) await AsyncStorage.setItem("callos_user", JSON.stringify({ ...JSON.parse(stored), ...newData }));
       onSaved(newData);
-      Alert.alert("Saved ✓", "Profile updated successfully.");
+      Alert.alert("Saved âœ“", "Profile updated successfully.");
       onClose();
     } catch (err) {
       Alert.alert("Error", err.message || "Could not update profile.");
@@ -517,47 +552,60 @@ function EditProfileModal({ visible, onClose, onSaved, user, theme }) {
   );
 }
 
-// ── SIM Config Modal ──────────────────────────────────────────────────────────
-function SimConfigModal({ visible, onClose, sims, theme }) {
+// â”€â”€ SIM Config Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function SimConfigModal({ visible, onClose, sims, selectedSim, onSelectSim, theme }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.5)" }}>
         <View style={{ backgroundColor: theme.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <Text style={{ fontSize: 18, fontWeight: "800", color: theme.primary }}>SIM Configuration</Text>
             <Pressable onPress={onClose}><Ionicons name="close" size={24} color={theme.muted} /></Pressable>
           </View>
+          <Text style={{ fontSize: 12.5, color: theme.muted, marginBottom: 16 }}>Choose which SIM to track. Only calls from that SIM will sync.</Text>
           {sims.length === 0 ? (
             <View style={{ alignItems: "center", paddingVertical: 32, gap: 12 }}>
               <Ionicons name="phone-portrait-outline" size={48} color={theme.dim} />
               <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>No SIM detected</Text>
-              <Text style={{ fontSize: 13, color: theme.muted, textAlign: "center", lineHeight: 20 }}>
-                SIM details will appear here once the app reads your device SIM cards.{"\n"}Make sure Phone State permission is granted.
-              </Text>
+              <Text style={{ fontSize: 13, color: theme.muted, textAlign: "center", lineHeight: 20 }}>Make sure Phone State permission is granted.</Text>
             </View>
-          ) : sims.map((s, i) => (
-            <View key={i} style={{ backgroundColor: theme.surface, borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: theme.border }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: palette.teal + "1a", alignItems: "center", justifyContent: "center" }}>
-                  <Ionicons name="phone-portrait-outline" size={18} color={palette.teal} />
+          ) : (
+            <View style={{ gap: 10 }}>
+              <Pressable onPress={() => onSelectSim(null)}
+                style={{ flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 14, padding: 14, borderWidth: 2,
+                  borderColor: selectedSim === null ? palette.teal : theme.border,
+                  backgroundColor: selectedSim === null ? palette.teal + "12" : theme.surface }}>
+                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: selectedSim === null ? palette.teal + "22" : theme.bg, alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="layers-outline" size={20} color={selectedSim === null ? palette.teal : theme.muted} />
                 </View>
-                <Text style={{ fontSize: 16, fontWeight: "700", color: theme.primary }}>SIM {s.slot + 1}</Text>
-                <View style={{ backgroundColor: palette.emerald + "22", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
-                  <Text style={{ fontSize: 11, fontWeight: "700", color: palette.emerald }}>Active</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 15, fontWeight: "700", color: selectedSim === null ? palette.teal : theme.primary }}>All SIMs</Text>
+                  <Text style={{ fontSize: 12, color: theme.muted, marginTop: 2 }}>Sync calls from all SIM slots</Text>
                 </View>
-              </View>
-              {[
-                { label: "Phone Number", value: s.phoneNumber || "Reading from device..." },
-                { label: "Carrier",      value: s.carrierName || "Reading from device..." },
-                { label: "Country",      value: s.countryIso?.toUpperCase() || "—" },
-              ].map((r) => (
-                <View key={r.label} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 4 }}>
-                  <Text style={{ fontSize: 13, color: theme.muted }}>{r.label}</Text>
-                  <Text style={{ fontSize: 13, fontWeight: "600", color: theme.primary }}>{r.value}</Text>
-                </View>
-              ))}
+                <Ionicons name={selectedSim === null ? "checkmark-circle" : "ellipse-outline"} size={22} color={selectedSim === null ? palette.teal : theme.dim} />
+              </Pressable>
+              {sims.map((s) => {
+                const on = selectedSim === s.slot;
+                return (
+                  <Pressable key={s.slot} onPress={() => onSelectSim(s.slot)}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 14, padding: 14, borderWidth: 2,
+                      borderColor: on ? palette.teal : theme.border,
+                      backgroundColor: on ? palette.teal + "12" : theme.surface }}>
+                    <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: on ? palette.teal + "22" : theme.bg, alignItems: "center", justifyContent: "center" }}>
+                      <Ionicons name="phone-portrait-outline" size={20} color={on ? palette.teal : theme.muted} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 15, fontWeight: "700", color: on ? palette.teal : theme.primary }}>SIM {s.slot + 1}</Text>
+                      {s.carrierName ? <Text style={{ fontSize: 12, color: theme.muted, marginTop: 1 }}>{s.carrierName}</Text> : null}
+                      {s.phoneNumber ? <Text style={{ fontSize: 12, color: theme.muted }}>{s.phoneNumber}</Text> : null}
+                      {s.countryIso  ? <Text style={{ fontSize: 11, color: theme.dim }}>{s.countryIso.toUpperCase()}</Text> : null}
+                    </View>
+                    <Ionicons name={on ? "checkmark-circle" : "ellipse-outline"} size={22} color={on ? palette.teal : theme.dim} />
+                  </Pressable>
+                );
+              })}
             </View>
-          ))}
+          )}
         </View>
       </View>
     </Modal>

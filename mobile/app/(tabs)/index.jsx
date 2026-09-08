@@ -7,7 +7,6 @@ import { AppHeader, Card, SectionRow, Delta } from "../../src/components";
 import { RadialRing, Sparkline, MiniBars, BarChart, Donut } from "../../src/charts";
 import { api } from "../../src/api";
 import { getRealCallLog } from "../../src/callLogService";
-import { getRealCallLog } from "../../src/callLogService";
 
 const RANGES = ["Today", "Yesterday", "Last Week", "Last 30"];
 const RANGE_MAP = { "Today": "today", "Yesterday": "yesterday", "Last Week": "7d", "Last 30": "30d" };
@@ -35,7 +34,6 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [localCounts, setLocalCounts] = useState({ total: 0, incoming: 0, outgoing: 0, missed: 0, rejected: 0 });
 
-  // Load real Android call log counts immediately — shows even before API responds
   const loadLocalCounts = useCallback(() => {
     getRealCallLog(1).then((calls) => {
       setLocalCounts({
@@ -49,20 +47,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => { loadLocalCounts(); }, []);
-  const [localStats, setLocalStats] = useState({ total: 0, missed: 0, incoming: 0, outgoing: 0, rejected: 0 });
-
-  // Load real local call log stats immediately on mount
-  useEffect(() => {
-    getRealCallLog(1).then((calls) => {
-      setLocalStats({
-        total:    calls.length,
-        missed:   calls.filter((c) => c.call_type === "missed").length,
-        incoming: calls.filter((c) => c.call_type === "incoming").length,
-        outgoing: calls.filter((c) => c.call_type === "outgoing").length,
-        rejected: calls.filter((c) => c.call_type === "rejected").length,
-      });
-    }).catch(() => {});
-  }, []);
 
   const load = useCallback((r = range, isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
@@ -162,22 +146,6 @@ export default function Home() {
               ))}
             </View>
           </ScrollView>
-        </View>
-
-        {/* Live local call log strip */}
-        <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
-          {[
-            { label: "Today's Calls", value: localStats.total,    color: palette.teal,   icon: "call" },
-            { label: "Incoming",      value: localStats.incoming, color: palette.violet, icon: "call-received" },
-            { label: "Missed",        value: localStats.missed,   color: palette.red,    icon: "call-missed" },
-            { label: "Outgoing",      value: localStats.outgoing, color: palette.cyan,   icon: "call-made" },
-          ].map((s) => (
-            <View key={s.label} style={{ flex: 1, backgroundColor: theme.card, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: theme.border, alignItems: "center" }}>
-              <Ionicons name={s.icon} size={16} color={s.color} />
-              <Text style={{ fontSize: 18, fontWeight: "800", color: theme.primary, marginTop: 4 }}>{s.value}</Text>
-              <Text style={{ fontSize: 9.5, color: theme.muted, textAlign: "center", marginTop: 2 }}>{s.label}</Text>
-            </View>
-          ))}
         </View>
 
         {/* Live call strip — reads directly from Android call log */}

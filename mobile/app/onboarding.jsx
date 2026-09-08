@@ -8,16 +8,17 @@ import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { palette, gradientBrand, useTheme } from "../src/theme";
-import { useAuth } from "../src/AuthContext";
-import { requestAllPermissions, readSimInfo } from "../src/nativeModules";
+import { useAuth, doFirstFullSync } from "../src/AuthContext";
+import { requestAllPermissions, checkPermissions, readSimInfo } from "../src/nativeModules";
+import { getRealCallLog } from "../src/callLogService";
 import { BASE_URL } from "../src/api";
 
-// NEW user:      Company Code → Sign Up → Permissions → SIM Select → Done
-// RETURNING user: Permissions → SIM Select → Done
-const NEW_STEPS     = ["Company","Sign Up","Permissions","SIM","Done"];
-const RETURN_STEPS  = ["Permissions","SIM","Done"];
-const NEW_ICONS     = ["shield-key-outline","person-add-outline","shield-checkmark-outline","phone-portrait-outline","checkmark-done-outline"];
-const RETURN_ICONS  = ["shield-checkmark-outline","phone-portrait-outline","checkmark-done-outline"];
+// NEW user:      Company Code → Sign Up → Permissions → SIM → CallLog Scan → Battery → Done
+// RETURNING user: Permissions → SIM → CallLog Scan → Battery → Done
+const NEW_STEPS     = ["Company","Sign Up","Permissions","SIM","Call Logs","Battery","Done"];
+const RETURN_STEPS  = ["Permissions","SIM","Call Logs","Battery","Done"];
+const NEW_ICONS     = ["shield-key-outline","person-add-outline","shield-checkmark-outline","phone-portrait-outline","call-outline","battery-charging-outline","checkmark-done-outline"];
+const RETURN_ICONS  = ["shield-checkmark-outline","phone-portrait-outline","call-outline","battery-charging-outline","checkmark-done-outline"];
 
 export default function Onboarding() {
   const router = useRouter();
@@ -39,18 +40,24 @@ export default function Onboarding() {
     setStep((s) => s + 1);
   };
 
+  // No back-navigation allowed — steps must be completed in order
+
   // Map step index to component
   const renderStep = () => {
     if (returning) {
       if (step === 0) return <PermissionsStep onDone={goNext} />;
       if (step === 1) return <SimDetectStep onDone={goNext} />;
-      if (step === 2) return <DoneStep onDone={goNext} />;
+      if (step === 2) return <CallLogScanStep onDone={goNext} />;
+      if (step === 3) return <BatteryCheckStep onDone={goNext} />;
+      if (step === 4) return <DoneStep onDone={goNext} />;
     } else {
       if (step === 0) return <CompanyCodeStep onDone={goNext} />;
       if (step === 1) return <SignUpStep companyCode={companyCode} onDone={goNext} />;
       if (step === 2) return <PermissionsStep onDone={goNext} />;
       if (step === 3) return <SimDetectStep onDone={goNext} />;
-      if (step === 4) return <DoneStep onDone={goNext} />;
+      if (step === 4) return <CallLogScanStep onDone={goNext} />;
+      if (step === 5) return <BatteryCheckStep onDone={goNext} />;
+      if (step === 6) return <DoneStep onDone={goNext} />;
     }
   };
 
@@ -80,7 +87,7 @@ export default function Onboarding() {
             {STEPS.map((s, i) => {
               const done = i < step, active = i === step;
               return (
-                <Pressable key={i} onPress={() => i < step && setStep(i)} style={{ alignItems: "center", flex: 1, zIndex: 1 }}>
+                <Pressable key={i} style={{ alignItems: "center", flex: 1, zIndex: 1 }}>
                   {done || active ? (
                     <LinearGradient colors={done ? ["#14b8a6","#14b8a6"] : gradientBrand} style={{ width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" }}>
                       <Ionicons name={done ? "checkmark" : ICONS[i]} size={16} color="#fff" />
@@ -106,12 +113,7 @@ export default function Onboarding() {
 
           <View style={{ flex: 1, minHeight: 20 }} />
 
-          {/* Skip only on SIM step */}
-          {((!returning && step === 3) || (returning && step === 1)) && (
-            <Pressable onPress={() => goNext({})} style={{ alignItems: "center", marginTop: 14 }}>
-              <Text style={{ fontSize: 12.5, color: theme.muted }}>Skip this step</Text>
-            </Pressable>
-          )}
+
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -518,6 +520,208 @@ function SimVerifyStep({ simData, onDone }) {
           </Pressable>
         </>
       )}
+    </View>
+  );
+}
+
+// ── Step: Call Log Scan ───────────────────────────────────────────────────────
+// Reads 90 days from Android, syncs to backend, shows real count + accepted.
+function CallLogScanStep({ onDone }) {
+  const { theme } = useTheme();
+  const { deviceId } = useAuth();
+  const [state, setState] = useState("scanning"); // scanning | syncing | done | no_permission | error
+  const [count, setCount] = useState(0);
+  const [synced, setSynced] = useState(0);
+  const [errorMsg, setErrorMsg] = useState("");
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+
+  async function scanAndSync() {
+    setState("scanning");
+    setErrorMsg("");
+    try {
+      const perms = await checkPermissions();
+      if (!perms.callLog) { setState("no_permission"); return; }
+
+      const calls = await getRealCallLog(90);
+      setCount(calls.length);
+      if (calls.length === 0) {
+        setState("error");
+        setErrorMsg("Call log returned 0 entries. Make sure Read Call Log permission is granted.");
+        return;
+      }
+
+      setState("syncing");
+      if (deviceId) {
+        const result = await doFirstFullSync(deviceId);
+        setSynced(result?.accepted || 0);
+      }
+      setState("done");
+      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, tension: 60, friction: 7 }).start();
+    } catch (e) {
+      setState("error");
+      setErrorMsg(e?.message || "Failed to read or sync call log.");
+    }
+  }
+
+  async function regrantPermission() {
+    const result = await requestAllPermissions();
+    if (result.callLog) scanAndSync();
+    else Linking.openSettings();
+  }
+
+  useEffect(() => { scanAndSync(); }, []);
+
+  return (
+    <View style={{ gap: 16, alignItems: "center", paddingVertical: 8 }}>
+      <View style={{ width: 68, height: 68, borderRadius: 20, backgroundColor: palette.teal + "1a", alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name="call-outline" size={34} color={palette.teal} />
+      </View>
+      <Text style={{ fontSize: 17, fontWeight: "800", color: theme.primary }}>Reading Call Log</Text>
+
+      {state === "scanning" && (
+        <View style={{ alignItems: "center", gap: 12 }}>
+          <ActivityIndicator color={palette.teal} size="large" />
+          <Text style={{ fontSize: 13, color: theme.muted }}>Scanning your last 90 days...</Text>
+        </View>
+      )}
+
+      {state === "syncing" && (
+        <View style={{ alignItems: "center", gap: 12 }}>
+          <ActivityIndicator color={palette.violet} size="large" />
+          <Text style={{ fontSize: 15, fontWeight: "700", color: theme.primary }}>{count} calls found</Text>
+          <Text style={{ fontSize: 13, color: theme.muted }}>Syncing to dashboard...</Text>
+        </View>
+      )}
+
+      {state === "done" && (
+        <Animated.View style={{ alignItems: "center", gap: 10, transform: [{ scale: scaleAnim }], width: "100%" }}>
+          <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: palette.emerald, alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="checkmark" size={40} color="#fff" />
+          </View>
+          <Text style={{ fontSize: 28, fontWeight: "800", color: palette.emerald }}>{count}</Text>
+          <Text style={{ fontSize: 14, color: theme.muted }}>calls read from your phone</Text>
+          {synced > 0 && (
+            <View style={{ backgroundColor: palette.emerald + "15", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: palette.emerald + "44" }}>
+              <Text style={{ fontSize: 13, fontWeight: "700", color: palette.emerald }}>✓ {synced} synced to dashboard</Text>
+            </View>
+          )}
+          <Pressable onPress={() => onDone({})} style={{ width: "100%", marginTop: 6 }}>
+            <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={{ height: 50, borderRadius: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 }}>
+              <Ionicons name="arrow-forward-circle" size={18} color="#fff" />
+              <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>Continue</Text>
+            </LinearGradient>
+          </Pressable>
+        </Animated.View>
+      )}
+
+      {state === "no_permission" && (
+        <View style={{ width: "100%", gap: 12 }}>
+          <View style={{ backgroundColor: palette.red + "15", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: palette.red + "44", flexDirection: "row", gap: 10 }}>
+            <Ionicons name="alert-circle" size={20} color={palette.red} style={{ marginTop: 1 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13.5, fontWeight: "700", color: palette.red }}>Call Log Permission Removed</Text>
+              <Text style={{ fontSize: 12, color: theme.muted, marginTop: 4, lineHeight: 18 }}>Read Call Log permission was revoked. CallNexa cannot sync calls without it.</Text>
+            </View>
+          </View>
+          <Pressable onPress={regrantPermission}>
+            <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={{ height: 50, borderRadius: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 }}>
+              <Ionicons name="shield-checkmark" size={18} color="#fff" />
+              <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>Re-grant Permission</Text>
+            </LinearGradient>
+          </Pressable>
+          <Pressable onPress={() => Linking.openSettings()} style={{ alignItems: "center" }}>
+            <Text style={{ fontSize: 12.5, color: theme.muted }}>Open App Settings →</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {state === "error" && (
+        <View style={{ width: "100%", gap: 12 }}>
+          <View style={{ backgroundColor: palette.red + "15", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: palette.red + "44", flexDirection: "row", gap: 10 }}>
+            <Ionicons name="warning-outline" size={20} color={palette.red} style={{ marginTop: 1 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13.5, fontWeight: "700", color: palette.red }}>Could Not Read Call Log</Text>
+              <Text style={{ fontSize: 12, color: theme.muted, marginTop: 4, lineHeight: 18 }}>{errorMsg}</Text>
+            </View>
+          </View>
+          <Pressable onPress={scanAndSync}>
+            <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={{ height: 50, borderRadius: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 }}>
+              <Ionicons name="refresh-outline" size={18} color="#fff" />
+              <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>Try Again</Text>
+            </LinearGradient>
+          </Pressable>
+          <Pressable onPress={() => Linking.openSettings()} style={{ alignItems: "center" }}>
+            <Text style={{ fontSize: 12.5, color: theme.muted }}>Open App Settings →</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── Step: Battery Check ───────────────────────────────────────────────────────
+function BatteryCheckStep({ onDone }) {
+  const { theme } = useTheme();
+  // We can't read battery optimization state from JS — we show instructions
+  // and let the user confirm. On Android, REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+  // intent opens the system dialog directly.
+  const [opened, setOpened] = useState(false);
+
+  function openBatterySettings() {
+    setOpened(true);
+    // Try direct intent first (opens "Battery optimization" for this app)
+    Linking.openURL("package:com.tzmicha.callnexa").catch(() =>
+      Linking.openSettings()
+    );
+  }
+
+  return (
+    <View style={{ gap: 14 }}>
+      <View style={{ alignItems: "center", marginBottom: 4 }}>
+        <View style={{ width: 68, height: 68, borderRadius: 20, backgroundColor: palette.amber + "1a", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+          <Ionicons name="battery-charging-outline" size={34} color={palette.amber} />
+        </View>
+        <Text style={{ fontSize: 17, fontWeight: "800", color: theme.primary }}>Battery Optimization</Text>
+        <Text style={{ fontSize: 13, color: theme.muted, textAlign: "center", marginTop: 6, lineHeight: 19 }}>
+          Android may kill background sync to save battery.{"\n"}Set CallNexa to <Text style={{ fontWeight: "700", color: palette.amber }}>Unrestricted</Text> so calls sync even when the app is closed.
+        </Text>
+      </View>
+
+      <View style={{ gap: 10 }}>
+        {[
+          { icon: "navigate-circle-outline", color: palette.teal,   text: "Open Battery Settings below" },
+          { icon: "apps-outline",            color: palette.violet, text: 'Find CallNexa in the list' },
+          { icon: "battery-full-outline",    color: palette.amber,  text: 'Tap "Unrestricted" or "Don\'t optimize"' },
+        ].map((item, i) => (
+          <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: theme.bg, borderRadius: 11, padding: 11 }}>
+            <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: item.color + "1a", alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ fontSize: 11, fontWeight: "800", color: item.color }}>{i + 1}</Text>
+            </View>
+            <Ionicons name={item.icon} size={16} color={item.color} />
+            <Text style={{ fontSize: 12.5, color: theme.secondary, flex: 1 }}>{item.text}</Text>
+          </View>
+        ))}
+      </View>
+
+      <Pressable onPress={openBatterySettings}>
+        <LinearGradient colors={[palette.amber, "#f59e0b"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+          style={{ height: 50, borderRadius: 13, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 }}>
+          <Ionicons name="battery-charging-outline" size={18} color="#fff" />
+          <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>Open Battery Settings</Text>
+        </LinearGradient>
+      </Pressable>
+
+      <Pressable onPress={() => onDone({})} disabled={!opened}>
+        <View style={{ height: 48, borderRadius: 13, borderWidth: 1.5, borderColor: opened ? palette.emerald : theme.border, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, opacity: opened ? 1 : 0.4 }}>
+          {opened && <Ionicons name="checkmark-circle" size={16} color={palette.emerald} />}
+          <Text style={{ fontSize: 14, fontWeight: "700", color: opened ? palette.emerald : theme.dim }}>
+            {opened ? "Done — Continue" : "Open Battery Settings first"}
+          </Text>
+        </View>
+      </Pressable>
     </View>
   );
 }

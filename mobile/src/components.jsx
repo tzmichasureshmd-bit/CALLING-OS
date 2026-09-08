@@ -98,11 +98,48 @@ function NotifPanel({ visible, onClose }) {
   );
 }
 
+// ---- Connection Status Hook ----
+function useConnectionStatus() {
+  const [status, setStatus] = useState("checking"); // "connected" | "disconnected" | "checking"
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function check() {
+      try {
+        const BASE = process.env.EXPO_PUBLIC_API_URL || "https://api.callingos.tzmicha.com/api/v1";
+        const url = BASE.replace("/api/v1", "") + "/health";
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        const res = await fetch(url, { method: "GET", signal: controller.signal });
+        clearTimeout(timer);
+        if (!cancelled) setStatus(res.ok ? "connected" : "disconnected");
+      } catch {
+        if (!cancelled) setStatus("disconnected");
+      }
+    }
+
+    check();
+    const interval = setInterval(check, 15000); // re-check every 15s
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  return status;
+}
+
 // ---- Header ----
 export function AppHeader({ title, subtitle, right }) {
   const { theme } = useTheme();
   const [showNotifs, setShowNotifs] = useState(false);
   const [unread, setUnread] = useState(0);
+  const connStatus = useConnectionStatus();
+
+  const connMeta = {
+    connected:    { color: palette.emerald, bg: palette.emerald + "22", label: "Connected",    dot: palette.emerald },
+    disconnected: { color: palette.red,     bg: palette.red     + "22", label: "Disconnected", dot: palette.red     },
+    checking:     { color: palette.amber,   bg: palette.amber   + "22", label: "Connecting…",  dot: palette.amber   },
+  };
+  const cm = connMeta[connStatus];
 
   useEffect(() => {
     api.getCalls({ page_size: 5 })
@@ -129,9 +166,9 @@ export function AppHeader({ title, subtitle, right }) {
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
           {right}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: theme.successSoft, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 }}>
-            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: palette.emerald }} />
-            <Text style={{ fontSize: 11, fontWeight: "700", color: theme.success }}>Live</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: cm.bg, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 }}>
+            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: cm.dot }} />
+            <Text style={{ fontSize: 11, fontWeight: "700", color: cm.color }}>{cm.label}</Text>
           </View>
           <Pressable onPress={() => setShowNotifs(true)}>
             <Ionicons name="notifications-outline" size={22} color={theme.secondary} />

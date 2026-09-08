@@ -187,6 +187,28 @@ def _build_sim_items_from_legacy(body: DeviceRegister) -> list[SIMSyncItem]:
     return []
 
 
+def _sync_selected_sim_phone(db: Session, device: Device) -> None:
+    """
+    Find the user-selected SIM (is_selected=True, or fallback to slot 1)
+    and update employee.phone with its phone_number if available.
+    """
+    sims = getattr(device, "sims", []) or []
+    if not sims:
+        return
+    emp = device.employee
+    if not emp:
+        return
+    # Priority: is_selected SIM first, then slot 1, then any SIM with a number
+    selected = next((s for s in sims if getattr(s, "is_selected", False) and s.phone_number), None)
+    if not selected:
+        selected = next((s for s in sims if s.slot == 1 and s.phone_number), None)
+    if not selected:
+        selected = next((s for s in sims if s.phone_number), None)
+    if selected and selected.phone_number and emp.phone != selected.phone_number:
+        emp.phone = selected.phone_number
+        db.commit()
+
+
 # ── Background offline watcher ────────────────────────────────────────────────
 
 async def _offline_watcher():
@@ -266,6 +288,9 @@ async def register_device(
     db.commit()
     db.refresh(device)
 
+    # Sync selected SIM phone number to employee profile
+    _sync_selected_sim_phone(db, device)
+
     # Broadcast device update + any SIM changes
     emp_name = emp.name
     await manager.broadcast(
@@ -325,6 +350,10 @@ async def heartbeat(
 
     db.commit()
     db.refresh(device)
+
+    # Sync selected SIM phone number to employee profile
+    if body.sims:
+        _sync_selected_sim_phone(db, device)
 
     emp_name = device.employee.name if device.employee else None
     await manager.broadcast(

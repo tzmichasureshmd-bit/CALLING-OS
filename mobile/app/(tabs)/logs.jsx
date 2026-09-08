@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   View, Text, ScrollView, TextInput, Pressable, Linking,
-  RefreshControl, ToastAndroid, Platform, Clipboard, Modal, Animated,
+  RefreshControl, ToastAndroid, Platform, Clipboard, Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -132,59 +132,26 @@ function DialPad({ visible, onClose, theme }) {
   );
 }
 
-// ── Sync Progress Bar ─────────────────────────────────────────────────────────────────────────────────
-/**
- * Shows a floating bar at the top when calls are pending/syncing.
- * Disappears automatically after all calls are synced.
- */
 function SyncProgressBar({ localStatuses, theme }) {
-  const slideY = useRef(new Animated.Value(-60)).current;
   const entries = Object.values(localStatuses);
   const pending  = entries.filter((e) => [STATUS.DETECTED, STATUS.LOCAL_SAVED, STATUS.SYNC_QUEUED, STATUS.SYNCING].includes(e.sync_status)).length;
   const synced   = entries.filter((e) => e.sync_status === STATUS.SYNCED).length;
   const failed   = entries.filter((e) => e.sync_status === STATUS.SYNC_FAILED).length;
   const total    = entries.length;
-  const visible  = pending > 0 || failed > 0;
-
-  useEffect(() => {
-    Animated.spring(slideY, {
-      toValue: visible ? 0 : -60,
-      useNativeDriver: true,
-      tension: 80,
-      friction: 10,
-    }).start();
-  }, [visible]);
-
+  if ((pending === 0 && failed === 0) || total === 0) return null;
   const isSyncing = entries.some((e) => e.sync_status === STATUS.SYNCING);
-  const color  = failed > 0 ? palette.red : isSyncing ? palette.teal : palette.amber;
-  const label  = isSyncing
+  const color = failed > 0 ? palette.red : isSyncing ? palette.teal : palette.amber;
+  const label = isSyncing
     ? `Syncing ${pending} call${pending !== 1 ? "s" : ""}...`
     : failed > 0
     ? `${failed} call${failed !== 1 ? "s" : ""} failed to sync`
     : `${pending} call${pending !== 1 ? "s" : ""} queued to sync`;
-
   return (
-    <Animated.View style={{
-      transform: [{ translateY: slideY }],
-      backgroundColor: color + "ee",
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 10,
-    }}>
-      <Ionicons
-        name={isSyncing ? "sync" : failed > 0 ? "alert-circle" : "time"}
-        size={16}
-        color="#fff"
-      />
-      <Text style={{ flex: 1, fontSize: 13, fontWeight: "700", color: "#fff" }}>{label}</Text>
-      {total > 0 && (
-        <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.85)" }}>
-          {synced}/{total} done
-        </Text>
-      )}
-    </Animated.View>
+    <View style={{ backgroundColor: color + "ee", paddingHorizontal: 16, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 10 }}>
+      <Ionicons name={isSyncing ? "sync" : failed > 0 ? "alert-circle" : "time"} size={15} color="#fff" />
+      <Text style={{ flex: 1, fontSize: 12.5, fontWeight: "700", color: "#fff" }}>{label}</Text>
+      <Text style={{ fontSize: 11.5, color: "rgba(255,255,255,0.85)" }}>{synced}/{total}</Text>
+    </View>
   );
 }
 
@@ -373,12 +340,12 @@ export default function Calls() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }} edges={["top"]}>
-      <SyncProgressBar localStatuses={localStatuses} theme={theme} />
       <AppHeader title="Calls" right={
         <Pressable onPress={() => load(true)} style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, alignItems: "center", justifyContent: "center" }}>
           <Ionicons name="refresh-outline" size={18} color={theme.secondary} />
         </Pressable>
       } />
+      <SyncProgressBar localStatuses={localStatuses} theme={theme} />
 
       <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
         <View style={[{ flexDirection: "row", alignItems: "center", backgroundColor: theme.surface, borderRadius: 13, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: theme.border }, shadowSoft]}>

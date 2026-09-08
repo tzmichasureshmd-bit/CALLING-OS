@@ -4,173 +4,120 @@ import { readCallLog, readSimInfo } from "./nativeModules";
 import { findSimForCall, buildCallSource } from "./simInventoryService";
 import { BASE_URL } from "./api";
 
-// ── Storage keys ──────────────────────────────────────────────────────────────
+// -- Storage keys
 const LAST_SYNC_KEY    = "callos_last_sync_ts";
 const SYNCED_IDS_KEY   = "callos_synced_ids";
 const UPLOAD_QUEUE_KEY = "callos_upload_queue";
 
-// ── Android CallLog type → CallNexa call_type ─────────────────────────────────
+// -- Android CallLog type -> CallNexa call_type
 // ALL types mapped. Zero-duration calls are NEVER filtered out.
-// Missed calls always have duration=0. Rejected calls always have duration=0.
 const TYPE_MAP = {
   "1": "incoming",  // INCOMING answered
-  "2": "outgoing",  // OUTGOING (answered OR unanswered — duration may be 0)
-  "3": "missed",    // MISSED   — duration=0, MUST sync
+  "2": "outgoing",  // OUTGOING (answered OR unanswered)
+  "3": "missed",    // MISSED   -- duration=0, MUST sync
   "4": "incoming",  // VOICEMAIL
-  "5": "rejected",  // REJECTED by user — duration=0, MUST sync
+  "5": "rejected",  // REJECTED by user -- duration=0, MUST sync
   "6": "rejected",  // BLOCKED
   "7": "incoming",  // ANSWERED_EXTERNALLY
 };
 
 function _deriveCallStatus(callType, durationSec) {
-  if (callType === "missed")                          return "missed";
-  if (callType === "rejected")                        return "rejected";
-  if (callType === "outgoing" && durationSec === 0)   return "no_answer";
-  if (durationSec > 0)                               return "connected";
+  if (callType === "missed")                        return "missed";
+  if (callType === "rejected")                      return "rejected";
+  if (callType === "outgoing" && durationSec === 0) return "no_answer";
+  if (durationSec > 0)                             return "connected";
   return "unknown";
 }
 
-// ── Recording file search ─────────────────────────────────────────────────────
-/**
- * Manufacturer call recording folder paths.
- * Vivo, Samsung, Xiaomi, OPPO, OnePlus all save to different locations.
- * We search all known paths for a file matching the call timestamp.
- *
- * NOTE: Android 9+ blocks MICROPHONE during cellular calls for third-party apps.
- * However, some manufacturers (Vivo, Xiaomi, Samsung) use a system-level
- * recording API that saves files to these folders. We scan for those files.
- */
+// -- Recording file search
 const RECORDING_SEARCH_DIRS = [
-  // Vivo (V29e and other Vivo devices)
   "file:///storage/emulated/0/Sounds/CallRecord/",
   "file:///storage/emulated/0/Record/Call/",
   "file:///storage/emulated/0/PhoneRecord/",
   "file:///storage/emulated/0/Vivo/CallRecord/",
-  // Samsung
   "file:///storage/emulated/0/Recordings/Call/",
   "file:///storage/emulated/0/DCIM/Call Recordings/",
-  // Xiaomi / MIUI
   "file:///storage/emulated/0/MIUI/sound_recorder/call_rec/",
   "file:///storage/emulated/0/Xiaomi/sound_recorder/call_rec/",
-  // OPPO / Realme
   "file:///storage/emulated/0/ColorOS/Recording/",
   "file:///storage/emulated/0/Recordings/",
-  // Generic Android
   "file:///storage/emulated/0/CallRecordings/",
   "file:///storage/emulated/0/Call/",
   "file:///storage/emulated/0/Android/data/com.android.phone/files/",
 ];
-
 const RECORDING_EXTENSIONS = ["mp3", "mp4", "m4a", "aac", "wav", "3gp", "amr", "ogg"];
 
-/**
- * Try to find a recording file for a call by scanning manufacturer folders.
- * Matches by timestamp proximity (within 60 seconds of call start).
- * Returns the file URI if found, null otherwise.
- */
 async function _findRecordingFile(startMs, phoneNumber) {
   try {
     const startSec = Math.floor(startMs / 1000);
-    const windowSec = 60; // recording may start up to 60s after call
-
+    const windowSec = 60;
     for (const dir of RECORDING_SEARCH_DIRS) {
       try {
         const info = await FileSystem.getInfoAsync(dir);
         if (!info.exists || !info.isDirectory) continue;
-
         const contents = await FileSystem.readDirectoryAsync(dir);
         for (const filename of contents) {
           const ext = filename.split(".").pop()?.toLowerCase();
           if (!RECORDING_EXTENSIONS.includes(ext)) continue;
-
-          // Try to match by file modification time
           try {
             const fileInfo = await FileSystem.getInfoAsync(dir + filename, { md5: false });
             if (fileInfo.exists && fileInfo.modificationTime) {
               const fileSec = Math.floor(fileInfo.modificationTime);
-              if (Math.abs(fileSec - startSec) <= windowSec) {
-                console.log(`[CallNexa] RECORDING_FOUND: ${dir}${filename}`);
-                return dir + filename;
-              }
+              if (Math.abs(fileSec - startSec) <= windowSec) return dir + filename;
             }
-          } catch { /* skip this file */ }
-
-          // Also try matching by phone number in filename
+          } catch { /* skip */ }
           if (phoneNumber && phoneNumber !== "unknown") {
-            const digits = phoneNumber.replace(/\D/g, "").slice(-7); // last 7 digits
-            if (digits.length >= 7 && filename.includes(digits)) {
-              console.log(`[CallNexa] RECORDING_FOUND_BY_NUMBER: ${dir}${filename}`);
-              return dir + filename;
-            }
+            const digits = phoneNumber.replace(/\D/g, "").slice(-7);
+            if (digits.length >= 7 && filename.includes(digits)) return dir + filename;
           }
         }
       } catch { /* dir not accessible */ }
     }
-  } catch { /* recording search failed silently */ }
+  } catch { /* silent */ }
   return null;
 }
 
-// ── Call log reading ──────────────────────────────────────────────────────────
-
-/**
- * Read ALL calls from Android system call log.
- *
- * RULES:
- * - NEVER filter zero-duration calls (missed/rejected = duration 0)
- * - client_event_id = "android-{c.id}" — deterministic, stable
- * - All types: incoming, outgoing, missed, rejected, blocked
- * - Searches manufacturer folders for recording files
- */
-export async function getRealCallLog(limitDays = 30) {
-  console.log(`[CallNexa] CALLLOG_QUERY_START: last ${limitDays} days`);
+// -- TASK 7: Core normalizer
+// Never filters zero-duration calls. Preserves Android _id (TASK 8).
+// Full diagnostic logging (TASK 12).
+async function _readAndNormalize(limitDays) {
+  console.log("[CALLLOG] provider query started -- last " + limitDays + " days");
   const raw = await readCallLog(limitDays);
-  console.log(`[CallNexa] CALLLOG_QUERY_RESULT: ${raw.length} raw entries from Android`);
+  console.log("[CALLLOG] records returned = " + raw.length);
 
   if (raw.length === 0) {
-    console.warn("[CallNexa] CALLLOG_EMPTY: Either no calls in window, permission denied, or native module missing");
+    console.warn("[CALLLOG] EMPTY: 0 records. Check permission, module, and device call log.");
+    return [];
   }
 
   const results = [];
+  let skipped = 0;
 
   for (const c of raw) {
-    // Must have Android _id
-    if (!c.id) {
-      console.warn("[CallNexa] CALL_SKIPPED: reason=missing_id entry=", JSON.stringify(c));
-      continue;
-    }
-    // Must have timestamp
-    if (!c.date) {
-      console.warn(`[CallNexa] CALL_SKIPPED: id=${c.id} reason=missing_date`);
-      continue;
-    }
+    // Android _id is the primary identifier -- TASK 8
+    const androidId = c.id || c._id;
+    if (!androidId) { skipped++; continue; }
+    if (!c.date)    { skipped++; continue; }
 
     const startMs = parseInt(c.date, 10);
-    if (isNaN(startMs) || startMs <= 0) {
-      console.warn(`[CallNexa] CALL_SKIPPED: id=${c.id} reason=invalid_date val=${c.date}`);
-      continue;
-    }
+    if (isNaN(startMs) || startMs <= 0) { skipped++; continue; }
 
-    // duration=0 is VALID — never skip based on duration
+    // duration=0 is VALID -- NEVER skip (missed/rejected always 0)
     const durationSec = Math.max(0, parseInt(c.duration, 10) || 0);
     const startISO    = new Date(startMs).toISOString();
     const endISO      = durationSec > 0 ? new Date(startMs + durationSec * 1000).toISOString() : null;
+    const callType    = TYPE_MAP[String(c.type)] ?? "incoming";
+    const callStatus  = _deriveCallStatus(callType, durationSec);
 
-    const callType   = TYPE_MAP[String(c.type)] ?? "incoming";
-    const callStatus = _deriveCallStatus(callType, durationSec);
-
-    // SIM: Android 0-indexed → backend 1-indexed
-    const simSlotAndroid = (c.simSlot !== undefined && c.simSlot !== null)
-      ? parseInt(c.simSlot, 10) : null;
+    const simSlotAndroid = (c.simSlot !== undefined && c.simSlot !== null) ? parseInt(c.simSlot, 10) : null;
     const subscriptionId = c.subscriptionId ? String(c.subscriptionId) : null;
     const simSlotBackend = simSlotAndroid !== null ? simSlotAndroid + 1 : null;
     const source         = await buildCallSource(simSlotAndroid, subscriptionId);
 
-    // Recording search is done AFTER sync, not during — keeps sync fast
-    // _findRecordingFile is called separately by enqueueRecordings
     const entry = {
-      client_event_id:     `android-${c.id}`,
+      client_event_id:     "android-" + androidId,  // TASK 8: stable collision-safe ID
       phone_number:        c.number || "unknown",
-      contact_name:        c.name   || null,
+      contact_name:        c.name || c.cachedName || null,
       call_type:           callType,
       call_status:         callStatus,
       start_time:          startISO,
@@ -180,38 +127,78 @@ export async function getRealCallLog(limitDays = 30) {
       subscription_id:     subscriptionId,
       source,
       recording_available: false,
-      recording_path:      null,  // populated later by background recording scan
+      recording_path:      null,
       _start_ms:           startMs,
-      _raw_number:         c.number || null, // kept for recording search
+      _raw_number:         c.number || null,
+      _android_id:         String(androidId),
     };
 
-    console.log(
-      `[CallNexa] CALL_DETECTED: id=${entry.client_event_id} ` +
-      `type=${callType} status=${callStatus} dur=${durationSec}s ` +
-      `rec=${!!recordingPath} num=***${String(c.number || "").slice(-4)}`
-    );
+    if (__DEV__) {
+      console.log(
+        "[CALLLOG] id=" + entry.client_event_id +
+        " type=" + callType + "(" + c.type + ")" +
+        " status=" + callStatus +
+        " dur=" + durationSec + "s" +
+        " num=***" + String(c.number || "").slice(-4)
+      );
+    }
     results.push(entry);
   }
 
-  console.log(`[CallNexa] CALLLOG_MAPPED: ${results.length} calls ready to sync`);
+  if (skipped > 0) console.warn("[CALLLOG] skipped " + skipped + " records (missing id/date)");
+  console.log("[CALLLOG] new calls mapped = " + results.length);
   return results;
 }
 
-// ── Sliding-window: get unsynced calls ────────────────────────────────────────
-/**
- * Re-reads last 7 days every time. Filters out already-confirmed-synced IDs.
- * Server deduplicates by client_event_id so re-sending is safe.
- */
+// -- TASK 7: Public API
+
+/** Initial reconciliation -- 90 days. Used on first login and app-start (TASK 10). */
+export async function getRealCallLog(limitDays = 90) {
+  return _readAndNormalize(limitDays);
+}
+
+/** Recent window -- last 2 hours. Used for normal foreground polling (TASK 7). */
+export async function getRecentCalls() {
+  return _readAndNormalize(2 / 24);
+}
+
+/** Calls since a specific timestamp (ms). Used for incremental sync. */
+export async function getCallsSince(sinceMs) {
+  const days = Math.max(0.1, Math.min((Date.now() - sinceMs) / (24 * 60 * 60 * 1000) + 0.1, 90));
+  const all = await _readAndNormalize(days);
+  return all.filter((c) => c._start_ms >= sinceMs);
+}
+
+/** Calls in last N days. */
+export async function getCallsLastDays(days) {
+  return _readAndNormalize(days);
+}
+
+/** Latest Android call log _id -- used for change detection (TASK 9). */
+export async function getLatestCallLogId() {
+  const calls = await _readAndNormalize(1);
+  return calls.length ? (calls[0]._android_id || null) : null;
+}
+
+/** Full diagnostic -- used by diagnostic screen (TASK 5/6). */
+export async function getCallLogDiagnostics() {
+  const { runCallLogComparison } = require("./callLogDiagnostic");
+  return runCallLogComparison(7);
+}
+
+// -- TASK 9: Sliding-window -- get unsynced calls
+// Re-reads last 7 days. Filters out already-confirmed-synced IDs.
+// Server deduplicates by client_event_id so re-sending is safe.
 export async function getNewCallsSinceLastSync() {
   const all = await getRealCallLog(7);
   if (!all.length) return [];
   const syncedSet = await _getSyncedIds();
   const unsync = all.filter((c) => !syncedSet.has(c.client_event_id));
-  console.log(`[CallNexa] SYNC_WINDOW: ${all.length} total, ${unsync.length} unsynced`);
+  console.log("[CALLLOG] queued calls = " + unsync.length + " (of " + all.length + " total in 7d window)");
   return unsync;
 }
 
-// ── Synced ID set ─────────────────────────────────────────────────────────────
+// -- Synced ID set
 
 async function _getSyncedIds() {
   try {
@@ -237,6 +224,7 @@ export async function markCallsSynced(calls) {
   if (ids.length) {
     await _addSyncedIds(ids);
     await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
+    console.log("[CALLLOG] sync confirmed = " + ids.length + " calls marked synced");
   }
 }
 
@@ -244,7 +232,7 @@ export async function markSyncComplete() {
   await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
 }
 
-// ── Recording upload queue ────────────────────────────────────────────────────
+// -- Recording upload queue
 
 export async function getUploadQueue() {
   try {
@@ -260,23 +248,18 @@ export async function saveUploadQueue(queue) {
 }
 
 export async function enqueueRecordings(calls) {
-  // Run recording file search in background for each call
   const queue    = await getUploadQueue();
   const existing = new Set(queue.map((q) => q.client_event_id));
   const toAdd    = [];
-
   for (const c of calls) {
     if (existing.has(c.client_event_id)) continue;
-    // Search for recording file now (after sync, non-blocking on main path)
     const recordingPath = await _findRecordingFile(c._start_ms || new Date(c.start_time).getTime(), c._raw_number || c.phone_number);
     if (!recordingPath) continue;
-
     let fileSize = null;
     try {
       const info = await FileSystem.getInfoAsync(recordingPath);
       if (info.exists) fileSize = info.size || null;
     } catch {}
-
     toAdd.push({
       client_event_id: c.client_event_id,
       path:            recordingPath,
@@ -288,10 +271,9 @@ export async function enqueueRecordings(calls) {
       created_at:      new Date().toISOString(),
     });
   }
-
   if (toAdd.length) {
     await saveUploadQueue([...queue, ...toAdd]);
-    console.log(`[CallNexa] RECORDING_QUEUED: ${toAdd.length} files queued for upload`);
+    console.log("[CALLLOG] recording queued = " + toAdd.length + " files");
   }
 }
 
@@ -316,7 +298,7 @@ export async function uploadRecording(callId, filePath, token) {
   }
 }
 
-// ── SIM helpers ───────────────────────────────────────────────────────────────
+// -- SIM helpers
 
 export async function getPrimarySimInfo() {
   const sims = await readSimInfo();

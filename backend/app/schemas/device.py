@@ -16,6 +16,7 @@ class SIMSyncItem(BaseModel):
     subscription_id: Optional[str] = None       # Android subscription ID where available
     network_type:    Optional[str] = None       # 2G | 3G | 4G | 5G | UNKNOWN
     is_active:       bool = True
+    is_selected:     bool = False               # True = user chose this SIM in SIM Configuration
 
 
 class SIMOut(BaseModel):
