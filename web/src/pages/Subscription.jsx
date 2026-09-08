@@ -1,114 +1,215 @@
 import { useState } from "react";
-import { CreditCard, Check, Users2, X, Plus } from "lucide-react";
+import { CreditCard, Users2, Check, Tag, Calendar, Info, ChevronRight } from "lucide-react";
 import { PageContainer, Card, CardHeader, Badge, Button, LoadingState, ErrorState } from "../components/ui.jsx";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
-import { useAuth } from "../context/AuthContext.jsx";
-import { employeesApi } from "../api/resources.js";
+import { subscriptionApi } from "../api/resources.js";
 
-function AddUsersModal({ onClose, onAdded }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState("");
+const PLANS = [
+  {
+    key: "starter",
+    name: "Starter",
+    price: 100,
+    unit: "user/month",
+    maxEmployees: 100,
+    features: ["Call tracking", "Call logs", "Dashboard Analytics", "Up to 100 employees"],
+    popular: false,
+  },
+  {
+    key: "growth",
+    name: "Growth",
+    price: 500,
+    unit: "month",
+    maxEmployees: null,
+    features: ["Everything in Starter", "Call recording", "AI Transcribe", "Unlimited employees", "Priority support"],
+    popular: true,
+  },
+];
 
-  async function submit() {
-    if (!name.trim() || !email.trim()) { setErr("Name and email are required"); return; }
-    setSaving(true); setErr("");
-    try {
-      await employeesApi.create({ name: name.trim(), email: email.trim(), phone: phone.trim() || null });
-      onAdded(); onClose();
-    } catch (e) {
-      setErr(e?.message || "Failed to add user");
-    } finally { setSaving(false); }
-  }
-
-  const inp = { width: "100%", padding: "10px 13px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 14, outline: "none", boxSizing: "border-box", marginTop: 6 };
-
+function PlanCard({ plan, current, onSelect, loading }) {
+  const isCurrent = current === plan.key;
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }} />
-      <div style={{ position: "relative", width: 400, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 18, padding: 24, boxShadow: "0 24px 64px rgba(0,0,0,0.4)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>Add User</div>
-          <button onClick={onClose} style={{ border: "none", background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}><X size={14} /></button>
-        </div>
-        {[{label:"FULL NAME",val:name,set:setName,ph:"John Doe",type:"text"},{label:"EMAIL",val:email,set:setEmail,ph:"john@company.com",type:"email"},{label:"PHONE (optional)",val:phone,set:setPhone,ph:"+91 98765 43210",type:"tel"}].map((f) => (
-          <div key={f.label} style={{ marginBottom: 14 }}>
-            <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)" }}>{f.label}</label>
-            <input style={inp} type={f.type} placeholder={f.ph} value={f.val} onChange={(e) => f.set(e.target.value)} />
+    <div style={{
+      border: `1.5px solid ${isCurrent ? "var(--accent)" : plan.popular ? "var(--accent)" : "var(--border)"}`,
+      borderRadius: 14, padding: 20, position: "relative",
+      background: isCurrent ? "var(--accent-soft, rgba(99,102,241,0.07))" : "var(--bg-card)",
+      flex: 1,
+    }}>
+      {plan.popular && !isCurrent && (
+        <span style={{ position: "absolute", top: 14, right: 14, background: "var(--accent)", color: "#fff", fontSize: 11, fontWeight: 700, borderRadius: 6, padding: "2px 8px" }}>Popular</span>
+      )}
+      {isCurrent && (
+        <span style={{ position: "absolute", top: 14, right: 14, background: "var(--success)", color: "#fff", fontSize: 11, fontWeight: 700, borderRadius: 6, padding: "2px 8px" }}>Current</span>
+      )}
+      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>{plan.name}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
+        <span style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)" }}>₹{plan.price}</span>
+        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>/{plan.unit}</span>
+      </div>
+      {plan.key === "growth" && (
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Flat rate — unlimited employees</div>
+      )}
+      {plan.key === "starter" && (
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Up to 100 employees per org</div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, margin: "14px 0 16px" }}>
+        {plan.features.map((f) => (
+          <div key={f} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--text-secondary)" }}>
+            <Check size={13} color="var(--success)" /> {f}
           </div>
         ))}
-        {err && <div style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 12 }}>{err}</div>}
-        <div style={{ display: "flex", gap: 10 }}>
-          <Button icon={Plus} onClick={submit} disabled={saving}>{saving ? "Adding…" : "Add User"}</Button>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-        </div>
       </div>
+      <button
+        onClick={() => onSelect(plan.key)}
+        disabled={isCurrent || loading}
+        style={{
+          width: "100%", padding: "10px 0", borderRadius: 10, border: "none",
+          background: isCurrent ? "var(--bg-hover)" : "var(--accent)",
+          color: isCurrent ? "var(--text-muted)" : "#fff",
+          fontWeight: 700, fontSize: 13.5, cursor: isCurrent ? "default" : "pointer",
+        }}
+      >
+        {isCurrent ? "Current Plan" : `Select ${plan.name}`}
+      </button>
     </div>
   );
 }
 
-const FEATURES = [
-  "Call tracking", "Call recording", "Call logs",
-  "AI Transcript", "Transcribe", "Dashboard Analytics",
-];
-
 export default function Subscription() {
-  const { user } = useAuth();
   const { loading, error, data, reload } = useResource(() => dataSource.getSubscription());
-  const [showAdd, setShowAdd] = useState(false);
+  const [coupon, setCoupon] = useState("");
+  const [couponMsg, setCouponMsg] = useState(null);
+  const [couponApplying, setCouponApplying] = useState(false);
+  const [planLoading, setPlanLoading] = useState(false);
 
   if (loading) return <PageContainer><Card><LoadingState message="Loading subscription..." /></Card></PageContainer>;
-  if (error) return <PageContainer><Card><ErrorState title="Couldn't load subscription" message={error.message} code={error.error_code} onRetry={reload} /></Card></PageContainer>;
+  if (error) return <PageContainer><Card><ErrorState title="Couldn't load subscription" message={error.message} onRetry={reload} /></Card></PageContainer>;
 
-  const { users, perUser } = data;
-  const orgName = user?.organization_name || "Your Organization";
+  const { users, plan, isTrial, trialDaysLeft, trialEndsOn, perUser } = data;
+
+  async function applyCoupon() {
+    if (!coupon.trim()) return;
+    setCouponApplying(true); setCouponMsg(null);
+    try {
+      const res = await subscriptionApi.applyCoupon(coupon.trim());
+      setCouponMsg({ ok: true, text: res.message || "Coupon applied!" });
+      reload();
+    } catch (e) {
+      setCouponMsg({ ok: false, text: e?.response?.data?.detail || "Invalid coupon code." });
+    } finally { setCouponApplying(false); }
+  }
+
+  async function selectPlan(planKey) {
+    setPlanLoading(true);
+    try {
+      await subscriptionApi.selectPlan(planKey);
+      reload();
+    } catch (e) {
+      alert(e?.response?.data?.detail || "Failed to select plan.");
+    } finally { setPlanLoading(false); }
+  }
 
   return (
     <PageContainer>
-      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 16 }} className="callos-grid-2">
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 860 }}>
+
+        {/* Current Plan */}
         <Card>
-          <CardHeader icon={CreditCard} title="Current Plan" subtitle={orgName} action={<Badge tone="success">Active</Badge>} />
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 8 }}>
-            <span style={{ fontSize: 34, fontWeight: 800, color: "var(--text-primary)" }}>₹{perUser}</span>
-            <span style={{ fontSize: 14, color: "var(--text-muted)" }}>/ user / month</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <CreditCard size={17} color="var(--accent)" />
+              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>Current Plan</span>
+            </div>
+            <Badge tone="success">Active</Badge>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18, color: "var(--text-muted)", fontSize: 13 }}>
-            <Users2 size={16} /> {users} active users · <b style={{ color: "var(--text-primary)" }}>₹{users * perUser}.00</b> / month
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
-            {FEATURES.map((f) => (
-              <div key={f} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-secondary)" }}>
-                <Check size={15} color="var(--success)" /> {f}
+
+          {isTrial ? (
+            <>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", marginBottom: 4 }}>Trial Period</div>
+              <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 10 }}>
+                Free Trial — {trialDaysLeft} Day(s) Remaining
               </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "var(--text-secondary)" }}>
+                  <Users2 size={14} /> {users} Employee(s) In Trial <span style={{ color: "var(--text-muted)" }}>(Max 10 During Trial)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "var(--text-secondary)" }}>
+                  <Calendar size={14} /> Trial ends on {trialEndsOn}
+                </div>
+              </div>
+              <div style={{ background: "var(--info-soft, rgba(59,130,246,0.08))", border: "1px solid var(--info-border, rgba(59,130,246,0.2))", borderRadius: 10, padding: "10px 14px", marginBottom: 16, display: "flex", gap: 8 }}>
+                <Info size={15} color="var(--info, #3b82f6)" style={{ flexShrink: 0, marginTop: 1 }} />
+                <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
+                  During Trial: User count automatically matches your employee count. Add or remove employees to change the count. Current count: <b>{users} user(s)</b>.
+                </span>
+              </div>
+              <button
+                onClick={() => selectPlan("starter")}
+                disabled={planLoading}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", padding: "11px 0", borderRadius: 10, border: "none", background: "var(--accent)", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}
+              >
+                ↑ Select Starter Plan <ChevronRight size={15} />
+              </button>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", marginBottom: 4, textTransform: "capitalize" }}>
+                {plan === "growth" ? "Growth Plan" : "Starter Plan"}
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10 }}>
+                <span style={{ fontSize: 30, fontWeight: 800, color: "var(--accent)" }}>
+                  ₹{plan === "growth" ? 500 : users * 100}
+                </span>
+                <span style={{ fontSize: 13, color: "var(--text-muted)" }}>/ month</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text-muted)" }}>
+                <Users2 size={15} /> {users} active employees
+              </div>
+            </>
+          )}
+        </Card>
+
+        {/* Available Plans */}
+        <Card>
+          <CardHeader icon={CreditCard} title="Available Plans" subtitle="Choose a plan that fits your needs" />
+          <div style={{ display: "flex", gap: 14, marginTop: 4 }}>
+            {PLANS.map((p) => (
+              <PlanCard key={p.key} plan={p} current={isTrial ? null : plan} onSelect={selectPlan} loading={planLoading} />
             ))}
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <Button onClick={() => window.open("mailto:billing@callingos.tzmicha.com?subject=Manage Plan", "_blank")}>Manage Plan</Button>
-            <Button variant="outline" onClick={() => setShowAdd(true)}>Add Users</Button>
           </div>
         </Card>
 
+        {/* Coupon Code */}
         <Card>
-          <CardHeader icon={CreditCard} title="Billing" subtitle="Next payment overview" />
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {[
-              { label: "Billing cycle", value: "Monthly" },
-              { label: "Amount due", value: `₹${users * perUser}.00` },
-              { label: "Payment method", value: "UPI · **** 5823" },
-            ].map((r) => (
-              <div key={r.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
-                <span style={{ color: "var(--text-muted)" }}>{r.label}</span>
-                <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{r.value}</span>
-              </div>
-            ))}
+          <CardHeader icon={Tag} title="Coupon Code" subtitle="Have a discount code? Apply it here" />
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <input
+              value={coupon}
+              onChange={(e) => setCoupon(e.target.value.toUpperCase())}
+              placeholder="Enter coupon code"
+              style={{ flex: 1, padding: "10px 13px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13.5, outline: "none", letterSpacing: 1 }}
+              onKeyDown={(e) => e.key === "Enter" && applyCoupon()}
+            />
+            <Button onClick={applyCoupon} disabled={couponApplying || !coupon.trim()}>
+              {couponApplying ? "Applying…" : "Apply"}
+            </Button>
+          </div>
+          {couponMsg && (
+            <div style={{ marginTop: 8, fontSize: 12.5, color: couponMsg.ok ? "var(--success)" : "var(--danger)", fontWeight: 600 }}>
+              {couponMsg.text}
+            </div>
+          )}
+        </Card>
+
+        {/* Payment History */}
+        <Card>
+          <CardHeader icon={CreditCard} title="Payment History" subtitle="View your recent transactions" />
+          <div style={{ marginTop: 8, fontSize: 13, color: "var(--text-muted)", textAlign: "center", padding: "24px 0" }}>
+            {isTrial ? "No payments yet — you're on a free trial." : "Payment history will appear here after your first billing cycle."}
           </div>
         </Card>
+
       </div>
-      {showAdd && <AddUsersModal onClose={() => setShowAdd(false)} onAdded={reload} />}
     </PageContainer>
   );
 }
-

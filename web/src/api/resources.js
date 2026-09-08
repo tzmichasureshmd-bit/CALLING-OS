@@ -73,6 +73,8 @@ export const invoicesApi = {
 
 export const subscriptionApi = {
   current: () => client.get("/subscriptions/current").then((r) => r.data),
+  selectPlan: (plan) => client.post("/subscriptions/select-plan", { plan }).then((r) => r.data),
+  applyCoupon: (code) => client.post("/subscriptions/apply-coupon", { code }).then((r) => r.data),
 };
 
 export const transcriptsApi = {
