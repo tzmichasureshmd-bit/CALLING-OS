@@ -1,5 +1,6 @@
 package com.tzmicha.callnexa
 
+import android.Manifest
 import android.content.pm.PackageManager
 import android.database.Cursor
 import android.provider.CallLog
@@ -9,181 +10,80 @@ import com.facebook.react.bridge.*
 class CallLogModule(private val reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
-    override fun getName(): String = "CallLogModule"
+    override fun getName() = "CallLogModule"
 
-    // ── Permission check ──────────────────────────────────────────────────────
+    // Called by nativeModules.js as _NativeCallLog.getCallLogsSince(sinceMs)
     @ReactMethod
-    fun checkPermission(promise: Promise) {
-        val granted = ContextCompat.checkSelfPermission(
-            reactContext,
-            android.Manifest.permission.READ_CALL_LOG
-        ) == PackageManager.PERMISSION_GRANTED
-        promise.resolve(granted)
-    }
-
-    // ── Query helpers ─────────────────────────────────────────────────────────
-
-    private val PROJECTION = arrayOf(
-        CallLog.Calls._ID,
-        CallLog.Calls.NUMBER,
-        CallLog.Calls.CACHED_NAME,
-        CallLog.Calls.TYPE,
-        CallLog.Calls.DATE,
-        CallLog.Calls.DURATION,
-        CallLog.Calls.NEW,
-        CallLog.Calls.PHONE_ACCOUNT_ID,
-        // Optional columns — handled safely
-        "is_read",
-        "voicemail_uri",
-        "cached_number_type",
-        "cached_number_label",
-        "phone_account_component_name"
-    )
-
-    private fun mapType(type: Int): String = when (type) {
-        CallLog.Calls.INCOMING_TYPE  -> "incoming"
-        CallLog.Calls.OUTGOING_TYPE  -> "outgoing"
-        CallLog.Calls.MISSED_TYPE    -> "missed"
-        CallLog.Calls.REJECTED_TYPE  -> "rejected"
-        CallLog.Calls.BLOCKED_TYPE   -> "blocked"
-        CallLog.Calls.VOICEMAIL_TYPE -> "voicemail"
-        else                         -> "unknown"
-    }
-
-    private fun safeGetString(cursor: Cursor, col: String): String? {
-        return try {
-            val idx = cursor.getColumnIndex(col)
-            if (idx >= 0 && !cursor.isNull(idx)) cursor.getString(idx) else null
-        } catch (_: Exception) { null }
-    }
-
-    private fun safeGetLong(cursor: Cursor, col: String): Long? {
-        return try {
-            val idx = cursor.getColumnIndex(col)
-            if (idx >= 0 && !cursor.isNull(idx)) cursor.getLong(idx) else null
-        } catch (_: Exception) { null }
-    }
-
-    private fun safeGetInt(cursor: Cursor, col: String): Int? {
-        return try {
-            val idx = cursor.getColumnIndex(col)
-            if (idx >= 0 && !cursor.isNull(idx)) cursor.getInt(idx) else null
-        } catch (_: Exception) { null }
-    }
-
-    private fun cursorToMap(cursor: Cursor): WritableMap {
-        val map = Arguments.createMap()
-        val id       = safeGetLong(cursor, CallLog.Calls._ID)
-        val number   = safeGetString(cursor, CallLog.Calls.NUMBER)
-        val name     = safeGetString(cursor, CallLog.Calls.CACHED_NAME)
-        val typeInt  = safeGetInt(cursor, CallLog.Calls.TYPE) ?: 0
-        val date     = safeGetLong(cursor, CallLog.Calls.DATE)
-        val duration = safeGetLong(cursor, CallLog.Calls.DURATION)
-        val isNew    = safeGetInt(cursor, CallLog.Calls.NEW)
-        val accountId = safeGetString(cursor, CallLog.Calls.PHONE_ACCOUNT_ID)
-
-        map.putString("id",              id?.toString())
-        map.putString("number",          number ?: "")
-        map.putString("name",            name ?: "")
-        map.putInt   ("type",            typeInt)
-        map.putString("typeName",        mapType(typeInt))
-        map.putString("date",            date?.toString() ?: "0")
-        map.putString("duration",        (duration ?: 0L).toString())
-        map.putInt   ("new",             isNew ?: 0)
-        map.putString("phoneAccountId",  accountId ?: "")
-
-        // Optional fields — safe
-        map.putString("isRead",          safeGetString(cursor, "is_read"))
-        map.putString("voicemailUri",    safeGetString(cursor, "voicemail_uri"))
-        map.putString("cachedNumberType",safeGetString(cursor, "cached_number_type"))
-        map.putString("cachedNumberLabel",safeGetString(cursor, "cached_number_label"))
-        map.putString("phoneAccountComponentName", safeGetString(cursor, "phone_account_component_name"))
-
-        return map
-    }
-
-    // ── getCallLogs(sinceMs, limit) ───────────────────────────────────────────
-    // Primary method. Queries CallLog.Calls.CONTENT_URI directly.
-    // sinceMs = 0 means no date filter (get all).
-    // limit = 0 means no limit.
-    @ReactMethod
-    fun getCallLogs(sinceMs: Double, limit: Int, promise: Promise) {
-        if (ContextCompat.checkSelfPermission(
-                reactContext, android.Manifest.permission.READ_CALL_LOG
-            ) != PackageManager.PERMISSION_GRANTED) {
-            promise.reject("PERMISSION_DENIED", "READ_CALL_LOG permission not granted")
-            return
-        }
-
+    fun getCallLogsSince(sinceMs: Double, promise: Promise) {
         try {
-            val selection     = if (sinceMs > 0) "${CallLog.Calls.DATE} >= ?" else null
-            val selectionArgs = if (sinceMs > 0) arrayOf(sinceMs.toLong().toString()) else null
-            val sortOrder     = "${CallLog.Calls.DATE} DESC" + (if (limit > 0) " LIMIT $limit" else "")
+            if (ContextCompat.checkSelfPermission(reactContext, Manifest.permission.READ_CALL_LOG)
+                != PackageManager.PERMISSION_GRANTED) {
+                val result = Arguments.createMap()
+                result.putBoolean("success", false)
+                result.putString("error", "READ_CALL_LOG permission not granted")
+                result.putArray("records", Arguments.createArray())
+                promise.resolve(result)
+                return
+            }
+
+            val records = Arguments.createArray()
+            val projection = arrayOf(
+                CallLog.Calls._ID,
+                CallLog.Calls.NUMBER,
+                CallLog.Calls.CACHED_NAME,
+                CallLog.Calls.TYPE,
+                CallLog.Calls.DATE,
+                CallLog.Calls.DURATION,
+                CallLog.Calls.PHONE_ACCOUNT_ID,
+            )
 
             val cursor: Cursor? = reactContext.contentResolver.query(
                 CallLog.Calls.CONTENT_URI,
-                null,          // null = all columns (safer than fixed projection on OEM devices)
-                selection,
-                selectionArgs,
-                sortOrder
+                projection,
+                "${CallLog.Calls.DATE} >= ?",
+                arrayOf(sinceMs.toLong().toString()),
+                "${CallLog.Calls.DATE} DESC"
             )
 
-            val results = Arguments.createArray()
-            cursor?.use { c ->
-                while (c.moveToNext()) {
-                    results.pushMap(cursorToMap(c))
+            cursor?.use {
+                val idIdx     = it.getColumnIndex(CallLog.Calls._ID)
+                val numIdx    = it.getColumnIndex(CallLog.Calls.NUMBER)
+                val nameIdx   = it.getColumnIndex(CallLog.Calls.CACHED_NAME)
+                val typeIdx   = it.getColumnIndex(CallLog.Calls.TYPE)
+                val dateIdx   = it.getColumnIndex(CallLog.Calls.DATE)
+                val durIdx    = it.getColumnIndex(CallLog.Calls.DURATION)
+                val subIdx    = it.getColumnIndex(CallLog.Calls.PHONE_ACCOUNT_ID)
+
+                while (it.moveToNext()) {
+                    val map = Arguments.createMap()
+                    map.putString("id",             if (idIdx   >= 0) it.getString(idIdx)   else null)
+                    map.putString("number",         if (numIdx  >= 0) it.getString(numIdx)  else null)
+                    map.putString("name",           if (nameIdx >= 0) it.getString(nameIdx) else null)
+                    map.putInt   ("type",           if (typeIdx >= 0) it.getInt(typeIdx)    else 0)
+                    map.putString("date",           if (dateIdx >= 0) it.getString(dateIdx) else null)
+                    map.putInt   ("duration",       if (durIdx  >= 0) it.getInt(durIdx)     else 0)
+                    map.putString("phoneAccountId", if (subIdx  >= 0) it.getString(subIdx)  else null)
+                    records.pushMap(map)
                 }
             }
 
-            val out = Arguments.createMap()
-            out.putBoolean("success", true)
-            out.putBoolean("permissionGranted", true)
-            out.putInt("count", results.size())
-            out.putArray("records", results)
-            promise.resolve(out)
-
+            val result = Arguments.createMap()
+            result.putBoolean("success", true)
+            result.putArray("records", records)
+            promise.resolve(result)
         } catch (e: Exception) {
-            val out = Arguments.createMap()
-            out.putBoolean("success", false)
-            out.putBoolean("permissionGranted", true)
-            out.putInt("count", 0)
-            out.putArray("records", Arguments.createArray())
-            out.putString("error", e.message ?: "Unknown error")
-            promise.resolve(out)
+            val result = Arguments.createMap()
+            result.putBoolean("success", false)
+            result.putString("error", e.message ?: "Unknown error")
+            result.putArray("records", Arguments.createArray())
+            promise.resolve(result)
         }
     }
 
-    // ── getCallLogsSince(sinceMs) ─────────────────────────────────────────────
+    // Legacy method kept for compatibility
     @ReactMethod
-    fun getCallLogsSince(sinceMs: Double, promise: Promise) {
-        getCallLogs(sinceMs, 0, promise)
-    }
-
-    // ── getLatestCallLogs(limit) ──────────────────────────────────────────────
-    @ReactMethod
-    fun getLatestCallLogs(limit: Int, promise: Promise) {
-        getCallLogs(0.0, limit, promise)
-    }
-
-    // ── getCallLogCount() ─────────────────────────────────────────────────────
-    @ReactMethod
-    fun getCallLogCount(promise: Promise) {
-        if (ContextCompat.checkSelfPermission(
-                reactContext, android.Manifest.permission.READ_CALL_LOG
-            ) != PackageManager.PERMISSION_GRANTED) {
-            promise.resolve(0)
-            return
-        }
-        try {
-            val cursor = reactContext.contentResolver.query(
-                CallLog.Calls.CONTENT_URI, arrayOf(CallLog.Calls._ID),
-                null, null, null
-            )
-            val count = cursor?.count ?: 0
-            cursor?.close()
-            promise.resolve(count)
-        } catch (e: Exception) {
-            promise.resolve(0)
-        }
+    fun getCallLog(limitDays: Double, promise: Promise) {
+        val sinceMs = System.currentTimeMillis() - (limitDays * 24 * 60 * 60 * 1000).toLong()
+        getCallLogsSince(sinceMs.toDouble(), promise)
     }
 }
