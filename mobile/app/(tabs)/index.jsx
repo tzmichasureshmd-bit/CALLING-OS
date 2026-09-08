@@ -34,23 +34,47 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [localCounts, setLocalCounts] = useState({ total: 0, incoming: 0, outgoing: 0, missed: 0, rejected: 0 });
 
-  const loadLocalCounts = useCallback(() => {
-    getRealCallLog(1).then((calls) => {
-      setLocalCounts({
-        total:    calls.length,
-        incoming: calls.filter((c) => c.call_type === "incoming").length,
-        outgoing: calls.filter((c) => c.call_type === "outgoing").length,
-        missed:   calls.filter((c) => c.call_type === "missed").length,
-        rejected: calls.filter((c) => c.call_type === "rejected").length,
+  const loadLocalCounts = useCallback((r = range) => {
+    const daysMap = { "Today": 1, "Yesterday": 2, "Last Week": 7, "Last 30": 30 };
+    const days = daysMap[r] || 1;
+    getRealCallLog(days).then((calls) => {
+      let filtered = calls;
+      if (r === "Yesterday") {
+        const yStart = new Date(); yStart.setDate(yStart.getDate() - 1); yStart.setHours(0,0,0,0);
+        const yEnd   = new Date(); yEnd.setDate(yEnd.getDate() - 1);   yEnd.setHours(23,59,59,999);
+        filtered = calls.filter((c) => { const t = new Date(c.start_time).getTime(); return t >= yStart.getTime() && t <= yEnd.getTime(); });
+      } else if (r === "Today") {
+        const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+        filtered = calls.filter((c) => new Date(c.start_time).getTime() >= todayStart.getTime());
+      }
+      const total    = filtered.length;
+      const incoming = filtered.filter((c) => c.call_type === "incoming").length;
+      const outgoing = filtered.filter((c) => c.call_type === "outgoing").length;
+      const missed   = filtered.filter((c) => c.call_type === "missed").length;
+      const connected = incoming + outgoing;
+      const connectedPct = total ? Math.round(connected / total * 100) : 0;
+      setLocalCounts({ total, incoming, outgoing, missed, rejected: filtered.filter((c) => c.call_type === "rejected").length });
+      // If backend returned nothing, populate m with local data
+      setM((prev) => prev.totalCalls > 0 ? prev : {
+        ...prev,
+        totalCalls: total,
+        connected,
+        connectedPct,
+        missed,
+        callMix: [
+          { label: "Incoming", value: total ? Math.round(incoming/total*100) : 0, color: palette.teal },
+          { label: "Outgoing", value: total ? Math.round(outgoing/total*100) : 0, color: palette.violet },
+          { label: "Missed",   value: total ? Math.round(missed/total*100)   : 0, color: palette.red },
+        ],
       });
     }).catch(() => {});
-  }, []);
+  }, [range]);
 
-  useEffect(() => { loadLocalCounts(); }, []);
+  useEffect(() => { loadLocalCounts(range); }, [range]);
 
   const load = useCallback((r = range, isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
-    if (isRefresh) loadLocalCounts(); // refresh local counts too
+    if (isRefresh) loadLocalCounts(r); // refresh local counts too
     api.getAnalytics(RANGE_MAP[r] || "today")
       .then((res) => {
         const kpis = res.kpis || {};
@@ -164,10 +188,10 @@ export default function Home() {
           ))}
         </View>
 
-        {/* Hero card */}
+        {/* Hero card — uses backend data if available, falls back to local counts */}
         <Card style={{ marginBottom: 16 }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
-            <HeroStat theme={theme} icon="call" iconColor={palette.teal} label="Total Calls" value={m.totalCalls} />
+            <HeroStat theme={theme} icon="call" iconColor={palette.teal} label="Total Calls" value={m.totalCalls || localCounts.total} />
             <HeroStat theme={theme} icon="time-outline" iconColor={palette.violet} label="Talk Time" value={m.talkTime} align="right" />
           </View>
           <View style={{ alignItems: "center", marginVertical: 6 }}>

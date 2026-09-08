@@ -14,7 +14,44 @@ import { syncSimInventory } from "./simInventoryService";
 
 const AuthContext = createContext(null);
 
-const FIRST_SYNC_KEY = "callos_first_sync_done";
+const FIRST_SYNC_KEY   = "callos_first_sync_done";
+const INSTALL_DATE_KEY = "callos_install_date";
+const LAST_SYNC_TS_KEY = "callos_last_sync_ts";
+const BATCH_SIZE       = 50;
+const BATCH_DELAY_MS   = 600;
+
+// Save install date once — never overwrite
+async function ensureInstallDate() {
+  const existing = await AsyncStorage.getItem(INSTALL_DATE_KEY).catch(() => null);
+  if (!existing) {
+    await AsyncStorage.setItem(INSTALL_DATE_KEY, new Date().toISOString());
+  }
+}
+
+// Batch sync helper — never sends more than BATCH_SIZE at once
+async function batchSync(deviceId, calls) {
+  if (!deviceId || !calls.length) return { accepted: 0, duplicates: 0, failed: 0 };
+  let totalAccepted = 0, totalDup = 0, totalFailed = 0;
+  const syncedCalls = [];
+  for (let i = 0; i < calls.length; i += BATCH_SIZE) {
+    const batch = calls.slice(i, i + BATCH_SIZE);
+    try {
+      const res = await api.syncCalls(deviceId, batch);
+      totalAccepted += res.accepted || 0;
+      totalDup      += res.duplicates || 0;
+      totalFailed   += res.failed || 0;
+      syncedCalls.push(...batch);
+      console.log(`[SYNC] batch ${Math.floor(i/BATCH_SIZE)+1}/${Math.ceil(calls.length/BATCH_SIZE)}: accepted=${res.accepted} dup=${res.duplicates}`);
+    } catch (e) {
+      console.warn(`[SYNC] batch failed: ${e?.message}`);
+    }
+    if (i + BATCH_SIZE < calls.length) {
+      await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+    }
+  }
+  if (syncedCalls.length) await markCallsSynced(syncedCalls);
+  return { accepted: totalAccepted, duplicates: totalDup, failed: totalFailed };
+}
 
 // ── Live device heartbeat ─────────────────────────────────────────────────────
 /**
@@ -136,47 +173,59 @@ async function ensureDevice(user) {
   }
 }
 
-// ── First-time full sync ──────────────────────────────────────────────────────
-// Always reads 90 days and syncs. FIRST_SYNC_KEY only set on confirmed success.
-// Retries on every login/app-start until backend confirms at least 1 accepted.
+// ── First-time sync — only calls FROM install date onwards ──────────────────
+// Fresh install = user only wants calls from today, not 90 days of history.
+// This prevents the 800-call crash on first login.
 export async function doFirstFullSync(deviceId) {
+  if (!deviceId) return { accepted: 0, total: 0 };
   try {
-    const allCalls = await getRealCallLog(90);
+    await ensureInstallDate();
+    const installDateStr = await AsyncStorage.getItem(INSTALL_DATE_KEY);
+    const installDate    = installDateStr ? new Date(installDateStr) : new Date();
+    const daysSinceInstall = Math.max(1, Math.ceil((Date.now() - installDate.getTime()) / 86400000));
+    // Cap at 7 days — never load 90 days on first sync
+    const daysToRead = Math.min(daysSinceInstall, 7);
+
+    console.log(`[SYNC] firstSync: reading ${daysToRead} days (installed ${daysSinceInstall}d ago)`);
+    const allCalls = await getRealCallLog(daysToRead);
+    console.log(`[SYNC] firstSync: ${allCalls.length} calls found`);
+
     if (!allCalls.length) {
-      console.log("[CallNexa] FIRST_SYNC: 0 calls in last 90 days");
+      await AsyncStorage.setItem(FIRST_SYNC_KEY, "1");
+      await AsyncStorage.setItem(LAST_SYNC_TS_KEY, String(Date.now()));
       return { accepted: 0, total: 0 };
     }
-    console.log(`[CallNexa] FIRST_SYNC: syncing ${allCalls.length} calls`);
-    const result = await api.syncCalls(deviceId, allCalls);
-    console.log(`[CallNexa] FIRST_SYNC_RESULT: accepted=${result.accepted} dup=${result.duplicates}`);
-    if (result.accepted > 0 || result.duplicates > 0) {
-      await markCallsSynced(allCalls);
-      await AsyncStorage.setItem(FIRST_SYNC_KEY, "1");
-    }
-    return result;
+
+    const result = await batchSync(deviceId, allCalls);
+    await AsyncStorage.setItem(FIRST_SYNC_KEY, "1");
+    await AsyncStorage.setItem(LAST_SYNC_TS_KEY, String(Date.now()));
+    console.log(`[SYNC] firstSync done: accepted=${result.accepted} dup=${result.duplicates}`);
+    return { ...result, total: allCalls.length };
   } catch (e) {
-    console.warn("[CallNexa] FIRST_SYNC_ERROR:", e?.message);
+    console.warn(`[SYNC] firstSync ERROR: ${e?.message}`);
     return { accepted: 0, total: 0, error: e?.message };
   }
 }
 
-// ── App-start reconciliation ──────────────────────────────────────────────────
-/**
- * On every app start (not just first login), re-read the last 7 days
- * and sync anything not yet confirmed. This is the safety net for:
- * - Calls made while app was killed
- * - Calls missed due to cursor issues
- * - Calls from phone restart
- * Server deduplication handles any re-sends safely.
- */
+// ── Incremental sync — only new calls since last sync ────────────────────────
 async function doStartReconciliation(deviceId) {
   try {
-    const newCalls = await getNewCallsSinceLastSync();
+    const lastSyncTs = await AsyncStorage.getItem(LAST_SYNC_TS_KEY).catch(() => null);
+    // Only look back max 2 days to find new calls — not 7 days
+    const lookbackDays = lastSyncTs
+      ? Math.min(2, Math.ceil((Date.now() - parseInt(lastSyncTs)) / 86400000) + 0.1)
+      : 1;
+    const allRecent = await getRealCallLog(lookbackDays);
+    if (!allRecent.length) return;
+
+    const raw = await AsyncStorage.getItem("callos_synced_ids").catch(() => null);
+    const synced = raw ? new Set(JSON.parse(raw)) : new Set();
+    const newCalls = allRecent.filter(c => !synced.has(c.client_event_id));
+
     if (!newCalls.length) return;
-    const result = await api.syncCalls(deviceId, newCalls);
-    if (result.accepted > 0 || result.duplicates === newCalls.length) {
-      await markCallsSynced(newCalls);
-    }
+    console.log(`[SYNC] reconcile: ${newCalls.length} new calls`);
+    await batchSync(deviceId, newCalls);
+    await AsyncStorage.setItem(LAST_SYNC_TS_KEY, String(Date.now()));
   } catch { /* silent */ }
 }
 
@@ -189,6 +238,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     (async () => {
       const u = await getStoredUser();
+      await ensureInstallDate(); // save install date on every app open (first time only)
       if (u) {
         setUser(u);
         const d = await getDeviceId();
@@ -212,7 +262,15 @@ export function AuthProvider({ children }) {
 
         if (d) {
           sendHeartbeat(d).catch(() => {});
-          doStartReconciliation(d).catch(() => {});
+          // Always attempt reconciliation on app start
+          // doFirstFullSync retries until backend confirms
+          const firstDone = await AsyncStorage.getItem(FIRST_SYNC_KEY);
+          if (!firstDone) {
+            console.log("[SYNC] App start: first sync not done, running doFirstFullSync");
+            doFirstFullSync(d).catch(() => {});
+          } else {
+            doStartReconciliation(d).catch(() => {});
+          }
           syncSimInventory(d).catch(() => {});
         }
       }
@@ -234,16 +292,15 @@ export function AuthProvider({ children }) {
       requestAllPermissions().catch(() => {});
     }
 
-    // Register device, then immediately sync 90 days of calls.
-    // Awaited so calls are synced BEFORE the user reaches the dashboard.
+    // Register device then sync from install date — non-blocking after login
     try {
       const dId = await ensureDevice(userData);
       if (dId) {
         setDeviceId(dId);
         await sendHeartbeat(dId).catch(() => {});
         syncSimInventory(dId, true).catch(() => {});
-        // Sync 90 days — this is the critical path. User sees real calls immediately.
-        await doFirstFullSync(dId);
+        // doFirstFullSync reads only from install date (max 7 days) — safe, no crash
+        doFirstFullSync(dId).catch(() => {});
       }
     } catch { /* device/sync failure must not block login */ }
 
@@ -269,20 +326,15 @@ export function AuthProvider({ children }) {
 
   const syncCalls = useCallback(async (fallbackCalls) => {
     if (!deviceId) return { accepted: 0, error: "No device registered" };
-    const firstDone = await AsyncStorage.getItem(FIRST_SYNC_KEY);
-    let calls;
-    if (!firstDone) {
-      calls = await getRealCallLog(90);
-    } else {
-      calls = await getNewCallsSinceLastSync();
-    }
-    const payload = calls.length > 0 ? calls : (fallbackCalls ?? []);
+    const raw = await AsyncStorage.getItem("callos_synced_ids").catch(() => null);
+    const synced = raw ? new Set(JSON.parse(raw)) : new Set();
+    // Only read last 2 days for manual sync — never 90 days
+    const recent = await getRealCallLog(2).catch(() => []);
+    const newCalls = recent.filter(c => !synced.has(c.client_event_id));
+    const payload = newCalls.length > 0 ? newCalls : (fallbackCalls ?? []);
     if (!payload.length) return { accepted: 0, duplicates: 0, failed: 0, total: 0 };
-    const result = await api.syncCalls(deviceId, payload);
-    if (result.accepted > 0 || result.duplicates === payload.length) {
-      await markCallsSynced(payload);
-      if (!firstDone) await AsyncStorage.setItem(FIRST_SYNC_KEY, "1");
-    }
+    const result = await batchSync(deviceId, payload);
+    await AsyncStorage.setItem(LAST_SYNC_TS_KEY, String(Date.now()));
     return result;
   }, [deviceId]);
 

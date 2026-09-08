@@ -44,12 +44,11 @@ async function getToken() {
 // ── HTTP client ───────────────────────────────────────────────────────────────
 
 // Retry fetch with exponential backoff — works on both WiFi and mobile data
-async function fetchWithRetry(url, options, retries = 3) {
+async function fetchWithRetry(url, options, retries = 2) {
   let lastErr;
   for (let i = 0; i < retries; i++) {
     const controller = new AbortController();
-    // Longer timeout on retries to handle slow mobile data
-    const timeout = 20000 + i * 10000; // 20s, 30s, 40s
+    const timeout = 10000; // 10s flat — no escalation
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
       const res = await fetch(url, { ...options, signal: controller.signal });
@@ -58,12 +57,7 @@ async function fetchWithRetry(url, options, retries = 3) {
     } catch (e) {
       clearTimeout(timer);
       lastErr = e;
-      if (e.name === "AbortError" && i < retries - 1) {
-        // Wait before retry: 1s, 2s
-        await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
-        continue;
-      }
-      throw e;
+      if (i < retries - 1) await new Promise((r) => setTimeout(r, 1000));
     }
   }
   throw lastErr;

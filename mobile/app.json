@@ -38,6 +38,7 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
       ]
     },
@@ -51,6 +52,7 @@
       "./plugins/withCallLog",
       "./plugins/withSimCards",
       "./plugins/withCallLogModule",
+      "./plugins/withForegroundService",
       ["expo-location", { "locationAlwaysAndWhenInUsePermission": "Allow CallNexa to track device location for manager dashboard." }],
       [
         "expo-notifications",

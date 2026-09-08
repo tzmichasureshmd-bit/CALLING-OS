@@ -99,29 +99,31 @@ function NotifPanel({ visible, onClose }) {
 }
 
 // ---- Connection Status Hook ----
+// Shows whether the backend sync is reachable — not internet connectivity.
+// App always works offline (local call log). Only shows "Offline" if backend unreachable.
 function useConnectionStatus() {
-  const [status, setStatus] = useState("checking"); // "connected" | "disconnected" | "checking"
+  const [status, setStatus] = useState("connected");
 
   useEffect(() => {
     let cancelled = false;
+    let timer;
 
     async function check() {
       try {
         const BASE = process.env.EXPO_PUBLIC_API_URL || "https://api.callingos.tzmicha.com/api/v1";
-        const url = BASE.replace("/api/v1", "") + "/health";
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 5000);
-        const res = await fetch(url, { method: "GET", signal: controller.signal });
-        clearTimeout(timer);
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 5000);
+        const res = await fetch(BASE.replace("/api/v1", "") + "/health", { signal: ctrl.signal });
+        clearTimeout(t);
         if (!cancelled) setStatus(res.ok ? "connected" : "disconnected");
       } catch {
         if (!cancelled) setStatus("disconnected");
       }
+      if (!cancelled) timer = setTimeout(check, 60000); // re-check every 60s only
     }
 
     check();
-    const interval = setInterval(check, 15000); // re-check every 15s
-    return () => { cancelled = true; clearInterval(interval); };
+    return () => { cancelled = true; clearTimeout(timer); };
   }, []);
 
   return status;
@@ -136,8 +138,7 @@ export function AppHeader({ title, subtitle, right }) {
 
   const connMeta = {
     connected:    { color: palette.emerald, bg: palette.emerald + "22", label: "Connected",    dot: palette.emerald },
-    disconnected: { color: palette.red,     bg: palette.red     + "22", label: "Disconnected", dot: palette.red     },
-    checking:     { color: palette.amber,   bg: palette.amber   + "22", label: "Connecting…",  dot: palette.amber   },
+    disconnected: { color: palette.red,     bg: palette.red     + "22", label: "No Internet",  dot: palette.red     },
   };
   const cm = connMeta[connStatus];
 

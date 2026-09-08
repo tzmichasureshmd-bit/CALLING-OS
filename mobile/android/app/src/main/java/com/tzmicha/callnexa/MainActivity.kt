@@ -1,5 +1,6 @@
 package com.tzmicha.callnexa
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 
@@ -12,11 +13,15 @@ import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
-    // Set the theme to AppTheme BEFORE onCreate to support
-    // coloring the background, status bar, and navigation bar.
-    // This is required for expo-splash-screen.
-    setTheme(R.style.AppTheme);
+    setTheme(R.style.AppTheme)
     super.onCreate(null)
+    // Start foreground service immediately so Android never kills the app
+    val svc = Intent(this, CallMonitorService::class.java)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      startForegroundService(svc)
+    } else {
+      startService(svc)
+    }
   }
 
   /**
