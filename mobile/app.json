@@ -39,7 +39,9 @@
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
-        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.WAKE_LOCK"
       ]
     },
     "plugins": [
@@ -53,7 +55,12 @@
       "./plugins/withSimCards",
       "./plugins/withCallLogModule",
       "./plugins/withForegroundService",
-      ["expo-location", { "locationAlwaysAndWhenInUsePermission": "Allow CallNexa to track device location for manager dashboard." }],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow CallNexa to track device location for manager dashboard."
+        }
+      ],
       [
         "expo-notifications",
         {
@@ -69,8 +76,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "927dc1f9-cc07-4431-afa1-0f92fb4d72b1"
+        "projectId": "66cd6c4d-0311-40a4-91c8-ebd924306ced"
       }
-    }
+    },
+    "owner": "evens6517"
   }
 }

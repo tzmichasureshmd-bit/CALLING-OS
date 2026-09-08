@@ -137,9 +137,9 @@ export default function Profile() {
       await AsyncStorage.setItem(LAST_SYNC_KEY, String(now));
       setLastSync(new Date(now).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' }));
       if (lastError && totalAccepted === 0 && totalDup === 0) {
-        Alert.alert('Sync Failed', 'Error: ' + lastError + '\n\nDevice: ' + deviceId + '\nCalls found: ' + allCalls.length);
+        Alert.alert('Sync Failed', 'Err:' + lastError + '\nDev:' + deviceId + '\nCalls:' + allCalls.length);
       } else {
-        Alert.alert('Sync Done', totalAccepted + ' new, ' + totalDup + ' duplicates, ' + allCalls.length + ' total' + (lastError ? '\n(partial: ' + lastError + ')' : ''));
+        Alert.alert('Sync Done', totalAccepted + ' new, ' + totalDup + ' dup, ' + allCalls.length + ' total\nDev:' + deviceId + (lastError ? '\nErr:' + lastError : ''));
       }
     } catch (e) {
       Alert.alert('Sync Error', (e.message || String(e)) + '\n\nDevice ID: ' + (deviceId || 'NULL'));
