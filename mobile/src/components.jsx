@@ -107,19 +107,25 @@ function useConnectionStatus() {
   useEffect(() => {
     let cancelled = false;
     let timer;
+    let failCount = 0;
 
     async function check() {
       try {
         const BASE = process.env.EXPO_PUBLIC_API_URL || "https://api.callingos.tzmicha.com/api/v1";
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 5000);
+        const t = setTimeout(() => ctrl.abort(), 8000); // 8s timeout
         const res = await fetch(BASE.replace("/api/v1", "") + "/health", { signal: ctrl.signal });
         clearTimeout(t);
-        if (!cancelled) setStatus(res.ok ? "connected" : "disconnected");
+        if (!cancelled) {
+          failCount = 0;
+          setStatus(res.ok ? "connected" : "disconnected");
+        }
       } catch {
-        if (!cancelled) setStatus("disconnected");
+        failCount++;
+        // Only show disconnected after 2 consecutive failures — prevents flicker from single timeout
+        if (!cancelled && failCount >= 2) setStatus("disconnected");
       }
-      if (!cancelled) timer = setTimeout(check, 60000); // re-check every 60s only
+      if (!cancelled) timer = setTimeout(check, 90000); // check every 90s
     }
 
     check();
@@ -143,13 +149,17 @@ export function AppHeader({ title, subtitle, right }) {
   const cm = connMeta[connStatus];
 
   useEffect(() => {
-    api.getCalls({ page_size: 5 })
-      .then((res) => {
-        const missed = (res.items || []).filter((c) => c.call_type === "missed").length;
-        setUnread(missed);
-      })
-      .catch(() => {});
-  }, []);
+    // Only fetch unread count once per session, not on every tab switch
+    const t = setTimeout(() => {
+      api.getCalls({ page_size: 5 })
+        .then((res) => {
+          const missed = (res.items || []).filter((c) => c.call_type === "missed").length;
+          setUnread(missed);
+        })
+        .catch(() => {});
+    }, 3000); // delay 3s so it doesn't block startup
+    return () => clearTimeout(t);
+  }, []); // [] = only once on mount, not on every re-render
 
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" });
 
@@ -165,13 +175,13 @@ export function AppHeader({ title, subtitle, right }) {
           ) : <Logo />}
           {!title && <Text style={{ fontSize: 11, color: theme.muted, marginTop: 2 }}>{today}</Text>}
         </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           {right}
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: cm.bg, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 }}>
             <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: cm.dot }} />
             <Text style={{ fontSize: 11, fontWeight: "700", color: cm.color }}>{cm.label}</Text>
           </View>
-          <Pressable onPress={() => setShowNotifs(true)}>
+          <Pressable onPress={() => setShowNotifs(true)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}>
             <Ionicons name="notifications-outline" size={22} color={theme.secondary} />
             {unread > 0 && (
               <View style={{ position: "absolute", top: -6, right: -8, backgroundColor: palette.red, borderRadius: 9, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 }}>

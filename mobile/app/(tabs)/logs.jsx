@@ -227,15 +227,7 @@ export default function Calls() {
       }));
       setAllCalls(mapped);
 
-      // Trigger background sync after load — non-blocking
-      if (deviceId && !syncRef.current) {
-        syncRef.current = true;
-        setSyncing(true);
-        syncInBackground(deviceId, raw)
-          .then(() => loadSyncedIds())
-          .finally(() => { syncRef.current = false; setSyncing(false); });
-      }
-    } catch { /* silent */ } finally {
+      // Background sync is handled by syncService.useAutoSync — no duplicate sync here
       setLoading(false);
       setRefreshing(false);
     }
@@ -357,20 +349,9 @@ export default function Calls() {
           {syncing
             ? <View style={{ flexDirection:"row", alignItems:"center", gap:5 }}>
                 <ActivityIndicator size="small" color={palette.teal}/>
-                <Text style={{ fontSize:11, color:palette.teal, fontWeight:"600" }}>Syncing to dashboard…</Text>
+                <Text style={{ fontSize:11, color:palette.teal, fontWeight:"600" }}>Syncing…</Text>
               </View>
-            : <Pressable onPress={() => {
-                if (syncRef.current) return;
-                syncRef.current = true;
-                setSyncing(true);
-                getRealCallLog(rangeDays)
-                  .then(raw => syncInBackground(deviceId, raw))
-                  .then(() => loadSyncedIds())
-                  .finally(() => { syncRef.current = false; setSyncing(false); });
-              }} style={{ flexDirection:"row", alignItems:"center", gap:4, backgroundColor:palette.teal+"18", borderRadius:8, paddingHorizontal:10, paddingVertical:5 }}>
-                <Ionicons name="cloud-upload-outline" size={13} color={palette.teal}/>
-                <Text style={{ fontSize:11, color:palette.teal, fontWeight:"700" }}>Sync {rangeDays}d</Text>
-              </Pressable>
+            : <Text style={{ fontSize:11, color:theme.dim }}>{filtered.length} shown</Text>
           }
         </View>
       </View>

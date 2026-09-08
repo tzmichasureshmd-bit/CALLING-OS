@@ -221,7 +221,7 @@ export function useAutoSync() {
     sendHeartbeat();
     runSync("reconcile");
 
-    pollRef.current      = setInterval(() => runSync("foreground"), 30_000);
+    pollRef.current      = setInterval(() => runSync("foreground"), 300_000);  // 5 min — not 30s, prevents Vivo process kill
     heartbeatRef.current = setInterval(sendHeartbeat, 60_000);
 
     const sub = AppState.addEventListener("change", (next) => {
