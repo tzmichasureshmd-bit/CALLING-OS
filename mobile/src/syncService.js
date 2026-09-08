@@ -35,7 +35,7 @@ async function getBatteryLevel() {
   } catch { return null; }
 }
 
-// ── Get unsynced calls from a list ────────────────────────────────────────────
+// ── Filter unsynced calls ─────────────────────────────────────────────────────
 async function filterUnsynced(calls) {
   const raw = await AsyncStorage.getItem(SYNCED_IDS_KEY).catch(() => null);
   const synced = raw ? new Set(JSON.parse(raw)) : new Set();
@@ -51,7 +51,7 @@ async function batchPost(deviceId, calls) {
     try {
       const res = await api.syncCalls(deviceId, batch);
       synced.push(...batch);
-      console.log(`[SYNC] batch ${Math.floor(i/BATCH_SIZE)+1}: +${res.accepted} dup=${res.duplicates}`);
+      console.log(`[SYNC] batch ${Math.floor(i / BATCH_SIZE) + 1}: +${res.accepted} dup=${res.duplicates}`);
     } catch (e) {
       console.warn(`[SYNC] batch failed: ${e?.message}`);
     }
@@ -70,35 +70,33 @@ async function processUploadQueue(token) {
   if (!queue.length) return;
   const remaining = [];
   for (const item of queue) {
-    if ((item.retryCount || 0) >= 3) continue; // drop after 3 retries
+    if ((item.retryCount || 0) >= 3) continue;
     try {
       const calls = await api.getCalls({ q: item.client_event_id, page_size: 1 });
       const call  = calls?.items?.[0];
-      if (!call) { remaining.push({ ...item, retryCount: (item.retryCount||0)+1 }); continue; }
+      if (!call) { remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1 }); continue; }
       const result = await uploadRecording(call.id, item.path, token);
-      if (!result) remaining.push({ ...item, retryCount: (item.retryCount||0)+1 });
+      if (!result) remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1 });
     } catch {
-      remaining.push({ ...item, retryCount: (item.retryCount||0)+1 });
+      remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1 });
     }
   }
   await saveUploadQueue(remaining);
 }
 
 // ── Main sync cycle ───────────────────────────────────────────────────────────
-// foreground  = last 2 hours only  (called every 30s while app is open)
-// reconcile   = since last sync ts (called on app-start/resume/background)
+// foreground = last 2h only (every 30s while app open)
+// reconcile  = since last sync ts (app-start / resume / background)
 export async function runSyncCycle(deviceId, mode) {
   if (!deviceId) return;
   try {
     let candidates;
     if (mode === "foreground") {
-      // Only last 2 hours — very fast, small list
       candidates = await getRecentCalls();
     } else {
-      // Since last sync — could be minutes or hours, never days
       const lastTs = await AsyncStorage.getItem(LAST_SYNC_TS_KEY).catch(() => null);
-      const msSince = lastTs ? Date.now() - parseInt(lastTs) : 2 * 60 * 60 * 1000; // default 2h
-      const daysSince = Math.min(1, msSince / 86400000 + 0.05); // cap at 1 day
+      const msSince = lastTs ? Date.now() - parseInt(lastTs) : 2 * 60 * 60 * 1000;
+      const daysSince = Math.min(1, msSince / 86400000 + 0.05);
       candidates = await getCallsLastDays(daysSince);
     }
 
@@ -129,7 +127,12 @@ TaskManager.defineTask(BG_TASK_NAME, async () => {
       await api.heartbeat(deviceId, {
         is_online: true,
         battery_level: level,
-        permissions_status: { callLog: perms.callLog??false, phoneState: perms.phoneState??false, contacts: perms.contacts??false, recording: perms.recording??false },
+        permissions_status: {
+          callLog: perms.callLog ?? false,
+          phoneState: perms.phoneState ?? false,
+          contacts: perms.contacts ?? false,
+          recording: perms.recording ?? false,
+        },
         background_sync_status: "active",
       });
     } catch {}
@@ -181,7 +184,12 @@ export function useAutoSync() {
         await api.heartbeat(deviceId, {
           is_online: true,
           battery_level: battery,
-          permissions_status: { callLog: perms.callLog??false, phoneState: perms.phoneState??false, contacts: perms.contacts??false, recording: perms.recording??false },
+          permissions_status: {
+            callLog: perms.callLog ?? false,
+            phoneState: perms.phoneState ?? false,
+            contacts: perms.contacts ?? false,
+            recording: perms.recording ?? false,
+          },
           background_sync_status: "active",
           app_version: "1.0.0",
         });
@@ -195,11 +203,9 @@ export function useAutoSync() {
       catch {} finally { syncingRef.current = false; }
     }
 
-    // App start — reconcile since last sync
     sendHeartbeat();
     runSync("reconcile");
 
-    // Poll every 30s — foreground only reads last 2h
     pollRef.current      = setInterval(() => runSync("foreground"), 30_000);
     heartbeatRef.current = setInterval(sendHeartbeat, 60_000);
 

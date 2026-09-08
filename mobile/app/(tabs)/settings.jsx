@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   View, Text, ScrollView, Pressable, ActivityIndicator,
   Alert, Modal, TextInput, Image, RefreshControl, Linking, Switch,
@@ -33,7 +33,7 @@ export default function Profile() {
   const [sims, setSims]                   = useState([]);
   const [selectedSim, setSelectedSim]     = useState(null); // null = all SIMs
   const [deviceInfo, setDeviceInfo]       = useState({});
-  const [stats, setStats]                 = useState({ totalCalls: "â€”", connectedPct: "â€”", talkTime: "â€”" });
+  const [stats, setStats]                 = useState({ totalCalls: "—", connectedPct: "—", talkTime: "—" });
   const [editOpen, setEditOpen]           = useState(false);
   const [simOpen, setSimOpen]             = useState(false);
   const [refreshing, setRefreshing]       = useState(false);
@@ -71,17 +71,22 @@ export default function Profile() {
     if (deviceId) {
       api.heartbeat(deviceId, { is_online: true, permissions_status: perms }).catch(() => {});
     }
-    api.getAnalytics("today")
-      .then((res) => {
-        const k = res.kpis || {};
-        setStats({
-          totalCalls:   k.total_calls ?? 0,
-          connectedPct: `${k.connected_pct ?? 0}%`,
-          talkTime:     fmtSeconds(k.talk_time_seconds),
-        });
-      })
-      .catch(() => {})
-      .finally(() => setRefreshing(false));
+    // Load stats from local call log � no backend needed
+    try {
+      const { getRealCallLog } = require("../../src/callLogService");
+      const todayCalls = await getRealCallLog(1);
+      const now = new Date(); now.setHours(0,0,0,0);
+      const today = todayCalls.filter(c => new Date(c.start_time) >= now);
+      const connected = today.filter(c => c.duration_seconds > 0).length;
+      const totalSecs = today.reduce((s, c) => s + (c.duration_seconds || 0), 0);
+      const h = Math.floor(totalSecs / 3600), m = Math.floor((totalSecs % 3600) / 60);
+      setStats({
+        totalCalls:   today.length,
+        connectedPct: today.length ? `${Math.round(connected/today.length*100)}%` : "0%",
+        talkTime:     totalSecs > 0 ? (h > 0 ? `${h}h ${m}m` : `${m}m`) : "0m",
+      });
+    } catch { /* silent */ }
+    setRefreshing(false);
   }, [deviceId]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -98,24 +103,37 @@ export default function Profile() {
     try {
       const { getRealCallLog, markCallsSynced } = require("../../src/callLogService");
       const { api: _api } = require("../../src/api");
-      let allCalls = await getRealCallLog(90);
+      const BATCH = 50;
+      // Read last 7 days only � not 90 (crash risk)
+      let allCalls = await getRealCallLog(7);
       if (selectedSim !== null) {
         allCalls = allCalls.filter((c) => (c.sim_slot !== undefined ? c.sim_slot - 1 : null) === selectedSim);
       }
       if (!allCalls.length) {
         setSyncResult({ accepted: 0, duplicates: 0, failed: 0 });
-        Alert.alert("No Calls Found", selectedSim !== null
-          ? `No calls for SIM ${selectedSim + 1} in last 90 days.`
-          : "No calls found in last 90 days.");
+        Alert.alert("No Calls Found", "No calls found in last 7 days.");
         return;
       }
-      const result = await _api.syncCalls(deviceId, allCalls);
-      if (result.accepted > 0 || result.duplicates > 0) await markCallsSynced(allCalls);
+      // Batch sync � 50 at a time
+      let totalAccepted = 0, totalDup = 0;
+      const synced = [];
+      for (let i = 0; i < allCalls.length; i += BATCH) {
+        const batch = allCalls.slice(i, i + BATCH);
+        try {
+          const res = await _api.syncCalls(deviceId, batch);
+          totalAccepted += res.accepted || 0;
+          totalDup      += res.duplicates || 0;
+          synced.push(...batch);
+        } catch { /* continue */ }
+        if (i + BATCH < allCalls.length) await new Promise(r => setTimeout(r, 500));
+      }
+      if (synced.length) await markCallsSynced(synced);
+      const result = { accepted: totalAccepted, duplicates: totalDup, failed: 0 };
       setSyncResult(result);
       const now = Date.now();
       await AsyncStorage.setItem(LAST_SYNC_KEY, String(now));
       setLastSync(new Date(now).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" }));
-      Alert.alert("Sync Complete", `${result.accepted} new  ${result.duplicates} duplicates  ${allCalls.length} total read`);
+      Alert.alert("Sync Complete", `${result.accepted} new  ${result.duplicates} duplicates  ${allCalls.length} total`);
     } catch (e) {
       Alert.alert("Sync Failed", e.message);
     } finally { setSyncing(false); }
@@ -127,7 +145,7 @@ export default function Profile() {
     if (!result[key]) {
       Alert.alert(
         "Permission Required",
-        "Please enable this permission in your device Settings â†’ Apps â†’ CallNexa â†’ Permissions.",
+        "Please enable this permission in your device Settings → Apps → CallNexa → Permissions.",
         [
           { text: "Open Settings", onPress: () => Linking.openSettings() },
           { text: "Cancel", style: "cancel" },
@@ -144,7 +162,7 @@ export default function Profile() {
       if (!result.recording) {
         Alert.alert(
           "Microphone Permission Required",
-          "Go to Settings â†’ Apps â†’ CallNexa â†’ Permissions â†’ Microphone and enable it.",
+          "Go to Settings → Apps → CallNexa → Permissions → Microphone and enable it.",
           [{ text: "Open Settings", onPress: () => Linking.openSettings() }, { text: "Cancel", style: "cancel" }]
         );
         return;
@@ -194,45 +212,45 @@ export default function Profile() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadAll(true)} tintColor={palette.teal} />}
       >
-        {/* â”€â”€ Profile header â”€â”€ */}
-        <View style={{ padding: 16 }}>
-          <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ borderRadius: 22, padding: 20 }}>
-            <Pressable onPress={() => setEditOpen(true)} style={{ position: "absolute", top: 16, right: 16, width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name="create-outline" size={17} color="#fff" />
-            </Pressable>
+        {/* ── Profile header ── */}
+        <View style={{ paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 }}>
+          <View style={{ backgroundColor: theme.card, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: theme.border }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-              <View style={{ width: 62, height: 62, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "rgba(255,255,255,0.35)" }}>
-                <Text style={{ fontSize: 22, fontWeight: "800", color: "#fff" }}>
+              <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: palette.teal + "18", alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 20, fontWeight: "700", color: palette.teal }}>
                   {e.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
                 </Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 20, fontWeight: "800", color: "#fff" }}>{e.name}</Text>
-                <Text style={{ fontSize: 13, color: "rgba(255,255,255,0.88)", marginTop: 1 }}>{e.email}</Text>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, backgroundColor: "rgba(255,255,255,0.18)", alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 9 }}>
-                  <MaterialCommunityIcons name="shield-key-outline" size={13} color="#fff" />
-                  <Text style={{ fontSize: 12, fontWeight: "700", color: "#fff", letterSpacing: 0.4 }}>{e.companyCode}</Text>
+                <Text style={{ fontSize: 18, fontWeight: "700", color: theme.primary, letterSpacing: -0.3 }}>{e.name}</Text>
+                <Text style={{ fontSize: 13, color: theme.muted, marginTop: 2 }}>{e.email}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 6 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: palette.emerald }} />
+                  <Text style={{ fontSize: 12, color: theme.muted }}>{e.companyCode}</Text>
                 </View>
               </View>
+              <Pressable onPress={() => setEditOpen(true)} style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: theme.surface2 || theme.surface, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: theme.border }}>
+                <Ionicons name="pencil" size={15} color={theme.muted} />
+              </Pressable>
             </View>
-            <View style={{ flexDirection: "row", marginTop: 18, backgroundColor: "rgba(255,255,255,0.14)", borderRadius: 14, paddingVertical: 12 }}>
+            <View style={{ flexDirection: "row", marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: theme.border }}>
               {[
-                { label: "Calls",     value: stats.totalCalls },
-                { label: "Connected", value: stats.connectedPct },
-                { label: "Talk Time", value: stats.talkTime },
+                { label: "Today's Calls", value: stats.totalCalls },
+                { label: "Connected",     value: stats.connectedPct },
+                { label: "Talk Time",     value: stats.talkTime },
               ].map((s, i) => (
-                <View key={s.label} style={{ flex: 1, alignItems: "center", borderLeftWidth: i === 0 ? 0 : 1, borderLeftColor: "rgba(255,255,255,0.2)" }}>
-                  <Text style={{ fontSize: 17, fontWeight: "800", color: "#fff" }}>{s.value}</Text>
-                  <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", marginTop: 2 }}>{s.label}</Text>
+                <View key={s.label} style={{ flex: 1, alignItems: "center", borderLeftWidth: i === 0 ? 0 : 1, borderLeftColor: theme.border }}>
+                  <Text style={{ fontSize: 18, fontWeight: "700", color: theme.primary }}>{s.value}</Text>
+                  <Text style={{ fontSize: 11, color: theme.muted, marginTop: 2 }}>{s.label}</Text>
                 </View>
               ))}
             </View>
-          </LinearGradient>
+          </View>
         </View>
 
         <View style={{ paddingHorizontal: 16, gap: 12 }}>
 
-          {/* â”€â”€ SIM Configuration â”€â”€ */}
+          {/* ── SIM Configuration ── */}
           <Pressable onPress={() => setSimOpen(true)} style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16 }]}>
             <View style={iconBox(palette.teal + "1a")}><Ionicons name="phone-portrait-outline" size={18} color={theme.accent} /></View>
             <View style={{ flex: 1, marginLeft: 12 }}>
@@ -248,16 +266,16 @@ export default function Profile() {
             <Ionicons name="chevron-forward" size={20} color={theme.dim} />
           </Pressable>
 
-          {/* â”€â”€ Device Info â”€â”€ */}
+          {/* ── Device Info ── */}
           <View style={[card, shadowSoft]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <View style={iconBox(palette.violet + "1f")}><Ionicons name="hardware-chip-outline" size={18} color={palette.violet} /></View>
               <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Device</Text>
             </View>
             {[
-              { label: "Model",        value: deviceInfo.model || "â€”" },
-              { label: "Manufacturer", value: deviceInfo.manufacturer || "â€”" },
-              { label: "Android",      value: deviceInfo.androidVersion || "â€”" },
+              { label: "Model",        value: deviceInfo.model || "—" },
+              { label: "Manufacturer", value: deviceInfo.manufacturer || "—" },
+              { label: "Android",      value: deviceInfo.androidVersion || "—" },
             ].map((r) => (
               <View key={r.label} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 }}>
                 <Text style={{ fontSize: 13, color: theme.muted }}>{r.label}</Text>
@@ -266,7 +284,7 @@ export default function Profile() {
             ))}
           </View>
 
-          {/* â”€â”€ Permission Health â”€â”€ */}
+          {/* ── Permission Health ── */}
           <View style={[card, shadowSoft]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <View style={iconBox(requiredGranted ? palette.emerald + "1f" : palette.red + "1f")}>
@@ -275,7 +293,7 @@ export default function Profile() {
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Permission Health</Text>
                 <Text style={{ fontSize: 12.5, color: requiredGranted ? theme.success : theme.danger, marginTop: 1 }}>
-                  {requiredGranted ? "Required permissions granted âœ“" : "Required permissions missing â€” tap to fix"}
+                  {requiredGranted ? "Required permissions granted ✓" : "Required permissions missing — tap to fix"}
                 </Text>
               </View>
             </View>
@@ -316,7 +334,7 @@ export default function Profile() {
             )}
           </View>
 
-          {/* â”€â”€ Battery Optimization Warning â”€â”€ */}
+          {/* ── Battery Optimization Warning ── */}
           <Pressable
             onPress={() => Linking.openSettings()}
             style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16, borderColor: palette.amber + "55" }]}>
@@ -326,13 +344,13 @@ export default function Profile() {
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Battery Optimization</Text>
               <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>
-                Disable battery optimization for reliable background sync. Tap â†’ Apps â†’ CallNexa â†’ Battery â†’ Unrestricted
+                Disable battery optimization for reliable background sync. Tap → Apps → CallNexa → Battery → Unrestricted
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={palette.amber} />
           </Pressable>
 
-          {/* â”€â”€ Call Recording Toggle â”€â”€ */}
+          {/* ── Call Recording Toggle ── */}
           <View style={[card, shadowSoft]}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -340,7 +358,7 @@ export default function Profile() {
                 <View>
                   <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Call Recording</Text>
                   <Text style={{ fontSize: 12, color: theme.muted, marginTop: 1 }}>
-                    {recordingEnabled ? "Recording enabled Â· saves to dashboard" : "Off Â· calls not recorded"}
+                    {recordingEnabled ? "Recording enabled · saves to dashboard" : "Off · calls not recorded"}
                   </Text>
                 </View>
               </View>
@@ -354,13 +372,13 @@ export default function Profile() {
             {recordingEnabled && (
               <View style={{ marginTop: 10, backgroundColor: palette.violet + "12", borderRadius: 10, padding: 10 }}>
                 <Text style={{ fontSize: 12, color: palette.violet, lineHeight: 18 }}>
-                  âœ“ Recorded calls will be saved and available for AI transcription on the web dashboard.{"\n"}Only calls with recordings will be transcribed â€” saves storage & DB space.
+                  ✓ Recorded calls will be saved and available for AI transcription on the web dashboard.{"\n"}Only calls with recordings will be transcribed — saves storage & DB space.
                 </Text>
               </View>
             )}
           </View>
 
-          {/* â”€â”€ Sync Health â”€â”€ */}
+          {/* ── Sync Health ── */}
           {syncHealth && (
             <View style={[card, shadowSoft]}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -385,14 +403,14 @@ export default function Profile() {
             </View>
           )}
 
-          {/* â”€â”€ Notification Preferences â”€â”€ */}
+          {/* ── Notification Preferences ── */}
           <View style={[card, shadowSoft]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <View style={iconBox(palette.amber + "1f")}><Ionicons name="notifications-outline" size={18} color={palette.amber} /></View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Notifications</Text>
                 <Text style={{ fontSize: 12, color: notifPerms === "granted" ? theme.success : theme.danger, marginTop: 1 }}>
-                  {notifPerms === "granted" ? "Allowed âœ“" : notifPerms === "denied" ? "Blocked â€” open Settings" : "Not yet requested"}
+                  {notifPerms === "granted" ? "Allowed ✓" : notifPerms === "denied" ? "Blocked — open Settings" : "Not yet requested"}
                 </Text>
               </View>
               {notifPerms !== "granted" && (
@@ -425,7 +443,7 @@ export default function Profile() {
             ))}
           </View>
 
-          {/* â”€â”€ Sync Now â”€â”€ */}
+          {/* ── Sync Now ── */}
           <Pressable onPress={handleSync} disabled={syncing}
             style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16, borderColor: syncing ? theme.border : palette.teal + "55" }]}>
             <View style={iconBox(palette.teal + "1a")}>
@@ -437,16 +455,16 @@ export default function Profile() {
                 {syncing
                   ? "Syncing all call logs..."
                   : syncResult
-                    ? `âœ“ ${syncResult.accepted} new Â· ${syncResult.duplicates} duplicates`
+                    ? `✓ ${syncResult.accepted} new · ${syncResult.duplicates} duplicates`
                     : lastSync
                       ? `Last synced: ${lastSync}`
-                      : "Auto-syncs every 5s Â· tap to sync now"}
+                      : "Auto-syncs every 5s · tap to sync now"}
               </Text>
             </View>
             {!syncing && <Ionicons name="chevron-forward" size={20} color={palette.teal} />}
           </Pressable>
 
-          {/* â”€â”€ Theme toggle â”€â”€ */}
+          {/* ── Theme toggle ── */}
           <View style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16 }]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
               <View style={iconBox(palette.violet + "1f")}><Ionicons name={dark ? "moon" : "sunny"} size={18} color={palette.violet} /></View>
@@ -460,19 +478,22 @@ export default function Profile() {
             </Pressable>
           </View>
 
-          {/* â”€â”€ App info â”€â”€ */}
+          {/* ── App info ── */}
           <View style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16 }]}>
             <Image source={require("../../assets/logo.png")} style={{ width: 38, height: 38, borderRadius: 10 }} resizeMode="contain" />
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>CallNexa</Text>
-              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>v1.0.0 Â· {e.companyName}</Text>
+              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>v1.0.0 · {e.companyName}</Text>
             </View>
           </View>
 
-          {/* â”€â”€ Sign out â”€â”€ */}
-          <Pressable onPress={handleSignOut} style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 15, borderColor: theme.dangerSoft }]}>
+          {/* ── Sign out ── */}
+          <Pressable onPress={handleSignOut}
+            style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+              paddingVertical: 15, borderRadius: 12, borderWidth: 1.5, borderColor: theme.danger + "44",
+              backgroundColor: theme.dangerSoft }}>
             <Ionicons name="log-out-outline" size={18} color={theme.danger} />
-            <Text style={{ fontSize: 14.5, fontWeight: "700", color: theme.danger }}>Sign Out</Text>
+            <Text style={{ fontSize: 14.5, fontWeight: "600", color: theme.danger }}>Sign Out</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -483,7 +504,7 @@ export default function Profile() {
   );
 }
 
-// â”€â”€ Edit Profile Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Edit Profile Modal ────────────────────────────────────────────────────────
 function EditProfileModal({ visible, onClose, onSaved, user, theme }) {
   const [name, setName]     = useState(user?.name || "");
   const [email, setEmail]   = useState(user?.email || "");
@@ -505,7 +526,7 @@ function EditProfileModal({ visible, onClose, onSaved, user, theme }) {
       const stored = await AsyncStorage.getItem("callos_user");
       if (stored) await AsyncStorage.setItem("callos_user", JSON.stringify({ ...JSON.parse(stored), ...newData }));
       onSaved(newData);
-      Alert.alert("Saved âœ“", "Profile updated successfully.");
+      Alert.alert("Saved ✓", "Profile updated successfully.");
       onClose();
     } catch (err) {
       Alert.alert("Error", err.message || "Could not update profile.");
@@ -552,7 +573,7 @@ function EditProfileModal({ visible, onClose, onSaved, user, theme }) {
   );
 }
 
-// â”€â”€ SIM Config Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── SIM Config Modal ──────────────────────────────────────────────────────────
 function SimConfigModal({ visible, onClose, sims, selectedSim, onSelectSim, theme }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
