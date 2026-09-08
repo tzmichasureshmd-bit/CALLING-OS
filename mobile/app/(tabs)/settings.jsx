@@ -98,48 +98,55 @@ export default function Profile() {
   }
 
   async function handleSync() {
-    if (!deviceId) { Alert.alert("Not Ready", "Device not registered. Sign out and back in."); return; }
+    if (!deviceId) {
+      Alert.alert('Not Ready', 'Device ID is null.\nSign out and sign back in to re-register.');
+      return;
+    }
     setSyncing(true); setSyncResult(null);
     try {
-      const { getRealCallLog, markCallsSynced } = require("../../src/callLogService");
-      const { api: _api } = require("../../src/api");
+      const { getRealCallLog, markCallsSynced } = require('../../src/callLogService');
+      const { api: _api } = require('../../src/api');
       const BATCH = 50;
-      // Read last 7 days only � not 90 (crash risk)
       let allCalls = await getRealCallLog(7);
       if (selectedSim !== null) {
         allCalls = allCalls.filter((c) => (c.sim_slot !== undefined ? c.sim_slot - 1 : null) === selectedSim);
       }
       if (!allCalls.length) {
-        setSyncResult({ accepted: 0, duplicates: 0, failed: 0 });
-        Alert.alert("No Calls Found", "No calls found in last 7 days.");
+        setSyncResult({ accepted: 0, duplicates: 0, failed: 0, total: 0 });
+        Alert.alert('No Calls', 'No calls found in last 7 days.');
         return;
       }
-      // Batch sync � 50 at a time
-      let totalAccepted = 0, totalDup = 0;
-      const synced = [];
+      let totalAccepted = 0, totalDup = 0, totalFailed = 0;
+      const confirmed = [];
+      let lastError = null;
       for (let i = 0; i < allCalls.length; i += BATCH) {
         const batch = allCalls.slice(i, i + BATCH);
         try {
           const res = await _api.syncCalls(deviceId, batch);
           totalAccepted += res.accepted || 0;
           totalDup      += res.duplicates || 0;
-          synced.push(...batch);
-        } catch { /* continue */ }
+          totalFailed   += res.failed || 0;
+          if ((res.accepted || 0) + (res.duplicates || 0) > 0) confirmed.push(...batch);
+        } catch (e) { lastError = e.message; }
         if (i + BATCH < allCalls.length) await new Promise(r => setTimeout(r, 500));
       }
-      if (synced.length) await markCallsSynced(synced);
-      const result = { accepted: totalAccepted, duplicates: totalDup, failed: 0 };
+      if (confirmed.length) await markCallsSynced(confirmed);
+      const result = { accepted: totalAccepted, duplicates: totalDup, failed: totalFailed, total: allCalls.length };
       setSyncResult(result);
       const now = Date.now();
       await AsyncStorage.setItem(LAST_SYNC_KEY, String(now));
-      setLastSync(new Date(now).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" }));
-      Alert.alert("Sync Complete", `${result.accepted} new  ${result.duplicates} duplicates  ${allCalls.length} total`);
+      setLastSync(new Date(now).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' }));
+      if (lastError && totalAccepted === 0 && totalDup === 0) {
+        Alert.alert('Sync Failed', 'Error: ' + lastError + '\n\nDevice: ' + deviceId + '\nCalls found: ' + allCalls.length);
+      } else {
+        Alert.alert('Sync Done', totalAccepted + ' new, ' + totalDup + ' duplicates, ' + allCalls.length + ' total' + (lastError ? '\n(partial: ' + lastError + ')' : ''));
+      }
     } catch (e) {
-      Alert.alert("Sync Failed", e.message);
+      Alert.alert('Sync Error', (e.message || String(e)) + '\n\nDevice ID: ' + (deviceId || 'NULL'));
     } finally { setSyncing(false); }
   }
 
-  async function handleRequestPermission(key) {
+    async function handleRequestPermission(key) {
     const result = await requestAllPermissions();
     setPermissions(result);
     if (!result[key]) {
