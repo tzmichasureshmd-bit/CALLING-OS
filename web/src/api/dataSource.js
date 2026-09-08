@@ -290,12 +290,9 @@ export const dataSource = {
     const res = await api.subscriptionApi.current();
     return {
       users: res.users,
-      plan: res.plan,
+      plan: res.plan ?? "starter",
       perUser: res.per_user ?? 100,
-      isTrial: res.is_trial ?? false,
-      trialDaysLeft: res.trial_days_left ?? 0,
-      trialEndsOn: res.trial_ends_on ?? "",
-      trialMaxEmployees: res.trial_max_employees ?? 10,
+      monthlyTotal: res.monthly_total ?? 0,
       maxEmployees: res.max_employees ?? null,
     };
   },

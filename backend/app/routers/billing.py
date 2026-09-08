@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -9,24 +9,11 @@ from ..models import Employee, Invoice, Organization, User
 
 router = APIRouter(tags=["billing"])
 
-TRIAL_DAYS = 14
-TRIAL_MAX_EMPLOYEES = 10
 VALID_COUPONS = {
     "CALLOS20": {"discount_pct": 20, "description": "20% off your first month"},
     "LAUNCH50": {"discount_pct": 50, "description": "50% off — Launch offer"},
     "TZMICHA":  {"discount_pct": 100, "description": "Full discount — internal use"},
 }
-
-
-def _trial_info(org: Organization):
-    created = org.created_at
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    trial_end = created + timedelta(days=TRIAL_DAYS)
-    now = datetime.now(timezone.utc)
-    days_left = max(0, (trial_end - now).days)
-    is_trial = org.plan in (None, "free", "trial") and now < trial_end
-    return is_trial, days_left, trial_end.strftime("%B %d, %Y")
 
 
 @router.get("/subscriptions/current")
@@ -38,38 +25,41 @@ def current_subscription(db: Session = Depends(get_db), user: User = Depends(get
         Employee.organization_id == user.organization_id,
         Employee.status == "active",
     ).count()
-    is_trial, days_left, trial_ends_on = _trial_info(org)
-    plan = org.plan or "trial"
+    # Normalise plan — free/trial/null all treated as starter
+    raw_plan = org.plan or "starter"
+    plan = raw_plan if raw_plan in ("starter", "growth") else "starter"
     per_user = 500 if plan == "growth" else 100
+    monthly_total = per_user if plan == "growth" else employees * per_user
     return {
         "status": "active",
         "plan": plan,
-        "is_trial": is_trial,
-        "trial_days_left": days_left,
-        "trial_ends_on": trial_ends_on,
-        "trial_max_employees": TRIAL_MAX_EMPLOYEES,
         "users": employees,
         "per_user": per_user,
+        "monthly_total": monthly_total,
         "billing_cycle": "monthly",
         "currency": "INR",
-        "max_employees": TRIAL_MAX_EMPLOYEES if is_trial else (100 if plan == "starter" else None),
+        "max_employees": 100 if plan == "starter" else None,
     }
 
 
 class SelectPlanBody(BaseModel):
     plan: str
+    billing_cycle: str = "monthly"
 
 
 @router.post("/subscriptions/select-plan")
 def select_plan(body: SelectPlanBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if body.plan not in ("starter", "growth"):
         raise HTTPException(400, "Invalid plan. Choose 'starter' or 'growth'.")
+    if body.billing_cycle not in ("monthly", "yearly"):
+        raise HTTPException(400, "Invalid billing_cycle. Choose 'monthly' or 'yearly'.")
     org = db.query(Organization).filter(Organization.id == user.organization_id).first()
     if not org:
         raise HTTPException(404, "Organization not found")
     org.plan = body.plan
     db.commit()
-    return {"ok": True, "plan": body.plan}
+    trial_days = 4 if body.billing_cycle == "yearly" else 0
+    return {"ok": True, "plan": body.plan, "billing_cycle": body.billing_cycle, "trial_days": trial_days}
 
 
 class CouponBody(BaseModel):
