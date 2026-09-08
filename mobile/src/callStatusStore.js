@@ -203,17 +203,30 @@ export async function getPendingRecordings() {
 
 /**
  * Get diagnostic summary for the sync health screen.
+ * Derives real numbers from the call log + synced-IDs set so it
+ * never shows all-zeros just because the status store is empty.
  */
 export async function getSyncHealthSummary() {
-  const all = await getAllCallStatuses();
-  return {
-    total:              all.length,
-    synced:             all.filter((c) => c.sync_status === STATUS.SYNCED).length,
-    pending:            all.filter((c) => [STATUS.SYNC_QUEUED, STATUS.SYNCING].includes(c.sync_status)).length,
-    failed:             all.filter((c) => c.sync_status === STATUS.SYNC_FAILED).length,
-    recordingUploaded:  all.filter((c) => c.recording_status === STATUS.RECORDING_UPLOADED).length,
-    recordingPending:   all.filter((c) => [STATUS.RECORDING_QUEUED, STATUS.RECORDING_UPLOADING].includes(c.recording_status)).length,
-    recordingFailed:    all.filter((c) => c.recording_status === STATUS.RECORDING_FAILED).length,
-    transcribed:        all.filter((c) => c.transcript_status === STATUS.TRANSCRIPTION_COMPLETED).length,
-  };
+  // 1. Status-store entries (populated after confirmed backend sync)
+  const storeEntries = await getAllCallStatuses();
+  const storeSynced  = storeEntries.filter((c) => c.sync_status === STATUS.SYNCED).length;
+  const storeFailed  = storeEntries.filter((c) => c.sync_status === STATUS.SYNC_FAILED).length;
+  const recUploaded  = storeEntries.filter((c) => c.recording_status === STATUS.RECORDING_UPLOADED).length;
+  const recPending   = storeEntries.filter((c) => [STATUS.RECORDING_QUEUED, STATUS.RECORDING_UPLOADING].includes(c.recording_status)).length;
+  const recFailed    = storeEntries.filter((c) => c.recording_status === STATUS.RECORDING_FAILED).length;
+  const transcribed  = storeEntries.filter((c) => c.transcript_status === STATUS.TRANSCRIPTION_COMPLETED).length;
+
+  // 2. Ground-truth: read actual call log + synced-IDs set
+  let total = storeEntries.length, synced = storeSynced, pending = 0, failed = storeFailed;
+  try {
+    const { getRealCallLog } = require("./callLogService");
+    const raw = await getRealCallLog(7);
+    const syncedRaw = await AsyncStorage.getItem("callos_synced_ids").catch(() => null);
+    const syncedSet = syncedRaw ? new Set(JSON.parse(syncedRaw)) : new Set();
+    total   = raw.length;
+    synced  = Math.max(storeSynced, raw.filter(c => syncedSet.has(c.client_event_id)).length);
+    pending = Math.max(0, total - synced - failed);
+  } catch { /* fall back to store values */ }
+
+  return { total, synced, pending, failed, recordingUploaded: recUploaded, recordingPending: recPending, recordingFailed: recFailed, transcribed };
 }
