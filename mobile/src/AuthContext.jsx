@@ -138,9 +138,8 @@ async function getStableDeviceId() {
 // ── Device registration ───────────────────────────────────────────────────────
 async function ensureDevice(user) {
   try {
-    let deviceId = await getDeviceId();
-    const info   = getDeviceInfo();
-    const hwId   = await getStableDeviceId();
+    const info = getDeviceInfo();
+    const hwId = await getStableDeviceId();
 
     // Read full SIM inventory
     const { readSimInfo } = require("./nativeModules");
@@ -160,11 +159,8 @@ async function ensureDevice(user) {
       }));
     } catch {}
 
-    if (deviceId) {
-      sendHeartbeat(deviceId);
-      return deviceId;
-    }
-
+    // Always register/upsert device — backend uses device_identifier for upsert
+    // This ensures the cached device_id is always valid for this build's signing key
     const device = await api.registerDevice({
       device_identifier: hwId,
       manufacturer:      info.manufacturer,
@@ -174,9 +170,14 @@ async function ensureDevice(user) {
       sims:              simItems,
     });
     await saveDeviceId(device.id);
+    console.log("[AUTH] device upserted: " + device.id + " hwId=" + hwId);
     return device.id;
-  } catch {
-    return null;
+  } catch (e) {
+    console.warn("[AUTH] ensureDevice failed: " + e?.message);
+    // Fall back to cached ID if registration fails (network offline)
+    const cached = await getDeviceId();
+    if (cached) console.warn("[AUTH] using cached deviceId: " + cached);
+    return cached || null;
   }
 }
 
