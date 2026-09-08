@@ -140,7 +140,7 @@ export default function Insights() {
 
   return (
     <SafeAreaView style={{ flex:1, backgroundColor:theme.bg }} edges={["top"]}>
-      <AppHeader title="Insights" right={
+      <AppHeader title="Insights" showStatus={false} right={
         <View style={{ flexDirection:"row", gap:6 }}>
           {RANGES.map(r => (
             <Pressable key={r} onPress={() => setRange(r)}

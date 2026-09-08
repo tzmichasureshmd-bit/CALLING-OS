@@ -136,7 +136,7 @@ function useConnectionStatus() {
 }
 
 // ---- Header ----
-export function AppHeader({ title, subtitle, right }) {
+export function AppHeader({ title, subtitle, right, showStatus = true }) {
   const { theme } = useTheme();
   const [showNotifs, setShowNotifs] = useState(false);
   const [unread, setUnread] = useState(0);
@@ -177,10 +177,12 @@ export function AppHeader({ title, subtitle, right }) {
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           {right}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: cm.bg, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 }}>
-            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: cm.dot }} />
-            <Text style={{ fontSize: 11, fontWeight: "700", color: cm.color }}>{cm.label}</Text>
-          </View>
+          {showStatus && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: cm.bg, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 }}>
+              <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: cm.dot }} />
+              <Text style={{ fontSize: 11, fontWeight: "700", color: cm.color }}>{cm.label}</Text>
+            </View>
+          )}
           <Pressable onPress={() => setShowNotifs(true)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}>
             <Ionicons name="notifications-outline" size={22} color={theme.secondary} />
             {unread > 0 && (
