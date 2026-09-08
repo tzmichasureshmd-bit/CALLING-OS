@@ -254,7 +254,8 @@ async def register_device(
         Employee.user_id == user.id,
         Employee.organization_id == user.organization_id,
     ).first()
-    if not emp:
+    # ADMIN users may not have an Employee record — allow registration with employee_id=None
+    if not emp and user.role not in ("ADMIN", "admin"):
         raise HTTPException(status_code=400, detail="No employee profile linked to this user")
 
     device = db.query(Device).filter(
@@ -266,7 +267,7 @@ async def register_device(
         device = Device(
             id=str(uuid.uuid4()),
             organization_id=user.organization_id,
-            employee_id=emp.id,
+            employee_id=emp.id if emp else None,
             device_identifier=body.device_identifier,
         )
         db.add(device)
@@ -292,7 +293,7 @@ async def register_device(
     _sync_selected_sim_phone(db, device)
 
     # Broadcast device update + any SIM changes
-    emp_name = emp.name
+    emp_name = emp.name if emp else None
     await manager.broadcast(
         user.organization_id,
         {"event": "device_update", "device": _device_payload(device, emp_name)},

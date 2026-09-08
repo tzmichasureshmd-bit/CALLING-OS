@@ -14,199 +14,20 @@ import { useAuth } from "../../src/AuthContext";
 import { api } from "../../src/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const NOTES_KEY = "callos_call_notes"; // { [phone]: { status, notes, updatedAt } }
+const NOTES_KEY = "callos_call_notes";
 
 const STATUSES = [
-  { key: "interested",    label: "Interested",      color: palette.emerald, icon: "checkmark-circle" },
-  { key: "asked_details", label: "Asked Details",   color: palette.teal,    icon: "information-circle" },
-  { key: "follow_up",     label: "Follow Up",       color: palette.violet,  icon: "time" },
-  { key: "callback",      label: "Callback",        color: palette.cyan,    icon: "call" },
-  { key: "proposal_sent", label: "Proposal Sent",   color: palette.blue,    icon: "document-text" },
-  { key: "converted",     label: "Converted ✓",     color: palette.emerald, icon: "trophy" },
-  { key: "not_interested",label: "Not Interested",  color: palette.red,     icon: "close-circle" },
+  { key: "interested",     label: "Interested",     color: palette.emerald, icon: "checkmark-circle"  },
+  { key: "asked_details",  label: "Asked Details",  color: palette.teal,    icon: "information-circle"},
+  { key: "follow_up",      label: "Follow Up",      color: palette.violet,  icon: "time"              },
+  { key: "callback",       label: "Callback",       color: palette.cyan,    icon: "call"              },
+  { key: "proposal_sent",  label: "Proposal Sent",  color: palette.blue,    icon: "document-text"     },
+  { key: "converted",      label: "Converted ✓",    color: palette.emerald, icon: "trophy"            },
+  { key: "not_interested", label: "Not Interested", color: palette.red,     icon: "close-circle"      },
 ];
 
-async function loadAllNotes() {
-  try {
-    const raw = await AsyncStorage.getItem(NOTES_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-async function saveNote(phone, data) {
-  const all = await loadAllNotes();
-  all[phone] = { ...data, updatedAt: new Date().toISOString() };
-  await AsyncStorage.setItem(NOTES_KEY, JSON.stringify(all));
-}
-
-// ── Call Progress Bottom Sheet ────────────────────────────────────────────────
-function CallProgressSheet({ visible, onClose, call, allCalls, syncedIds, theme, shadowSoft }) {
-  const [status, setStatus]   = useState(null);
-  const [notes, setNotes]     = useState("");
-  const [saving, setSaving]   = useState(false);
-  const [saved, setSaved]     = useState(false);
-
-  // History: all calls with same phone number
-  const history = useMemo(() => {
-    if (!call) return [];
-    return allCalls
-      .filter(c => c.phone === call.phone)
-      .sort((a, b) => b._ts - a._ts)
-      .slice(0, 20);
-  }, [call, allCalls]);
-
-  // Load saved note on open
-  useEffect(() => {
-    if (!visible || !call) return;
-    setSaved(false);
-    loadAllNotes().then(all => {
-      const saved = all[call.phone] || {};
-      setStatus(saved.status || null);
-      setNotes(saved.notes || "");
-    });
-  }, [visible, call?.phone]);
-
-  async function handleSave() {
-    if (!call) return;
-    setSaving(true);
-    const data = { status, notes, phone: call.phone, name: call.name };
-    await saveNote(call.phone, data);
-    // Try push to backend leads
-    try {
-      await api.getCalls({ q: call.phone, page_size: 1 }); // just verify connection
-      // Post as a lead note if status set
-      if (status) {
-        await api.request?.(
-          "POST", "/leads",
-          { name: call.name !== "Unknown" ? call.name : call.phone, phone: call.phone,
-            status, notes, source: "mobile_call_log" }
-        ).catch(() => {});
-      }
-    } catch { /* offline — saved locally */ }
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => { setSaved(false); onClose(); }, 800);
-  }
-
-  if (!call) return null;
-  const isSynced = syncedIds.has(call.id);
-  const selectedStatus = STATUSES.find(s => s.key === status);
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={{ flex:1, backgroundColor:"rgba(0,0,0,0.55)" }} onPress={onClose}/>
-      <KeyboardAvoidingView behavior="padding" style={{ position:"absolute", bottom:0, left:0, right:0 }}>
-        <View style={{ backgroundColor:theme.bg, borderTopLeftRadius:26, borderTopRightRadius:26, maxHeight:"88%" }}>
-          {/* Handle */}
-          <View style={{ width:36, height:4, borderRadius:2, backgroundColor:theme.border, alignSelf:"center", marginTop:10 }}/>
-
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding:20, paddingBottom:40 }}>
-            {/* Header */}
-            <View style={{ flexDirection:"row", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
-              <View style={{ flex:1 }}>
-                <Text style={{ fontSize:18, fontWeight:"800", color:theme.primary }} numberOfLines={1}>{call.name}</Text>
-                <Text style={{ fontSize:13, color:palette.teal, marginTop:2 }}>{call.phone}</Text>
-              </View>
-              <Pressable onPress={onClose} hitSlop={{top:12,bottom:12,left:12,right:12}}>
-                <Ionicons name="close" size={22} color={theme.muted}/>
-              </Pressable>
-            </View>
-
-            {/* Sync + Call info row */}
-            <View style={{ flexDirection:"row", gap:8, marginBottom:16, flexWrap:"wrap" }}>
-              <View style={{ flexDirection:"row", alignItems:"center", gap:5, backgroundColor: isSynced ? palette.emerald+"18" : palette.amber+"18", borderRadius:8, paddingHorizontal:10, paddingVertical:5 }}>
-                <Ionicons name={isSynced ? "cloud-done-outline" : "cloud-upload-outline"} size={13} color={isSynced ? palette.emerald : palette.amber}/>
-                <Text style={{ fontSize:11.5, fontWeight:"700", color: isSynced ? palette.emerald : palette.amber }}>{isSynced ? "Synced to web" : "Pending sync"}</Text>
-              </View>
-              <View style={{ flexDirection:"row", alignItems:"center", gap:5, backgroundColor:theme.surface, borderRadius:8, paddingHorizontal:10, paddingVertical:5, borderWidth:1, borderColor:theme.border }}>
-                <Ionicons name="time-outline" size={13} color={theme.muted}/>
-                <Text style={{ fontSize:11.5, color:theme.muted }}>{call.time} · {call.ago}</Text>
-              </View>
-              <View style={{ flexDirection:"row", alignItems:"center", gap:5, backgroundColor:theme.surface, borderRadius:8, paddingHorizontal:10, paddingVertical:5, borderWidth:1, borderColor:theme.border }}>
-                <Ionicons name="call-outline" size={13} color={theme.muted}/>
-                <Text style={{ fontSize:11.5, color:theme.muted }}>{call.duration} · {call.sim}</Text>
-              </View>
-            </View>
-
-            {/* Status picker */}
-            <Text style={{ fontSize:12, fontWeight:"700", color:theme.muted, textTransform:"uppercase", letterSpacing:0.5, marginBottom:10 }}>Call Outcome / Progress</Text>
-            <View style={{ flexDirection:"row", flexWrap:"wrap", gap:8, marginBottom:16 }}>
-              {STATUSES.map(s => {
-                const on = status === s.key;
-                return (
-                  <Pressable key={s.key} onPress={() => setStatus(on ? null : s.key)}
-                    style={{ flexDirection:"row", alignItems:"center", gap:6, paddingHorizontal:12, paddingVertical:8, borderRadius:10, borderWidth:1.5,
-                      borderColor: on ? s.color : theme.border,
-                      backgroundColor: on ? s.color+"22" : theme.surface }}>
-                    <Ionicons name={s.icon} size={14} color={on ? s.color : theme.muted}/>
-                    <Text style={{ fontSize:12.5, fontWeight:"700", color: on ? s.color : theme.muted }}>{s.label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {/* Notes */}
-            <Text style={{ fontSize:12, fontWeight:"700", color:theme.muted, textTransform:"uppercase", letterSpacing:0.5, marginBottom:8 }}>Notes</Text>
-            <TextInput
-              value={notes}
-              onChangeText={setNotes}
-              placeholder="What was discussed? Customer interest, objections, next steps…"
-              placeholderTextColor={theme.dim}
-              multiline
-              numberOfLines={4}
-              style={{ backgroundColor:theme.surface, borderRadius:12, borderWidth:1, borderColor:theme.border,
-                padding:12, fontSize:13.5, color:theme.primary, minHeight:90, textAlignVertical:"top", marginBottom:16 }}
-            />
-
-            {/* Call history with this number */}
-            {history.length > 1 && (
-              <>
-                <Text style={{ fontSize:12, fontWeight:"700", color:theme.muted, textTransform:"uppercase", letterSpacing:0.5, marginBottom:10 }}>Call History · {history.length} calls</Text>
-                {history.map((h, i) => {
-                  const meta = TYPE[h.type] || TYPE.incoming;
-                  return (
-                    <View key={h.id} style={{ flexDirection:"row", alignItems:"center", gap:10, paddingVertical:9,
-                      borderBottomWidth: i < history.length-1 ? 1 : 0, borderBottomColor:theme.border }}>
-                      <View style={{ width:32, height:32, borderRadius:9, backgroundColor:meta.color+"18", alignItems:"center", justifyContent:"center" }}>
-                        <MaterialCommunityIcons name={meta.icon} size={15} color={meta.color}/>
-                      </View>
-                      <View style={{ flex:1 }}>
-                        <Text style={{ fontSize:13, fontWeight:"600", color:theme.primary }}>{meta.label} · {h.duration}</Text>
-                        <Text style={{ fontSize:11.5, color:theme.muted }}>{h.time} · {h.ago}</Text>
-                      </View>
-                      <View style={{ flexDirection:"row", alignItems:"center", gap:4 }}>
-                        {syncedIds.has(h.id) && <Ionicons name="cloud-done-outline" size={13} color={palette.emerald}/>}
-                        <Text style={{ fontSize:11, color:theme.dim }}>{h.sim}</Text>
-                      </View>
-                    </View>
-                  );
-                })}
-                <View style={{ height:12 }}/>
-              </>
-            )}
-
-            {/* Save button */}
-            <Pressable onPress={handleSave} disabled={saving || saved}>
-              <LinearGradient colors={saved ? [palette.emerald, palette.emerald] : gradientBrand}
-                start={{x:0,y:0}} end={{x:1,y:0}}
-                style={{ height:50, borderRadius:14, alignItems:"center", justifyContent:"center", flexDirection:"row", gap:8 }}>
-                {saving
-                  ? <ActivityIndicator color="#fff"/>
-                  : saved
-                    ? <><Ionicons name="checkmark" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Saved!</Text></>
-                    : <><Ionicons name="save-outline" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Save Progress</Text></>}
-              </LinearGradient>
-            </Pressable>
-          </ScrollView>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
-const CHIPS = ["All", "In", "Out", "Missed", "Rejected"];
+const CHIPS  = ["All", "In", "Out", "Missed", "Rejected"];
 const PAGE   = 40;
-const BATCH  = 50;
-
 const RANGES = [
   { label: "7 Days",  days: 7  },
   { label: "15 Days", days: 15 },
@@ -222,6 +43,25 @@ const TYPE = {
   rejected: { icon: "call-missed",   color: palette.amber,  label: "Rejected" },
   blocked:  { icon: "call-missed",   color: palette.amber,  label: "Blocked"  },
 };
+
+// Pipeline stages for Details sheet
+const PIPELINE = [
+  { key: "detected",    label: "Detected"   },
+  { key: "log_read",    label: "Log Read"   },
+  { key: "synced",      label: "Synced"     },
+  { key: "recording",   label: "Recording"  },
+  { key: "uploaded",    label: "Uploaded"   },
+  { key: "transcribed", label: "Transcribed"},
+];
+
+function getPipelineStage(c) {
+  // Returns index 0-5 of how far this call has progressed
+  if (!c.synced) return 1; // detected + log read done, sync pending
+  if (!c.hasRecording) return 2; // synced, no recording
+  if (!c.recordingUploaded) return 3; // has recording, not uploaded
+  if (!c.transcribed) return 4; // uploaded, not transcribed
+  return 5; // fully complete
+}
 
 function fmtDur(s) {
   if (!s) return "00:00";
@@ -242,35 +82,253 @@ function groupLabel(iso) {
   if (d.toDateString() === y.toDateString()) return "Yesterday";
   return d.toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" });
 }
+function copyPhone(phone) {
+  Clipboard.setString(phone);
+  if (Platform.OS === "android") ToastAndroid.show("Number copied!", ToastAndroid.SHORT);
+}
 
-// ── Background batch sync (never blocks UI) ───────────────────────────────────
-async function syncInBackground(deviceId, calls) {
-  if (!deviceId || !calls.length) return;
-  try {
-    const raw = await AsyncStorage.getItem("callos_synced_ids").catch(() => null);
-    const synced = raw ? new Set(JSON.parse(raw)) : new Set();
-    const unsync = calls.filter((c) => !synced.has(c.client_event_id));
-    if (!unsync.length) return;
+async function loadAllNotes() {
+  try { const r = await AsyncStorage.getItem(NOTES_KEY); return r ? JSON.parse(r) : {}; }
+  catch { return {}; }
+}
+async function saveNote(phone, data) {
+  const all = await loadAllNotes();
+  all[phone] = { ...data, updatedAt: new Date().toISOString() };
+  await AsyncStorage.setItem(NOTES_KEY, JSON.stringify(all));
+}
 
-    const newIds = [];
-    for (let i = 0; i < unsync.length; i += BATCH) {
-      const batch = unsync.slice(i, i + BATCH);
-      try {
-        const res = await api.syncCalls(deviceId, batch);
-        if (res.accepted > 0 || res.duplicates > 0) {
-          batch.forEach((c) => newIds.push(c.client_event_id));
-        }
-      } catch { /* silent — retry next time */ }
-      // Yield to JS thread between batches
-      await new Promise((r) => setTimeout(r, 600));
-    }
-    if (newIds.length) {
-      const all = [...synced, ...newIds];
-      const trimmed = all.length > 5000 ? all.slice(all.length - 5000) : all;
-      await AsyncStorage.setItem("callos_synced_ids", JSON.stringify(trimmed));
-      await AsyncStorage.setItem("callos_last_sync_ts", String(Date.now()));
-    }
-  } catch { /* silent */ }
+// ── Progress Sheet ────────────────────────────────────────────────────────────
+function ProgressSheet({ visible, onClose, call, theme }) {
+  const [status, setStatus] = useState(null);
+  const [notes,  setNotes]  = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved,  setSaved]  = useState(false);
+  const [dropOpen, setDropOpen] = useState(false);
+
+  useEffect(() => {
+    if (!visible || !call) return;
+    setSaved(false); setDropOpen(false);
+    loadAllNotes().then(all => {
+      const n = all[call.phone] || {};
+      setStatus(n.status || null);
+      setNotes(n.notes || "");
+    });
+  }, [visible, call?.phone]);
+
+  async function handleSave() {
+    if (!call) return;
+    setSaving(true);
+    await saveNote(call.phone, { status, notes, phone: call.phone, name: call.name });
+    setSaving(false); setSaved(true);
+    setTimeout(() => { setSaved(false); onClose(); }, 700);
+  }
+
+  if (!call) return null;
+  const selected = STATUSES.find(s => s.key === status);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex:1, backgroundColor:"rgba(0,0,0,0.5)" }} onPress={onClose}/>
+      <KeyboardAvoidingView behavior="padding" style={{ position:"absolute", bottom:0, left:0, right:0 }}>
+        <View style={{ backgroundColor:theme.bg, borderTopLeftRadius:24, borderTopRightRadius:24 }}>
+          <View style={{ width:36, height:4, borderRadius:2, backgroundColor:theme.border, alignSelf:"center", marginTop:10 }}/>
+          <View style={{ padding:20, paddingBottom:40 }}>
+
+            {/* Header */}
+            <View style={{ flexDirection:"row", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
+              <View style={{ flex:1 }}>
+                <Text style={{ fontSize:17, fontWeight:"800", color:theme.primary }} numberOfLines={1}>{call.name}</Text>
+                <Text style={{ fontSize:13, color:theme.muted, marginTop:2 }}>{call.phone}</Text>
+              </View>
+              <Pressable onPress={onClose} hitSlop={{top:12,bottom:12,left:12,right:12}}>
+                <Ionicons name="close" size={22} color={theme.muted}/>
+              </Pressable>
+            </View>
+
+            {/* Status dropdown */}
+            <Text style={{ fontSize:11, fontWeight:"700", color:theme.muted, textTransform:"uppercase", letterSpacing:0.6, marginBottom:8 }}>Call Status</Text>
+            <Pressable onPress={() => setDropOpen(o => !o)}
+              style={{ flexDirection:"row", alignItems:"center", justifyContent:"space-between",
+                backgroundColor:theme.surface, borderRadius:12, borderWidth:1.5,
+                borderColor: selected ? selected.color : theme.border,
+                paddingHorizontal:14, paddingVertical:13, marginBottom: dropOpen ? 0 : 16 }}>
+              <View style={{ flexDirection:"row", alignItems:"center", gap:8 }}>
+                {selected
+                  ? <><Ionicons name={selected.icon} size={16} color={selected.color}/>
+                      <Text style={{ fontSize:14, fontWeight:"700", color:selected.color }}>{selected.label}</Text></>
+                  : <Text style={{ fontSize:14, color:theme.dim }}>Select status…</Text>}
+              </View>
+              <Ionicons name={dropOpen ? "chevron-up" : "chevron-down"} size={18} color={theme.muted}/>
+            </Pressable>
+
+            {dropOpen && (
+              <View style={{ backgroundColor:theme.surface, borderRadius:12, borderWidth:1,
+                borderColor:theme.border, marginBottom:16, overflow:"hidden" }}>
+                {STATUSES.map((s, i) => {
+                  const on = status === s.key;
+                  return (
+                    <Pressable key={s.key} onPress={() => { setStatus(on ? null : s.key); setDropOpen(false); }}
+                      style={{ flexDirection:"row", alignItems:"center", gap:10,
+                        paddingHorizontal:14, paddingVertical:13,
+                        backgroundColor: on ? s.color+"18" : "transparent",
+                        borderTopWidth: i===0 ? 0 : 1, borderTopColor:theme.border }}>
+                      <Ionicons name={s.icon} size={16} color={on ? s.color : theme.muted}/>
+                      <Text style={{ fontSize:14, fontWeight: on ? "700" : "500", color: on ? s.color : theme.secondary, flex:1 }}>{s.label}</Text>
+                      {on && <Ionicons name="checkmark" size={16} color={s.color}/>}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* Notes */}
+            <Text style={{ fontSize:11, fontWeight:"700", color:theme.muted, textTransform:"uppercase", letterSpacing:0.6, marginBottom:8 }}>Notes</Text>
+            <TextInput
+              value={notes}
+              onChangeText={setNotes}
+              placeholder="What was discussed? Customer interest, objections, next steps…"
+              placeholderTextColor={theme.dim}
+              multiline
+              style={{ backgroundColor:theme.surface, borderRadius:12, borderWidth:1, borderColor:theme.border,
+                padding:12, fontSize:13.5, color:theme.primary, minHeight:100, textAlignVertical:"top", marginBottom:20 }}
+            />
+
+            {/* Save */}
+            <Pressable onPress={handleSave} disabled={saving || saved}>
+              <LinearGradient colors={saved ? [palette.emerald, palette.emerald] : gradientBrand}
+                start={{x:0,y:0}} end={{x:1,y:0}}
+                style={{ height:50, borderRadius:13, alignItems:"center", justifyContent:"center", flexDirection:"row", gap:8 }}>
+                {saving
+                  ? <ActivityIndicator color="#fff"/>
+                  : saved
+                    ? <><Ionicons name="checkmark" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Saved!</Text></>
+                    : <><Ionicons name="save-outline" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Save Progress</Text></>}
+              </LinearGradient>
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// ── Details Sheet (pipeline timeline + call history) ─────────────────────────
+function DetailsSheet({ visible, onClose, call, allCalls, syncedIds, theme }) {
+  const history = useMemo(() => {
+    if (!call) return [];
+    return allCalls.filter(c => c.phone === call.phone).sort((a,b) => b._ts - a._ts).slice(0,20);
+  }, [call, allCalls]);
+
+  if (!call) return null;
+  const stage = getPipelineStage(call);
+  const pct   = Math.round((stage / (PIPELINE.length - 1)) * 100);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex:1, backgroundColor:"rgba(0,0,0,0.5)" }} onPress={onClose}/>
+      <View style={{ position:"absolute", bottom:0, left:0, right:0,
+        backgroundColor:theme.bg, borderTopLeftRadius:24, borderTopRightRadius:24, maxHeight:"88%" }}>
+        <View style={{ width:36, height:4, borderRadius:2, backgroundColor:theme.border, alignSelf:"center", marginTop:10 }}/>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding:20, paddingBottom:40 }}>
+
+          {/* Header */}
+          <View style={{ flexDirection:"row", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+            <View style={{ flex:1 }}>
+              <Text style={{ fontSize:17, fontWeight:"800", color:theme.primary }} numberOfLines={1}>{call.name}</Text>
+              <Pressable onPress={() => copyPhone(call.phone)}>
+                <Text style={{ fontSize:13, color:palette.teal, marginTop:2 }}>{call.phone} <Text style={{ fontSize:10, color:theme.dim }}>tap to copy</Text></Text>
+              </Pressable>
+            </View>
+            <Pressable onPress={onClose} hitSlop={{top:12,bottom:12,left:12,right:12}}>
+              <Ionicons name="close" size={22} color={theme.muted}/>
+            </Pressable>
+          </View>
+
+          {/* Call meta row */}
+          <View style={{ flexDirection:"row", gap:8, marginBottom:18, flexWrap:"wrap" }}>
+            {[
+              `${TYPE[call.type]?.label || "Call"} · ${call.sim}`,
+              `${call.time} · ${call.ago}`,
+              `Duration: ${call.duration}`,
+            ].map((t,i) => (
+              <View key={i} style={{ backgroundColor:theme.surface, borderRadius:8, paddingHorizontal:10, paddingVertical:5, borderWidth:1, borderColor:theme.border }}>
+                <Text style={{ fontSize:11.5, color:theme.muted }}>{t}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Pipeline progress bar */}
+          <Text style={{ fontSize:11, fontWeight:"700", color:theme.muted, textTransform:"uppercase", letterSpacing:0.6, marginBottom:10 }}>Processing Pipeline</Text>
+          <View style={{ height:6, backgroundColor:theme.border, borderRadius:3, marginBottom:14, overflow:"hidden" }}>
+            <View style={{ width:`${pct}%`, height:"100%", backgroundColor: pct===100 ? palette.emerald : palette.teal, borderRadius:3 }}/>
+          </View>
+
+          {/* Pipeline steps */}
+          <View style={{ flexDirection:"row", justifyContent:"space-between", marginBottom:20 }}>
+            {PIPELINE.map((p, i) => {
+              const done    = i <= stage;
+              const current = i === stage && pct < 100;
+              const color   = done ? (pct===100 && i===PIPELINE.length-1 ? palette.emerald : palette.teal) : theme.dim;
+              return (
+                <View key={p.key} style={{ alignItems:"center", flex:1 }}>
+                  <View style={{ width:22, height:22, borderRadius:11, marginBottom:4,
+                    backgroundColor: done ? color+"22" : theme.surface,
+                    borderWidth:1.5, borderColor: done ? color : theme.border,
+                    alignItems:"center", justifyContent:"center" }}>
+                    {done
+                      ? <Ionicons name={current ? "time-outline" : "checkmark"} size={12} color={color}/>
+                      : <View style={{ width:6, height:6, borderRadius:3, backgroundColor:theme.border }}/>}
+                  </View>
+                  <Text style={{ fontSize:8.5, color: done ? color : theme.dim, fontWeight: done ? "700" : "400", textAlign:"center" }}>{p.label}</Text>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Status summary */}
+          <View style={{ backgroundColor:theme.surface, borderRadius:12, padding:14, borderWidth:1, borderColor:theme.border, marginBottom:20 }}>
+            {[
+              { label:"Sync",        val: call.synced ? "Synced ✓" : "Pending",          color: call.synced ? palette.emerald : palette.amber },
+              { label:"Recording",   val: call.hasRecording ? "Available" : "Not available", color: call.hasRecording ? palette.teal : theme.dim },
+              { label:"Upload",      val: call.recordingUploaded ? "Uploaded ✓" : "Not uploaded", color: call.recordingUploaded ? palette.emerald : theme.dim },
+              { label:"Transcription", val: call.transcribed ? "Completed ✓" : "Pending", color: call.transcribed ? palette.emerald : theme.dim },
+            ].map((r,i) => (
+              <View key={r.label} style={{ flexDirection:"row", justifyContent:"space-between", paddingVertical:7,
+                borderTopWidth: i===0 ? 0 : 1, borderTopColor:theme.border }}>
+                <Text style={{ fontSize:13, color:theme.muted }}>{r.label}</Text>
+                <Text style={{ fontSize:13, fontWeight:"700", color:r.color }}>{r.val}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Call history */}
+          {history.length > 1 && (
+            <>
+              <Text style={{ fontSize:11, fontWeight:"700", color:theme.muted, textTransform:"uppercase", letterSpacing:0.6, marginBottom:10 }}>
+                Call History · {history.length} calls with this number
+              </Text>
+              {history.map((h, i) => {
+                const meta = TYPE[h.type] || TYPE.incoming;
+                return (
+                  <View key={h.id} style={{ flexDirection:"row", alignItems:"center", gap:10, paddingVertical:9,
+                    borderBottomWidth: i < history.length-1 ? 1 : 0, borderBottomColor:theme.border }}>
+                    <View style={{ width:32, height:32, borderRadius:9, backgroundColor:meta.color+"18", alignItems:"center", justifyContent:"center" }}>
+                      <MaterialCommunityIcons name={meta.icon} size={15} color={meta.color}/>
+                    </View>
+                    <View style={{ flex:1 }}>
+                      <Text style={{ fontSize:13, fontWeight:"600", color:theme.primary }}>{meta.label} · {h.duration}</Text>
+                      <Text style={{ fontSize:11.5, color:theme.muted }}>{h.time} · {h.ago} · {h.sim}</Text>
+                    </View>
+                    {syncedIds.has(h.id) && <Ionicons name="cloud-done-outline" size={14} color={palette.emerald}/>}
+                  </View>
+                );
+              })}
+            </>
+          )}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
 }
 
 // ── Dial Pad ──────────────────────────────────────────────────────────────────
@@ -309,50 +367,79 @@ function DialPad({ visible, onClose, theme }) {
 }
 
 // ── Call Row ──────────────────────────────────────────────────────────────────
-const CallRow = ({ c, expanded, onToggle, onProgress, noteStatus, theme, shadowSoft }) => {
+const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteStatus, theme, shadowSoft }) => {
   const meta = TYPE[c.type] || TYPE.incoming;
   const open = expanded === c.id;
   const ns   = STATUSES.find(s => s.key === noteStatus);
+
   return (
-    <Pressable onPress={onToggle} style={[{ flexDirection:"row", backgroundColor:theme.card, borderRadius:16, padding:14, marginBottom:8, borderWidth:1, borderColor: ns ? ns.color+"55" : theme.border, overflow:"hidden" }, shadowSoft]}>
+    <Pressable onPress={onToggle}
+      style={[{ backgroundColor:theme.card, borderRadius:16, padding:14, marginBottom:8,
+        borderWidth:1, borderColor: ns ? ns.color+"55" : theme.border, overflow:"hidden" }, shadowSoft]}>
+      {/* Left color bar */}
       <View style={{ position:"absolute", left:0, top:0, bottom:0, width:4, backgroundColor: ns ? ns.color : meta.color }}/>
-      <View style={{ width:40, height:40, borderRadius:12, alignItems:"center", justifyContent:"center", marginLeft:4, backgroundColor:meta.color+"1f" }}>
-        <MaterialCommunityIcons name={meta.icon} size={19} color={meta.color}/>
-      </View>
-      <View style={{ flex:1, marginLeft:12 }}>
-        <View style={{ flexDirection:"row", justifyContent:"space-between" }}>
-          <Text style={{ fontSize:15, fontWeight:"700", color:theme.primary, flex:1 }} numberOfLines={1}>{c.name}</Text>
-          <Text style={{ fontSize:11.5, color:theme.muted }}>{c.time}</Text>
+
+      <View style={{ flexDirection:"row" }}>
+        {/* Avatar */}
+        <View style={{ width:40, height:40, borderRadius:12, alignItems:"center", justifyContent:"center",
+          marginLeft:4, backgroundColor:meta.color+"1f" }}>
+          <MaterialCommunityIcons name={meta.icon} size={19} color={meta.color}/>
         </View>
-        <View style={{ flexDirection:"row", justifyContent:"space-between", marginTop:2 }}>
-          <Text style={{ fontSize:13, color:theme.muted }}>{c.phone}</Text>
-          <Text style={{ fontSize:11, color:theme.dim }}>{c.ago}</Text>
-        </View>
-        <View style={{ flexDirection:"row", alignItems:"center", gap:8, marginTop:5, flexWrap:"wrap" }}>
-          <Text style={{ fontSize:11.5, fontWeight:"600", color:meta.color }}>{meta.label} · {c.duration}</Text>
-          <View style={{ borderWidth:1, borderColor:theme.border, borderRadius:6, paddingHorizontal:6, paddingVertical:1 }}>
-            <Text style={{ fontSize:10, color:theme.muted, fontWeight:"600" }}>{c.sim}</Text>
+
+        <View style={{ flex:1, marginLeft:12 }}>
+          {/* Row 1: name + time */}
+          <View style={{ flexDirection:"row", justifyContent:"space-between", alignItems:"center" }}>
+            <Text style={{ fontSize:15, fontWeight:"700", color:theme.primary, flex:1 }} numberOfLines={1}>{c.name}</Text>
+            <Text style={{ fontSize:11.5, color:theme.muted, marginLeft:8 }}>{c.time}</Text>
           </View>
-          {c.synced && <View style={{ backgroundColor:palette.emerald+"22", borderRadius:5, paddingHorizontal:5, paddingVertical:1 }}><Text style={{ fontSize:9, fontWeight:"700", color:palette.emerald }}>✓ Synced</Text></View>}
-          {ns && <View style={{ backgroundColor:ns.color+"22", borderRadius:5, paddingHorizontal:6, paddingVertical:1 }}><Text style={{ fontSize:9, fontWeight:"700", color:ns.color }}>{ns.label}</Text></View>}
-        </View>
-        {open && (
-          <View style={{ flexDirection:"row", justifyContent:"space-around", marginTop:12, paddingTop:12, borderTopWidth:1, borderTopColor:theme.border }}>
-            {[
-              { icon:"call",          label:"Call",      color:palette.emerald, fn:()=>Linking.openURL(`tel:${c.phone.replace(/\s/g,"")}`) },
-              { icon:"logo-whatsapp", label:"WhatsApp",  color:"#25D366",       fn:()=>Linking.openURL(`whatsapp://send?phone=${c.phone.replace(/\D/g,"")}`) },
-              { icon:"copy-outline",  label:"Copy",      color:palette.teal,    fn:()=>{ Clipboard.setString(c.phone); if(Platform.OS==="android") ToastAndroid.show("Copied!",ToastAndroid.SHORT); } },
-              { icon:"stats-chart",   label:"Progress",  color:palette.violet,  fn:()=>onProgress(c) },
-            ].map(a=>(
-              <Pressable key={a.label} onPress={a.fn} style={{ alignItems:"center", gap:4 }}>
-                <View style={{ width:40, height:40, borderRadius:12, backgroundColor:a.color+"1a", alignItems:"center", justifyContent:"center" }}>
-                  <Ionicons name={a.icon} size={18} color={a.color}/>
-                </View>
-                <Text style={{ fontSize:10.5, color:theme.muted }}>{a.label}</Text>
-              </Pressable>
-            ))}
+
+          {/* Row 2: phone (tappable copy) + ago */}
+          <View style={{ flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginTop:2 }}>
+            <Pressable onPress={() => copyPhone(c.phone)} style={{ flexDirection:"row", alignItems:"center", gap:4 }}>
+              <Text style={{ fontSize:13, color:theme.muted }}>{c.phone}</Text>
+              <Ionicons name="copy-outline" size={11} color={theme.dim}/>
+            </Pressable>
+            <Text style={{ fontSize:11, color:theme.dim }}>{c.ago}</Text>
           </View>
-        )}
+
+          {/* Row 3: type · duration · sim · synced · note status */}
+          <View style={{ flexDirection:"row", alignItems:"center", gap:6, marginTop:5, flexWrap:"wrap" }}>
+            <Text style={{ fontSize:11.5, fontWeight:"600", color:meta.color }}>{meta.label} · {c.duration}</Text>
+            <View style={{ borderWidth:1, borderColor:theme.border, borderRadius:6, paddingHorizontal:6, paddingVertical:1 }}>
+              <Text style={{ fontSize:10, color:theme.muted, fontWeight:"600" }}>{c.sim}</Text>
+            </View>
+            {c.synced && (
+              <View style={{ backgroundColor:palette.emerald+"22", borderRadius:5, paddingHorizontal:5, paddingVertical:1 }}>
+                <Text style={{ fontSize:9, fontWeight:"700", color:palette.emerald }}>✓ Synced</Text>
+              </View>
+            )}
+            {ns && (
+              <View style={{ backgroundColor:ns.color+"22", borderRadius:5, paddingHorizontal:6, paddingVertical:1 }}>
+                <Text style={{ fontSize:9, fontWeight:"700", color:ns.color }}>{ns.label}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Expanded actions */}
+          {open && (
+            <View style={{ flexDirection:"row", justifyContent:"space-around", marginTop:12,
+              paddingTop:12, borderTopWidth:1, borderTopColor:theme.border }}>
+              {[
+                { icon:"call",         label:"Call",     color:palette.emerald, fn:()=>Linking.openURL(`tel:${c.phone.replace(/\s/g,"")}`) },
+                { icon:"logo-whatsapp",label:"WhatsApp", color:"#25D366",       fn:()=>Linking.openURL(`whatsapp://send?phone=${c.phone.replace(/\D/g,"")}`) },
+                { icon:"stats-chart",  label:"Progress", color:palette.violet,  fn:()=>onProgress(c) },
+                { icon:"information-circle-outline", label:"Details", color:palette.teal, fn:()=>onDetails(c) },
+              ].map(a=>(
+                <Pressable key={a.label} onPress={a.fn} style={{ alignItems:"center", gap:4 }}>
+                  <View style={{ width:40, height:40, borderRadius:12, backgroundColor:a.color+"1a", alignItems:"center", justifyContent:"center" }}>
+                    <Ionicons name={a.icon} size={18} color={a.color}/>
+                  </View>
+                  <Text style={{ fontSize:10.5, color:theme.muted }}>{a.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </View>
       </View>
     </Pressable>
   );
@@ -360,41 +447,29 @@ const CallRow = ({ c, expanded, onToggle, onProgress, noteStatus, theme, shadowS
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function Calls() {
-  const [rangeDays, setRangeDays] = useState(7);
-  const [query,     setQuery]     = useState("");
-  const [debouncedQ,setDebouncedQ]= useState("");
-  const [chip,      setChip]      = useState("All");
-  const [expanded,  setExpanded]  = useState(null);
-  const [allCalls,  setAllCalls]  = useState([]);
-  const [syncedIds, setSyncedIds] = useState(new Set());
-  const [page,      setPage]      = useState(1);
-  const [loading,   setLoading]   = useState(true);
-  const [refreshing,setRefreshing]= useState(false);
-  const [dialOpen,  setDialOpen]  = useState(false);
-  const [syncing,   setSyncing]   = useState(false);
+  const [rangeDays,    setRangeDays]    = useState(7);
+  const [query,        setQuery]        = useState("");
+  const [debouncedQ,   setDebouncedQ]   = useState("");
+  const [chip,         setChip]         = useState("All");
+  const [expanded,     setExpanded]     = useState(null);
+  const [allCalls,     setAllCalls]     = useState([]);
+  const [syncedIds,    setSyncedIds]    = useState(new Set());
+  const [page,         setPage]         = useState(1);
+  const [loading,      setLoading]      = useState(true);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [dialOpen,     setDialOpen]     = useState(false);
   const [progressCall, setProgressCall] = useState(null);
-  const [notesMap,  setNotesMap]  = useState({});
+  const [detailsCall,  setDetailsCall]  = useState(null);
+  const [notesMap,     setNotesMap]     = useState({});
   const { theme, shadowSoft } = useTheme();
-  const { deviceId } = useAuth();
   const debounceRef = useRef(null);
-  const syncRef = useRef(false);
 
-  // Debounce search 300ms
   useEffect(() => {
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => setDebouncedQ(query), 300);
     return () => clearTimeout(debounceRef.current);
   }, [query]);
 
-  // Load synced IDs from storage
-  const loadSyncedIds = useCallback(async () => {
-    try {
-      const raw = await AsyncStorage.getItem("callos_synced_ids");
-      setSyncedIds(raw ? new Set(JSON.parse(raw)) : new Set());
-    } catch { setSyncedIds(new Set()); }
-  }, []);
-
-  // Load calls for selected range
   const load = useCallback(async (days = rangeDays, isRefresh = false) => {
     if (isRefresh) { setRefreshing(true); setPage(1); } else setLoading(true);
     try {
@@ -404,35 +479,31 @@ export default function Calls() {
       ]);
       const synced = ids ? new Set(JSON.parse(ids)) : new Set();
       setSyncedIds(synced);
-      const mapped = raw.map((c) => ({
-        id:          c.client_event_id,
-        rawCall:     c,
-        type:        c.call_type || "incoming",
-        name:        c.contact_name || "Unknown",
-        phone:       c.phone_number || "",
-        duration:    fmtDur(c.duration_seconds),
-        durationSec: c.duration_seconds,
-        time:        new Date(c._start_ms || c.start_time).toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" }),
-        ago:         relTime(c.start_time),
-        group:       groupLabel(c.start_time),
-        sim:         c.source || "SIM 1",
-        synced:      synced.has(c.client_event_id),
-        _ts:         c._start_ms || new Date(c.start_time).getTime(),
+      const mapped = raw.map(c => ({
+        id:               c.client_event_id,
+        type:             c.call_type || "incoming",
+        name:             c.contact_name || "Unknown",
+        phone:            c.phone_number || "",
+        duration:         fmtDur(c.duration_seconds),
+        durationSec:      c.duration_seconds,
+        time:             new Date(c._start_ms || c.start_time).toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" }),
+        ago:              relTime(c.start_time),
+        group:            groupLabel(c.start_time),
+        sim:              c.source || "SIM 1",
+        synced:           synced.has(c.client_event_id),
+        hasRecording:     c.recording_available || false,
+        recordingUploaded:false,
+        transcribed:      false,
+        _ts:              c._start_ms || new Date(c.start_time).getTime(),
       }));
       setAllCalls(mapped);
-
-      // Background sync is handled by syncService.useAutoSync — no duplicate sync here
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [rangeDays, deviceId]);
+    } catch { /* silent */ }
+    finally { setLoading(false); setRefreshing(false); }
+  }, [rangeDays]);
 
   useEffect(() => { load(rangeDays); }, [rangeDays]);
-
-  // Load saved notes map on mount
   useEffect(() => { loadAllNotes().then(setNotesMap); }, []);
 
-  // Filtered + memoized
   const filtered = useMemo(() => {
     let list = allCalls;
     if      (chip === "In")       list = list.filter(c => c.type === "incoming");
@@ -448,7 +519,6 @@ export default function Calls() {
 
   const visible = useMemo(() => filtered.slice(0, page * PAGE), [filtered, page]);
 
-  // Inject group headers
   const flatData = useMemo(() => {
     const result = []; let lastGroup = null;
     for (const c of visible) {
@@ -478,7 +548,8 @@ export default function Calls() {
         c={item}
         expanded={expanded}
         onToggle={() => setExpanded(expanded === item.id ? null : item.id)}
-        onProgress={(c) => setProgressCall(c)}
+        onProgress={c => setProgressCall(c)}
+        onDetails={c => setDetailsCall(c)}
         noteStatus={notesMap[item.phone]?.status || null}
         theme={theme}
         shadowSoft={shadowSoft}
@@ -486,24 +557,27 @@ export default function Calls() {
     );
   }, [expanded, notesMap, theme, shadowSoft]);
 
-  const keyExtractor = useCallback((item) => item.id, []);
+  const keyExtractor = useCallback(item => item.id, []);
 
   return (
     <SafeAreaView style={{ flex:1, backgroundColor:theme.bg }} edges={["top"]}>
       <AppHeader title="Calls" right={
-        <View style={{ flexDirection:"row", alignItems:"center", gap:8 }}>
-          {syncing && <ActivityIndicator size="small" color={palette.teal}/>}
-          <Pressable onPress={() => load(rangeDays, true)} style={{ width:38, height:38, borderRadius:11, backgroundColor:theme.surface, borderWidth:1, borderColor:theme.border, alignItems:"center", justifyContent:"center" }}>
-            <Ionicons name="refresh-outline" size={18} color={theme.secondary}/>
-          </Pressable>
-        </View>
+        <Pressable onPress={() => load(rangeDays, true)}
+          style={{ width:38, height:38, borderRadius:11, backgroundColor:theme.surface,
+            borderWidth:1, borderColor:theme.border, alignItems:"center", justifyContent:"center" }}>
+          <Ionicons name="refresh-outline" size={18} color={theme.secondary}/>
+        </Pressable>
       }/>
 
       <View style={{ paddingHorizontal:16, paddingTop:8 }}>
         {/* Search */}
-        <View style={[{ flexDirection:"row", alignItems:"center", backgroundColor:theme.surface, borderRadius:13, paddingHorizontal:14, paddingVertical:11, borderWidth:1, borderColor:theme.border, marginBottom:10 }, shadowSoft]}>
+        <View style={[{ flexDirection:"row", alignItems:"center", backgroundColor:theme.surface,
+          borderRadius:13, paddingHorizontal:14, paddingVertical:11,
+          borderWidth:1, borderColor:theme.border, marginBottom:10 }, shadowSoft]}>
           <Ionicons name="search" size={18} color={theme.dim}/>
-          <TextInput value={query} onChangeText={setQuery} placeholder="Search name or number…" placeholderTextColor={theme.dim} style={{ flex:1, marginLeft:8, fontSize:14, color:theme.primary }}/>
+          <TextInput value={query} onChangeText={setQuery} placeholder="Search name or number…"
+            placeholderTextColor={theme.dim}
+            style={{ flex:1, marginLeft:8, fontSize:14, color:theme.primary }}/>
           {query.length>0 && <Pressable onPress={()=>setQuery("")}><Ionicons name="close-circle" size={18} color={theme.dim}/></Pressable>}
         </View>
 
@@ -514,7 +588,9 @@ export default function Calls() {
               const on = r.days === rangeDays;
               return (
                 <Pressable key={r.days} onPress={() => { setRangeDays(r.days); setPage(1); setChip("All"); }}
-                  style={{ paddingHorizontal:14, paddingVertical:7, borderRadius:999, borderWidth:1.5, borderColor: on ? palette.violet : theme.border, backgroundColor: on ? palette.violet : theme.surface }}>
+                  style={{ paddingHorizontal:14, paddingVertical:7, borderRadius:999, borderWidth:1.5,
+                    borderColor: on ? palette.violet : theme.border,
+                    backgroundColor: on ? palette.violet : theme.surface }}>
                   <Text style={{ fontSize:12.5, fontWeight:"700", color: on ? "#fff" : theme.muted }}>{r.label}</Text>
                 </Pressable>
               );
@@ -529,7 +605,10 @@ export default function Calls() {
               const on = f === chip;
               return (
                 <Pressable key={f} onPress={() => { setChip(f); setPage(1); }}
-                  style={{ paddingHorizontal:14, paddingVertical:7, borderRadius:999, borderWidth:1, borderColor: on ? palette.teal : theme.border, backgroundColor: on ? palette.teal : theme.surface, flexDirection:"row", alignItems:"center", gap:5 }}>
+                  style={{ paddingHorizontal:14, paddingVertical:7, borderRadius:999, borderWidth:1,
+                    borderColor: on ? palette.teal : theme.border,
+                    backgroundColor: on ? palette.teal : theme.surface,
+                    flexDirection:"row", alignItems:"center", gap:5 }}>
                   <Text style={{ fontSize:12.5, fontWeight:"600", color: on ? "#04211d" : theme.muted }}>{f}</Text>
                   {counts[f] > 0 && (
                     <View style={{ backgroundColor: on ? "rgba(0,0,0,0.2)" : theme.border, borderRadius:8, paddingHorizontal:5, paddingVertical:1 }}>
@@ -542,16 +621,10 @@ export default function Calls() {
           </View>
         </ScrollView>
 
-        {/* Summary bar */}
+        {/* Summary */}
         <View style={{ flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:6, paddingHorizontal:2 }}>
           <Text style={{ fontSize:12, color:theme.muted }}>{filtered.length} calls · Last {rangeDays} days</Text>
-          {syncing
-            ? <View style={{ flexDirection:"row", alignItems:"center", gap:5 }}>
-                <ActivityIndicator size="small" color={palette.teal}/>
-                <Text style={{ fontSize:11, color:palette.teal, fontWeight:"600" }}>Syncing…</Text>
-              </View>
-            : <Text style={{ fontSize:11, color:theme.dim }}>{filtered.length} shown</Text>
-          }
+          <Text style={{ fontSize:11, color:theme.dim }}>{visible.length} shown</Text>
         </View>
       </View>
 
@@ -584,6 +657,7 @@ export default function Calls() {
         />
       )}
 
+      {/* Dial FAB */}
       <Pressable onPress={() => setDialOpen(true)} style={{ position:"absolute", bottom:100, right:20, elevation:8 }}>
         <LinearGradient colors={gradientBrand} style={{ width:58, height:58, borderRadius:29, alignItems:"center", justifyContent:"center" }}>
           <Ionicons name="keypad-outline" size={24} color="#fff"/>
@@ -592,17 +666,20 @@ export default function Calls() {
 
       <DialPad visible={dialOpen} onClose={() => setDialOpen(false)} theme={theme}/>
 
-      <CallProgressSheet
+      <ProgressSheet
         visible={!!progressCall}
-        onClose={() => {
-          setProgressCall(null);
-          loadAllNotes().then(setNotesMap);
-        }}
+        onClose={() => { setProgressCall(null); loadAllNotes().then(setNotesMap); }}
         call={progressCall}
+        theme={theme}
+      />
+
+      <DetailsSheet
+        visible={!!detailsCall}
+        onClose={() => setDetailsCall(null)}
+        call={detailsCall}
         allCalls={allCalls}
         syncedIds={syncedIds}
         theme={theme}
-        shadowSoft={shadowSoft}
       />
     </SafeAreaView>
   );
