@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { readCallLog, readSimInfo } from "./nativeModules";
 import { findSimForCall, buildCallSource } from "./simInventoryService";
 import { BASE_URL } from "./api";
+import { upsertCallStatus, STATUS } from "./callStatusStore";
 
 // -- Storage keys
 const LAST_SYNC_KEY    = "callos_last_sync_ts";
@@ -225,6 +226,17 @@ export async function markCallsSynced(calls) {
     await _addSyncedIds(ids);
     await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
     console.log("[CALLLOG] sync confirmed = " + ids.length + " calls marked synced");
+    // Update callStatusStore so Sync Health shows real numbers
+    await Promise.all(calls.map((c) =>
+      upsertCallStatus(c.client_event_id, {
+        sync_status:      STATUS.SYNCED,
+        phone_number:     c.phone_number,
+        contact_name:     c.contact_name || null,
+        call_type:        c.call_type,
+        duration_seconds: c.duration_seconds,
+        start_time:       c.start_time,
+      }).catch(() => {})
+    ));
   }
 }
 

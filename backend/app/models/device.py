@@ -27,8 +27,9 @@ class Device(Base):
     latitude            = Column(Float, nullable=True)
     longitude           = Column(Float, nullable=True)
     location_accuracy   = Column(Float, nullable=True)
-    wifi_ssid           = Column(String(100), nullable=True)
-    created_at          = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    wifi_ssid               = Column(String(100), nullable=True)
+    reconnect_requested_at  = Column(DateTime, nullable=True)   # set by manager "Connect" button
+    created_at              = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at          = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                                  onupdate=lambda: datetime.now(timezone.utc))
 

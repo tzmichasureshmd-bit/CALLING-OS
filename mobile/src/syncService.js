@@ -128,7 +128,7 @@ TaskManager.defineTask(BG_TASK_NAME, async () => {
     try {
       const perms = await checkPermissions().catch(() => ({}));
       const level = await getBatteryLevel();
-      await api.heartbeat(deviceId, {
+      const res = await api.heartbeat(deviceId, {
         is_online: true,
         battery_level: level,
         permissions_status: {
@@ -139,6 +139,11 @@ TaskManager.defineTask(BG_TASK_NAME, async () => {
         },
         background_sync_status: "active",
       });
+      if (res?.sync_now) {
+        const { doFirstFullSync } = require("./AuthContext");
+        doFirstFullSync(deviceId).catch(() => {});
+        return BackgroundFetch.BackgroundFetchResult.NewData;
+      }
     } catch {}
     await runSyncCycle(deviceId, "reconcile");
     return BackgroundFetch.BackgroundFetchResult.NewData;
@@ -185,7 +190,7 @@ export function useAutoSync() {
     async function sendHeartbeat() {
       try {
         const [perms, battery] = await Promise.all([checkPermissions(), getBatteryLevel()]);
-        await api.heartbeat(deviceId, {
+        const res = await api.heartbeat(deviceId, {
           is_online: true,
           battery_level: battery,
           permissions_status: {
@@ -197,6 +202,12 @@ export function useAutoSync() {
           background_sync_status: "active",
           app_version: "1.0.0",
         });
+        // Manager clicked "Connect" — trigger full sync immediately
+        if (res?.sync_now) {
+          console.log("[SYNC] sync_now received from server — triggering full sync");
+          const { doFirstFullSync } = require("./AuthContext");
+          doFirstFullSync(deviceId).catch(() => {});
+        }
       } catch {}
     }
 

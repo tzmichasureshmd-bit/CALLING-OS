@@ -25,7 +25,15 @@ jobs:
             printf '%s' '${{ secrets.BACKEND_ENV }}' > /opt/callingos/backend/.env
             printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /opt/callingos/backend/firebase-service-account.json
 
+            # Run pending migrations against Supabase (idempotent — IF NOT EXISTS)
             cd /opt/callingos/backend
+            for f in migrations/003_device_health_columns.sql migrations/004_missing_columns.sql migrations/005_superadmin_tables.sql migrations/006_device_reconnect.sql; do
+              echo "=== Running $f ==="
+              docker run --rm postgres:15-alpine psql \
+                "postgresql://postgres.gjfohkxocurrzbdpybuu:TzMicha%40123@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres" \
+                -f /dev/stdin < $f || true
+            done
+
             docker compose up -d --build
             docker image prune -f
 

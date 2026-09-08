@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import {
   Smartphone, Battery, CheckCircle2, XCircle,
   RefreshCw, WifiOff, Wifi, ShieldCheck, ShieldAlert,
-  Cpu, AlertTriangle, MapPin,
+  Cpu, AlertTriangle, MapPin, Zap,
 } from "lucide-react";
 import { SkeletonRows, ErrorState } from "../components/ui.jsx";
 import { useDeviceSocket } from "../api/useDeviceSocket.js";
+import { devicesApi } from "../api/resources.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -156,11 +157,23 @@ function DeviceDetail({ d, connected }) {
   const lastSeen = useTick(d.lastSeenAt, 1000);
   const s = STATUS[d.status] || STATUS.offline;
   const allPermsOk = d.permissions.callLog === true && d.permissions.phoneState === true && d.permissions.contacts === true && d.permissions.recording === true;
+  const [connecting, setConnecting] = useState(false);
+  const [connectSent, setConnectSent] = useState(false);
+
+  async function handleConnect() {
+    setConnecting(true);
+    try {
+      await devicesApi.reconnect(d.id);
+      setConnectSent(true);
+      setTimeout(() => setConnectSent(false), 8000);
+    } catch {}
+    setConnecting(false);
+  }
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
 
-      {/* Header */}
+        {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div style={{ width: 64, height: 64, borderRadius: 18, background: s.soft, display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
@@ -191,6 +204,26 @@ function DeviceDetail({ d, connected }) {
             </div>
           </div>
         </div>
+        {/* Connect button — only shown when device is offline */}
+        {!d.is_online && (
+          <button
+            onClick={handleConnect}
+            disabled={connecting || connectSent}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "8px 16px", borderRadius: 10, border: "none", cursor: connecting || connectSent ? "default" : "pointer",
+              background: connectSent ? "var(--success-soft)" : "var(--accent)",
+              color: connectSent ? "var(--success)" : "#fff",
+              fontSize: 13, fontWeight: 700,
+              opacity: connecting ? 0.7 : 1,
+              transition: "all 0.2s",
+              flexShrink: 0,
+            }}
+          >
+            <Zap size={14} style={{ animation: connecting ? "spin 0.8s linear infinite" : "none" }} />
+            {connectSent ? "Signal sent" : connecting ? "Sending…" : "Connect"}
+          </button>
+        )}
       </div>
 
       {/* Permission warning banner */}

@@ -14,6 +14,10 @@ CONN_STR = (
 MIGRATIONS = [
     "migrations/001_expand_sims.sql",
     "migrations/002_expand_calls_recording.sql",
+    "migrations/003_device_health_columns.sql",
+    "migrations/004_missing_columns.sql",
+    "migrations/005_superadmin_tables.sql",
+    "migrations/006_device_reconnect.sql",
 ]
 
 

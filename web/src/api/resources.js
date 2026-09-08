@@ -33,6 +33,7 @@ export const employeesApi = {
 
 export const devicesApi = {
   list: (params) => client.get("/devices", { params }).then((r) => r.data),
+  reconnect: (id) => client.post(`/devices/${id}/reconnect`).then((r) => r.data),
 };
 
 export const callsApi = {

@@ -294,7 +294,7 @@ async def sync_calls(
 @router.get("", response_model=PaginatedCalls)
 def list_calls(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=500),
     employee_id: str = Query(None),
     device_id: str = Query(None),
     call_type: str = Query(None),

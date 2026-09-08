@@ -343,6 +343,12 @@ async def heartbeat(
     if body.wifi_ssid is not None:
         device.wifi_ssid = body.wifi_ssid
 
+    # Check if manager requested a reconnect/sync — consume the flag
+    sync_now = False
+    if device.reconnect_requested_at is not None:
+        sync_now = True
+        device.reconnect_requested_at = None   # consume — only fires once
+
     # Update SIM inventory if provided
     changes = []
     if body.sims:
@@ -366,7 +372,27 @@ async def heartbeat(
             {"event": "sim_changed", **change},
         )
 
-    return {"status": "ok", "last_seen": device.last_seen_at}
+    return {"status": "ok", "last_seen": device.last_seen_at, "sync_now": sync_now}
+
+
+# ── Reconnect / force-sync command ──────────────────────────────────────────
+
+@router.post("/{device_id}/reconnect")
+async def reconnect_device(
+    device_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Manager clicks 'Connect' → sets reconnect_requested_at so next heartbeat returns sync_now=True."""
+    device = db.query(Device).filter(
+        Device.id == device_id,
+        Device.organization_id == user.organization_id,
+    ).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    device.reconnect_requested_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"status": "ok", "message": "Reconnect signal queued — device will sync on next heartbeat"}
 
 
 # ── Dedicated SIM sync endpoint ───────────────────────────────────────────────
