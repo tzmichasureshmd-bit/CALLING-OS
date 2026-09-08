@@ -352,9 +352,26 @@ export default function Calls() {
         </ScrollView>
 
         {/* Summary bar */}
-        <View style={{ flexDirection:"row", justifyContent:"space-between", marginBottom:6, paddingHorizontal:2 }}>
+        <View style={{ flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:6, paddingHorizontal:2 }}>
           <Text style={{ fontSize:12, color:theme.muted }}>{filtered.length} calls · Last {rangeDays} days</Text>
-          {syncing && <Text style={{ fontSize:11, color:palette.teal, fontWeight:"600" }}>↑ Syncing…</Text>}
+          {syncing
+            ? <View style={{ flexDirection:"row", alignItems:"center", gap:5 }}>
+                <ActivityIndicator size="small" color={palette.teal}/>
+                <Text style={{ fontSize:11, color:palette.teal, fontWeight:"600" }}>Syncing to dashboard…</Text>
+              </View>
+            : <Pressable onPress={() => {
+                if (syncRef.current) return;
+                syncRef.current = true;
+                setSyncing(true);
+                getRealCallLog(rangeDays)
+                  .then(raw => syncInBackground(deviceId, raw))
+                  .then(() => loadSyncedIds())
+                  .finally(() => { syncRef.current = false; setSyncing(false); });
+              }} style={{ flexDirection:"row", alignItems:"center", gap:4, backgroundColor:palette.teal+"18", borderRadius:8, paddingHorizontal:10, paddingVertical:5 }}>
+                <Ionicons name="cloud-upload-outline" size={13} color={palette.teal}/>
+                <Text style={{ fontSize:11, color:palette.teal, fontWeight:"700" }}>Sync {rangeDays}d</Text>
+              </Pressable>
+          }
         </View>
       </View>
 

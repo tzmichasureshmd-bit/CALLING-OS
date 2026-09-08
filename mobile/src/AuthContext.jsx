@@ -292,17 +292,22 @@ export function AuthProvider({ children }) {
       requestAllPermissions().catch(() => {});
     }
 
-    // Register device then sync from install date — non-blocking after login
+    // Register device — MUST succeed before any sync
     try {
       const dId = await ensureDevice(userData);
       if (dId) {
         setDeviceId(dId);
+        console.log("[AUTH] device registered: " + dId);
         await sendHeartbeat(dId).catch(() => {});
         syncSimInventory(dId, true).catch(() => {});
-        // doFirstFullSync reads only from install date (max 7 days) — safe, no crash
-        doFirstFullSync(dId).catch(() => {});
+        // Sync from install date — non-blocking, batched
+        doFirstFullSync(dId).catch((e) => console.warn("[AUTH] firstSync error:", e?.message));
+      } else {
+        console.warn("[AUTH] device registration failed — sync skipped");
       }
-    } catch { /* device/sync failure must not block login */ }
+    } catch (e) {
+      console.warn("[AUTH] ensureDevice error:", e?.message);
+    }
 
     return userData;
   }, []);
