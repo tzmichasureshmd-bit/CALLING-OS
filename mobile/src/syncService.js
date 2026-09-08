@@ -45,21 +45,24 @@ async function filterUnsynced(calls) {
 // ── Batch POST to backend ─────────────────────────────────────────────────────
 async function batchPost(deviceId, calls) {
   if (!calls.length) return;
-  const synced = [];
+  const confirmed = [];
   for (let i = 0; i < calls.length; i += BATCH_SIZE) {
     const batch = calls.slice(i, i + BATCH_SIZE);
     try {
       const res = await api.syncCalls(deviceId, batch);
-      synced.push(...batch);
-      console.log(`[SYNC] batch ${Math.floor(i / BATCH_SIZE) + 1}: +${res.accepted} dup=${res.duplicates}`);
+      // Only mark synced if server confirmed (accepted or duplicate = already in DB)
+      if ((res.accepted || 0) + (res.duplicates || 0) > 0) {
+        confirmed.push(...batch);
+      }
+      console.log(`[SYNC] batch ${Math.floor(i / BATCH_SIZE) + 1}: +${res.accepted} dup=${res.duplicates} failed=${res.failed}`);
     } catch (e) {
       console.warn(`[SYNC] batch failed: ${e?.message}`);
     }
     if (i + BATCH_SIZE < calls.length)
       await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
   }
-  if (synced.length) {
-    await markCallsSynced(synced);
+  if (confirmed.length) {
+    await markCallsSynced(confirmed);
     await AsyncStorage.setItem(LAST_SYNC_TS_KEY, String(Date.now()));
   }
 }
@@ -95,8 +98,9 @@ export async function runSyncCycle(deviceId, mode) {
       candidates = await getRecentCalls();
     } else {
       const lastTs = await AsyncStorage.getItem(LAST_SYNC_TS_KEY).catch(() => null);
-      const msSince = lastTs ? Date.now() - parseInt(lastTs) : 2 * 60 * 60 * 1000;
-      const daysSince = Math.min(1, msSince / 86400000 + 0.05);
+      const msSince = lastTs ? Date.now() - parseInt(lastTs) : 24 * 60 * 60 * 1000;
+      // Look back at least 2h, at most 2 days
+      const daysSince = Math.min(2, Math.max(2 / 24, msSince / 86400000 + 0.05));
       candidates = await getCallsLastDays(daysSince);
     }
 

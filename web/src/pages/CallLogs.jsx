@@ -13,6 +13,20 @@ import { dataSource } from "../api/dataSource.js";
 import { callsApi } from "../api/resources.js";
 import { useResource } from "../api/useResource.js";
 import { useDeviceSocket } from "../api/useDeviceSocket.js";
+import { useRange } from "../context/RangeContext.jsx";
+
+function rangeToParams(range) {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  if (range === "today")     return { from_date: startOfToday, page_size: 500 };
+  if (range === "yesterday") {
+    const yStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).toISOString();
+    return { from_date: yStart, to_date: startOfToday, page_size: 500 };
+  }
+  if (range === "7d")  return { from_date: new Date(Date.now() - 7  * 86400000).toISOString(), page_size: 500 };
+  if (range === "30d") return { from_date: new Date(Date.now() - 30 * 86400000).toISOString(), page_size: 500 };
+  return { page_size: 500 };
+}
 
 function exportCallsCSV(calls) {
   const rows = [["Date", "Type", "Customer", "Phone", "Employee", "Duration (s)", "SIM", "Device", "Recording"]];
@@ -43,7 +57,12 @@ export default function CallLogs() {
   const [query, setQuery]   = useState("");
   const [filter, setFilter] = useState("All");
   const [selected, setSelected] = useState(null);
-  const { loading, error, data, reload } = useResource(() => dataSource.getCalls());
+  const { range } = useRange();
+
+  const { loading, error, data, reload } = useResource(
+    () => dataSource.getCalls(rangeToParams(range)),
+    [range]
+  );
 
   // Auto-refresh when WebSocket signals new calls synced
   const { newCallEvent } = useDeviceSocket();

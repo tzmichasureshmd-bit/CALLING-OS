@@ -29,10 +29,11 @@ async function ensureInstallDate() {
 }
 
 // Batch sync helper — never sends more than BATCH_SIZE at once
+// Only marks calls as synced if server accepted OR said duplicate (already there)
 async function batchSync(deviceId, calls) {
   if (!deviceId || !calls.length) return { accepted: 0, duplicates: 0, failed: 0 };
   let totalAccepted = 0, totalDup = 0, totalFailed = 0;
-  const syncedCalls = [];
+  const confirmedCalls = [];
   for (let i = 0; i < calls.length; i += BATCH_SIZE) {
     const batch = calls.slice(i, i + BATCH_SIZE);
     try {
@@ -40,16 +41,20 @@ async function batchSync(deviceId, calls) {
       totalAccepted += res.accepted || 0;
       totalDup      += res.duplicates || 0;
       totalFailed   += res.failed || 0;
-      syncedCalls.push(...batch);
-      console.log(`[SYNC] batch ${Math.floor(i/BATCH_SIZE)+1}/${Math.ceil(calls.length/BATCH_SIZE)}: accepted=${res.accepted} dup=${res.duplicates}`);
+      // Only mark as synced if server confirmed (accepted or duplicate = already in DB)
+      if ((res.accepted || 0) + (res.duplicates || 0) > 0) {
+        confirmedCalls.push(...batch);
+      }
+      console.log(`[SYNC] batch ${Math.floor(i/BATCH_SIZE)+1}/${Math.ceil(calls.length/BATCH_SIZE)}: accepted=${res.accepted} dup=${res.duplicates} failed=${res.failed}`);
     } catch (e) {
       console.warn(`[SYNC] batch failed: ${e?.message}`);
+      // Don't mark as synced — will retry next cycle
     }
     if (i + BATCH_SIZE < calls.length) {
       await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
     }
   }
-  if (syncedCalls.length) await markCallsSynced(syncedCalls);
+  if (confirmedCalls.length) await markCallsSynced(confirmedCalls);
   return { accepted: totalAccepted, duplicates: totalDup, failed: totalFailed };
 }
 
@@ -111,19 +116,21 @@ export async function sendHeartbeat(deviceId) {
 
 // ── Hardware-bound device identifier ─────────────────────────────────────────
 async function getStableDeviceId() {
-  // Try expo-application for a hardware/installation-bound ID
+  // expo-application.androidId is stable across reinstalls (tied to device + signing key)
   try {
     const Application = require("expo-application");
     if (Platform.OS === "android") {
       const androidId = Application.androidId;
-      if (androidId) return `android-${androidId}`;
+      if (androidId && androidId.length > 4) return `android-${androidId}`;
     }
   } catch { /* expo-application not available */ }
 
-  // Fallback: generate a UUID once and persist it
-  const stored = await AsyncStorage.getItem("callos_hw_device_id");
+  // Fallback: persist a UUID once — never regenerate if already stored
+  const stored = await AsyncStorage.getItem("callos_hw_device_id").catch(() => null);
   if (stored) return stored;
-  const newId = `rn-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // Use a deterministic seed so reinstalls on same device get same ID
+  const seed = `${Platform.Version}-${Date.now()}`;
+  const newId = `rn-${seed}-${Math.random().toString(36).slice(2)}`;
   await AsyncStorage.setItem("callos_hw_device_id", newId);
   return newId;
 }
@@ -262,11 +269,12 @@ export function AuthProvider({ children }) {
 
         if (d) {
           sendHeartbeat(d).catch(() => {});
-          // Always attempt reconciliation on app start
-          // doFirstFullSync retries until backend confirms
+          // Run first sync if never done, OR if synced_ids is empty (e.g. after logout)
           const firstDone = await AsyncStorage.getItem(FIRST_SYNC_KEY);
-          if (!firstDone) {
-            console.log("[SYNC] App start: first sync not done, running doFirstFullSync");
+          const syncedIds = await AsyncStorage.getItem("callos_synced_ids").catch(() => null);
+          const hasLocalSyncState = syncedIds && JSON.parse(syncedIds).length > 0;
+          if (!firstDone || !hasLocalSyncState) {
+            console.log("[SYNC] App start: running doFirstFullSync (firstDone=" + firstDone + " hasSyncState=" + hasLocalSyncState + ")");
             doFirstFullSync(d).catch(() => {});
           } else {
             doStartReconciliation(d).catch(() => {});

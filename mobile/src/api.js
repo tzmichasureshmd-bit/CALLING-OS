@@ -131,6 +131,11 @@ export async function clearSession() {
     "callos_device_id",
     "callos_first_sync_done",
     "callos_sync_fail_count",
+    "callos_synced_ids",
+    "callos_last_sync_ts",
+    "callos_install_date",
+    "callos_hw_device_id",
+    "callos_upload_queue",
   ]);
 }
 
