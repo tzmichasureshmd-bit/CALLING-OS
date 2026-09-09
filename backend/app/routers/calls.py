@@ -174,7 +174,10 @@ async def sync_calls(
             if end and end.tzinfo is None:
                 end = end.replace(tzinfo=timezone.utc)
             now_utc = datetime.now(timezone.utc)
-            if start > now_utc.replace(second=now_utc.second + 300):
+            # Reject calls more than 5 minutes in the future
+            from datetime import timedelta
+            if start > now_utc + timedelta(minutes=5):
+                logger.warning("Call %s rejected: future timestamp %s", item.client_event_id, start)
                 failed += 1
                 results.append(CallSyncItemResult(
                     client_event_id=item.client_event_id,
@@ -183,7 +186,8 @@ async def sync_calls(
                     recording_status="not_available",
                 ))
                 continue
-        except Exception:
+        except Exception as ts_exc:
+            logger.error("Timestamp parse error for %s: %s", item.client_event_id, ts_exc)
             failed += 1
             results.append(CallSyncItemResult(
                 client_event_id=item.client_event_id,
@@ -242,7 +246,8 @@ async def sync_calls(
                 transcript_status=None,
             ))
         except Exception as exc:
-            logger.warning("Call insert failed for event %s: %s", item.client_event_id, exc)
+            logger.error("Call INSERT failed for event %s: %s", item.client_event_id, exc, exc_info=True)
+            db.rollback()
             failed += 1
             results.append(CallSyncItemResult(
                 client_event_id=item.client_event_id,
