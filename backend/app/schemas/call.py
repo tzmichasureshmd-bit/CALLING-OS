@@ -32,6 +32,7 @@ class CallSyncItemResult(BaseModel):
     sync_status: str = "synced"            # synced | failed
     recording_status: str = "not_available" # not_available | pending
     transcript_status: Optional[str] = None
+    error: Optional[str] = None            # populated on failed inserts for diagnostics
 
 
 class CallSyncResponse(BaseModel):
