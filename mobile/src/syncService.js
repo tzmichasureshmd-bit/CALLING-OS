@@ -100,7 +100,7 @@ export async function runSyncCycle(deviceId, mode) {
       const lastTs = await AsyncStorage.getItem(LAST_SYNC_TS_KEY).catch(() => null);
       const msSince = lastTs ? Date.now() - parseInt(lastTs) : 24 * 60 * 60 * 1000;
       // Look back at least 2h, at most 2 days
-      const daysSince = Math.min(2, Math.max(2 / 24, msSince / 86400000 + 0.05));
+      const daysSince = Math.min(30, Math.max(2 / 24, msSince / 86400000 + 0.05));
       candidates = await getCallsLastDays(daysSince);
     }
 

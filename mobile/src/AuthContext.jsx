@@ -192,7 +192,7 @@ export async function doFirstFullSync(deviceId) {
     const installDate    = installDateStr ? new Date(installDateStr) : new Date();
     const daysSinceInstall = Math.max(1, Math.ceil((Date.now() - installDate.getTime()) / 86400000));
     // Cap at 7 days — never load 90 days on first sync
-    const daysToRead = Math.min(daysSinceInstall, 7);
+    const daysToRead = Math.min(daysSinceInstall, 30);
 
     console.log(`[SYNC] firstSync: reading ${daysToRead} days (installed ${daysSinceInstall}d ago)`);
     const allCalls = await getRealCallLog(daysToRead);
@@ -221,8 +221,8 @@ async function doStartReconciliation(deviceId) {
     const lastSyncTs = await AsyncStorage.getItem(LAST_SYNC_TS_KEY).catch(() => null);
     // Only look back max 2 days to find new calls — not 7 days
     const lookbackDays = lastSyncTs
-      ? Math.min(2, Math.ceil((Date.now() - parseInt(lastSyncTs)) / 86400000) + 0.1)
-      : 1;
+      ? Math.min(30, Math.ceil((Date.now() - parseInt(lastSyncTs)) / 86400000) + 0.1)
+      : 30;
     const allRecent = await getRealCallLog(lookbackDays);
     if (!allRecent.length) return;
 
