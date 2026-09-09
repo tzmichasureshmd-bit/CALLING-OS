@@ -20,6 +20,7 @@ jobs:
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
             cd /opt/callingos
+            git stash
             git pull origin main
 
             printf '%s' '${{ secrets.BACKEND_ENV }}' > /opt/callingos/backend/.env
@@ -34,8 +35,9 @@ jobs:
                 -f /dev/stdin < $f || true
             done
 
-            docker compose down
-            docker compose up -d --build
+            docker compose down --remove-orphans
+            docker compose build --no-cache
+            docker compose up -d
             docker image prune -f
 
             echo "✅ Deploy complete — backend + web rebuilt"
