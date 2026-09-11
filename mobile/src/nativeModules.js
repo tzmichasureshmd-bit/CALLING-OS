@@ -130,11 +130,11 @@ export async function readCallLog(limitDays = 30) {
           date:           r.date,
           duration:       r.duration,
           new:            r.new,
-          simSlot:        null,  // populated from phoneAccountId below
-          subscriptionId: r.phoneAccountId || null,
+          simSlot:        null,
+          // subscriptionId from the dedicated column is primary; phoneAccountId is fallback
+          subscriptionId: r.subscriptionId || r.phoneAccountId || null,
           phoneAccountId: r.phoneAccountId || null,
           cachedName:     r.name || "",
-          // Keep raw type name for diagnostics
           _typeName:      r.typeName,
         }));
       }
@@ -192,45 +192,92 @@ export async function readCallLog(limitDays = 30) {
 }
 
 // ── SIM Info ──────────────────────────────────────────────────────────────────
+// Native Kotlin SimModule (SubscriptionManager) is PRIMARY.
+// react-native-sim-cards-manager is FALLBACK only.
+// subscriptionId and simSlotIndex are NEVER mixed.
+
+const _NativeSimModule = NativeModules.SimModule || null;
+
+/**
+ * Normalize a raw SIM object from either source into the canonical shape.
+ * slot       = physical slot index (0-based, from simSlotIndex ONLY)
+ * subscriptionId = Android subscription ID (independent of slot)
+ */
+function _normalizeSim(raw, fallbackIndex) {
+  // slot must come from simSlotIndex / slot — NEVER from subscriptionId
+  const slot = (
+    raw.slot            !== undefined ? raw.slot :            // native module field
+    raw.simSlotIndex    !== undefined ? raw.simSlotIndex :    // library field
+    raw.slotIndex       !== undefined ? raw.slotIndex :       // library alt field
+    fallbackIndex
+  );
+
+  // Guard: if slot looks like a subscription ID (> 10) use fallback index
+  const safeSlot = (typeof slot === "number" && slot >= 0 && slot <= 10) ? slot : fallbackIndex;
+
+  return {
+    slot:           safeSlot,
+    display_slot:   safeSlot + 1,
+    subscriptionId: raw.subscription_id !== undefined
+                      ? (raw.subscription_id !== null ? String(raw.subscription_id) : null)
+                      : raw.subscriptionId
+                        ? String(raw.subscriptionId)
+                        : raw.simSerialNumber
+                          ? String(raw.simSerialNumber)
+                          : null,
+    carrierName:    raw.carrier_name  || raw.carrierName  || raw.displayName || raw.operatorName || raw.networkOperatorName || null,
+    displayName:    raw.display_name  || raw.displayName  || raw.carrierName  || null,
+    phoneNumber:    raw.phone_number  !== undefined ? raw.phone_number  : (raw.phoneNumber || raw.number || null),
+    countryIso:     raw.country_iso   !== undefined ? raw.country_iso   : (raw.countryIso  || raw.networkCountryIso || null),
+    mcc:            raw.mcc           ? String(raw.mcc)   : null,
+    mnc:            raw.mnc           ? String(raw.mnc)   : null,
+    networkType:    raw.network_type  || _mapNetworkType(raw.networkType ?? raw.dataNetworkType ?? null),
+    isActive:       raw.is_active     !== undefined ? raw.is_active     : (raw.isActive !== false),
+    isEmbedded:     raw.is_embedded   !== undefined ? raw.is_embedded   : (raw.isEmbedded || false),
+    cardId:         raw.card_id       !== undefined ? raw.card_id       : null,
+    carrierId:      raw.carrier_id    !== undefined ? raw.carrier_id    : null,
+    dataRoaming:    raw.data_roaming  !== undefined ? raw.data_roaming  : false,
+    iccId:          raw.icc_id        !== undefined ? raw.icc_id        : null,
+    _source:        raw._source       || "unknown",
+  };
+}
+
 export async function readSimInfo() {
   if (Platform.OS !== "android") return [];
-  try {
-    if (_SimCardsManager) {
-      try {
-        const sims = await _SimCardsManager.getSimCards();
-        if (Array.isArray(sims) && sims.length > 0) {
-          return sims.map((s, i) => ({
-            slot:           s.slotIndex       ?? s.simSlotIndex    ?? i,
-            phoneNumber:    s.phoneNumber     || s.number          || null,
-            carrierName:    s.carrierName     || s.displayName     || s.operatorName || s.networkOperatorName || null,
-            countryIso:     s.countryIso      || s.networkCountryIso || null,
-            mcc:            s.mcc             ? String(s.mcc)      : null,
-            mnc:            s.mnc             ? String(s.mnc)      : null,
-            subscriptionId: s.subscriptionId  ? String(s.subscriptionId) : s.simSerialNumber ? String(s.simSerialNumber) : null,
-            networkType:    _mapNetworkType(s.networkType ?? s.dataNetworkType ?? null),
-            isActive:       s.isActive !== false,
-          }));
-        }
-      } catch {}
-    }
+
+  // ── PRIMARY: native Kotlin SimModule (SubscriptionManager) ───────────────
+  if (_NativeSimModule) {
     try {
-      const { NativeModules: NM } = require("react-native");
-      const TM = NM.TelephonyManager || NM.RNTelephony;
-      if (TM) {
-        const [line, carrier, networkTypeRaw] = await Promise.all([
-          TM.getLine1Number?.().catch(() => null),
-          TM.getNetworkOperatorName?.().catch(() => null),
-          TM.getNetworkType?.().catch(() => null),
-        ]);
-        if (line || carrier) {
-          return [{ slot: 0, phoneNumber: line || null, carrierName: carrier || null, countryIso: null, mcc: null, mnc: null, subscriptionId: null, networkType: _mapNetworkType(networkTypeRaw), isActive: true }];
-        }
+      const result = await _NativeSimModule.getSimInventory();
+      if (result && result.success && Array.isArray(result.sims) && result.sims.length > 0) {
+        console.log("[SimModule] source=android_subscription_manager sims=" + result.sims.length);
+        return result.sims.map((s, i) => _normalizeSim({ ...s, _source: "android_subscription_manager" }, i));
       }
-    } catch {}
-    return [{ slot: 0, phoneNumber: null, carrierName: null, countryIso: null, mcc: null, mnc: null, subscriptionId: null, networkType: null, isActive: true }];
-  } catch {
-    return [{ slot: 0, phoneNumber: null, carrierName: null, countryIso: null, mcc: null, mnc: null, subscriptionId: null, networkType: null, isActive: true }];
+      if (result && !result.success) {
+        console.warn("[SimModule] native failed: " + result.error);
+      }
+    } catch (e) {
+      console.warn("[SimModule] native threw: " + e?.message);
+    }
+  } else {
+    console.warn("[SimModule] SimModule not available — using library fallback");
   }
+
+  // ── FALLBACK: react-native-sim-cards-manager ──────────────────────────────
+  if (_SimCardsManager) {
+    try {
+      const sims = await _SimCardsManager.getSimCards();
+      if (Array.isArray(sims) && sims.length > 0) {
+        console.log("[SimModule] source=react-native-sim-cards-manager sims=" + sims.length);
+        return sims.map((s, i) => _normalizeSim({ ...s, _source: "react_native_sim_cards_manager" }, i));
+      }
+    } catch (e) {
+      console.warn("[SimModule] library fallback threw: " + e?.message);
+    }
+  }
+
+  console.warn("[SimModule] all sources failed — returning empty inventory");
+  return [];
 }
 
 // ── Device Info ───────────────────────────────────────────────────────────────
@@ -242,12 +289,40 @@ export function getDeviceInfo() {
   };
 }
 
+// ── SIM permission + count helpers ───────────────────────────────────────────
+export async function checkSimPermission() {
+  if (_NativeSimModule) {
+    try { return await _NativeSimModule.checkSimPermission(); } catch {}
+  }
+  // Fallback: use PermissionsAndroid
+  const P = PermissionsAndroid.PERMISSIONS;
+  const phoneState = await PermissionsAndroid.check(P.READ_PHONE_STATE).catch(() => false);
+  const phoneNumbers = Platform.Version >= 26
+    ? await PermissionsAndroid.check(P.READ_PHONE_NUMBERS).catch(() => false)
+    : false;
+  return {
+    READ_PHONE_STATE: phoneState,
+    READ_PHONE_NUMBERS: phoneNumbers,
+    api_level: Platform.Version,
+    manufacturer: Device.manufacturer || "Unknown",
+    model: Device.modelName || "Unknown",
+  };
+}
+
+export async function getSimCount() {
+  if (_NativeSimModule) {
+    try { return await _NativeSimModule.getSimCount(); } catch {}
+  }
+  return { count: -1, error: "SimModule not available" };
+}
+
 // ── Permissions ───────────────────────────────────────────────────────────────
 const PERM_DEFS = (androidVersion) => {
   const P = PermissionsAndroid.PERMISSIONS;
   const defs = [
     { key: "callLog",    perm: P.READ_CALL_LOG,    title: "Call Log",    msg: "CallNexa needs to read your call history to sync calls to the dashboard." },
     { key: "phoneState", perm: P.READ_PHONE_STATE, title: "Phone State", msg: "CallNexa needs phone state access to detect active calls and read SIM info." },
+    { key: "phoneNumbers", perm: P.READ_PHONE_NUMBERS, title: "Phone Numbers", msg: "CallNexa needs this to read your SIM phone number." },
     { key: "contacts",   perm: P.READ_CONTACTS,    title: "Contacts",    msg: "CallNexa needs contacts access to match caller names automatically." },
     { key: "storage",    perm: androidVersion >= 33 ? P.READ_MEDIA_AUDIO : P.READ_EXTERNAL_STORAGE, title: "Storage", msg: "CallNexa needs storage access to read call recordings." },
     { key: "recording",  perm: P.RECORD_AUDIO,     title: "Microphone",  msg: "CallNexa needs microphone access for call transcription." },
@@ -294,14 +369,15 @@ export async function checkPermissions() {
     const P = PermissionsAndroid.PERMISSIONS;
     const androidVersion = parseInt(Platform.Version, 10);
     const storagePermission = androidVersion >= 33 ? P.READ_MEDIA_AUDIO : P.READ_EXTERNAL_STORAGE;
-    const [callLog, phoneState, contacts, storage, recording] = await Promise.all([
+    const [callLog, phoneState, phoneNumbers, contacts, storage, recording] = await Promise.all([
       PermissionsAndroid.check(P.READ_CALL_LOG),
       PermissionsAndroid.check(P.READ_PHONE_STATE),
+      androidVersion >= 26 ? PermissionsAndroid.check(P.READ_PHONE_NUMBERS) : Promise.resolve(false),
       PermissionsAndroid.check(P.READ_CONTACTS),
       PermissionsAndroid.check(storagePermission),
       PermissionsAndroid.check(P.RECORD_AUDIO),
     ]);
-    return { callLog, phoneState, contacts, storage, recording, allGranted: callLog && phoneState };
+    return { callLog, phoneState, phoneNumbers, contacts, storage, recording, allGranted: callLog && phoneState };
   } catch {
     return { allGranted: false };
   }

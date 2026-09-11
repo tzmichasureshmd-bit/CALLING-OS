@@ -7,7 +7,7 @@ from ..database import Base
 class Opportunity(Base):
     __tablename__ = "opportunities"
 
-    id = Column(String(36), primary_key=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(__import__("uuid").uuid4()))
     organization_id = Column(String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     employee_id = Column(String(36), ForeignKey("employees.id", ondelete="SET NULL"), nullable=True, index=True)
     lead_id = Column(String(36), ForeignKey("leads.id", ondelete="SET NULL"), nullable=True)

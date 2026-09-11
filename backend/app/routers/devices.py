@@ -119,6 +119,7 @@ def _upsert_sims(
 
             # Update all fields
             if item.carrier        is not None: existing.carrier         = item.carrier
+            if item.display_name   is not None: existing.display_name    = item.display_name
             if item.phone_number   is not None: existing.phone_number    = item.phone_number
             if item.mcc            is not None: existing.mcc             = item.mcc
             if item.mnc            is not None: existing.mnc             = item.mnc
@@ -136,6 +137,7 @@ def _upsert_sims(
                 device_id=device.id,
                 slot=item.slot,
                 carrier=item.carrier,
+                display_name=item.display_name,
                 phone_number=item.phone_number,
                 mcc=item.mcc,
                 mnc=item.mnc,
@@ -454,8 +456,18 @@ def list_devices(
     )
     if employee_id:
         query = query.filter(Device.employee_id == employee_id)
+
+    # Deduplicate: one entry per employee, keeping the most recently seen device.
+    # Multiple device rows for the same employee (e.g. re-registrations) would
+    # otherwise produce duplicate/conflicting entries in the dashboard widget.
+    seen: dict[str, Device] = {}
+    for d in query.order_by(Device.last_seen_at.desc().nullslast()).all():
+        key = d.employee_id or d.id  # ungrouped devices (no employee) keep their own row
+        if key not in seen:
+            seen[key] = d
+
     result = []
-    for d in query.all():
+    for d in seen.values():
         out = DeviceOut.model_validate(d)
         out.employee_name = d.employee.name if d.employee else None
         result.append(out)

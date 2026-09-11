@@ -110,6 +110,8 @@ export async function queryCallLogDirect(options = {}) {
     };
   }
 
+  const sinceMs = Date.now() - limitDays * 24 * 60 * 60 * 1000;
+
   // Step 2: Try native CallLogModule first (direct ContentResolver)
   if (_NativeCallLog) {
     try {
@@ -178,7 +180,6 @@ export async function queryCallLogDirect(options = {}) {
     };
   }
 
-  const sinceMs = Date.now() - limitDays * 24 * 60 * 60 * 1000;
   const sinceStr = String(sinceMs);
 
   if (IS_DEV) {

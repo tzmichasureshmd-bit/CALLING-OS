@@ -9,14 +9,15 @@ class SIMSyncItem(BaseModel):
     """One SIM subscription sent from the mobile app."""
     slot:            int                        # 1-indexed
     carrier:         Optional[str] = None
+    display_name:    Optional[str] = None       # operator display name
     phone_number:    Optional[str] = None
     mcc:             Optional[str] = None
     mnc:             Optional[str] = None
     country_iso:     Optional[str] = None
-    subscription_id: Optional[str] = None       # Android subscription ID where available
-    network_type:    Optional[str] = None       # 2G | 3G | 4G | 5G | UNKNOWN
+    subscription_id: Optional[str] = None
+    network_type:    Optional[str] = None
     is_active:       bool = True
-    is_selected:     bool = False               # True = user chose this SIM in SIM Configuration
+    is_selected:     bool = False
 
 
 class SIMOut(BaseModel):

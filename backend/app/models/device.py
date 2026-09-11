@@ -12,7 +12,7 @@ class Device(Base):
     organization_id     = Column(String(50), ForeignKey("organizations.id", ondelete="CASCADE"),
                                  nullable=False, index=True)
     employee_id         = Column(String(50), ForeignKey("employees.id", ondelete="CASCADE"),
-                                 nullable=False, index=True)
+                                 nullable=True, index=True)
     device_identifier   = Column(String(200), nullable=False)
     manufacturer        = Column(String(100))
     model               = Column(String(100))
@@ -51,6 +51,7 @@ class SIM(Base):
                                 nullable=False, index=True)
     slot               = Column(SmallInteger, nullable=False)   # 1-indexed (SIM 1, SIM 2)
     carrier            = Column(String(100))
+    display_name       = Column(String(100))                     # operator display name
     phone_number       = Column(String(30))
     mcc                = Column(String(10))
     mnc                = Column(String(10))

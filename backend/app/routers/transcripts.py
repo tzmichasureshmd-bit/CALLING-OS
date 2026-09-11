@@ -219,6 +219,8 @@ def _run_whisper_sync(call_id: str, storage_path: str, org_id: str) -> None:
                         "event": "transcript_updated",
                         "call_id": call_id,
                         "status": call.transcript_status,
+                        "transcript_status": call.transcript_status,
+                        "recording_status": "uploaded",
                     },
                 )
             )

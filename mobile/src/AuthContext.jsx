@@ -204,7 +204,22 @@ export async function doFirstFullSync(deviceId) {
       return { accepted: 0, total: 0 };
     }
 
-    const result = await batchSync(deviceId, allCalls);
+    // Apply selected-SIM filter
+    let toSync = allCalls;
+    try {
+      const { getSelectedSimIdentity } = require("./callLogService");
+      const { subscriptionId: selSubId, slot: selSlot } = await getSelectedSimIdentity();
+      if (selSubId !== null || selSlot !== null) {
+        toSync = allCalls.filter((c) => {
+          if (selSubId && c.subscription_id) return c.subscription_id === selSubId;
+          if (selSlot !== null && c.sim_slot !== null) return c.sim_slot === selSlot + 1;
+          return true;
+        });
+        console.log(`[SYNC] firstSync: SIM filter applied — ${toSync.length} of ${allCalls.length} calls eligible`);
+      }
+    } catch { /* fallback: sync all */ }
+
+    const result = await batchSync(deviceId, toSync);
     await AsyncStorage.setItem(FIRST_SYNC_KEY, "1");
     await AsyncStorage.setItem(LAST_SYNC_TS_KEY, String(Date.now()));
     console.log(`[SYNC] firstSync done: accepted=${result.accepted} dup=${result.duplicates}`);

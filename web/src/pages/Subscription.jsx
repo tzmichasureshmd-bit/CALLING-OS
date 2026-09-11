@@ -151,7 +151,7 @@ export default function Subscription() {
       setCouponMsg({ ok: true, text: res.message || "Coupon applied!" });
       reload();
     } catch (e) {
-      setCouponMsg({ ok: false, text: e?.response?.data?.detail || "Invalid coupon code." });
+      setCouponMsg({ ok: false, text: e?.message || "Invalid coupon code." });
     } finally { setCouponApplying(false); }
   }
 

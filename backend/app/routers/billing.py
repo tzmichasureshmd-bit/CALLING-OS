@@ -24,6 +24,7 @@ def current_subscription(db: Session = Depends(get_db), user: User = Depends(get
     employees = db.query(Employee).filter(
         Employee.organization_id == user.organization_id,
         Employee.status == "active",
+        Employee.user_id != user.id,  # exclude the admin's own employee record
     ).count()
     # Normalise plan — free/trial/null all treated as starter
     raw_plan = org.plan or "starter"

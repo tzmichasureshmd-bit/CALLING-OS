@@ -1,16 +1,16 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 
-// Generic data-loading hook: handles loading / error / data + retry.
-// Usage: const { loading, error, data, reload } = useResource(() => dataSource.getCalls());
 export function useResource(fetcher, deps = []) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
+  const fetcherRef = useRef(fetcher);
+  fetcherRef.current = fetcher;
 
   const reload = useCallback(() => {
     setLoading(true);
     setError(null);
-    Promise.resolve(fetcher())
+    Promise.resolve(fetcherRef.current())
       .then((res) => {
         setData(res);
         setLoading(false);

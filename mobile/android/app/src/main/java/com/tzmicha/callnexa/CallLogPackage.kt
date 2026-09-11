@@ -7,7 +7,10 @@ import com.facebook.react.uimanager.ViewManager
 
 class CallLogPackage : ReactPackage {
     override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-        return listOf(CallLogModule(reactContext))
+        return listOf(
+            CallLogModule(reactContext),
+            SimModule(reactContext),
+        )
     }
     override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
         return emptyList()

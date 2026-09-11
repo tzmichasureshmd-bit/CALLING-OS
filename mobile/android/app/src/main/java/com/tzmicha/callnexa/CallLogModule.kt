@@ -35,6 +35,7 @@ class CallLogModule(private val reactContext: ReactApplicationContext) :
                 CallLog.Calls.DATE,
                 CallLog.Calls.DURATION,
                 CallLog.Calls.PHONE_ACCOUNT_ID,
+                "subscription_id",  // Android 5.1+ SUBSCRIPTION_ID column
             )
 
             val cursor: Cursor? = reactContext.contentResolver.query(
@@ -53,6 +54,7 @@ class CallLogModule(private val reactContext: ReactApplicationContext) :
                 val dateIdx   = it.getColumnIndex(CallLog.Calls.DATE)
                 val durIdx    = it.getColumnIndex(CallLog.Calls.DURATION)
                 val subIdx    = it.getColumnIndex(CallLog.Calls.PHONE_ACCOUNT_ID)
+                val subIdIdx  = it.getColumnIndex("subscription_id")
 
                 while (it.moveToNext()) {
                     val map = Arguments.createMap()
@@ -63,6 +65,10 @@ class CallLogModule(private val reactContext: ReactApplicationContext) :
                     map.putString("date",           if (dateIdx >= 0) it.getString(dateIdx) else null)
                     map.putInt   ("duration",       if (durIdx  >= 0) it.getInt(durIdx)     else 0)
                     map.putString("phoneAccountId", if (subIdx  >= 0) it.getString(subIdx)  else null)
+                    // SUBSCRIPTION_ID: the Android subscription identity for this call
+                    // This is the primary key for SIM identification — never use as slot
+                    val rawSubId = if (subIdIdx >= 0) it.getString(subIdIdx) else null
+                    map.putString("subscriptionId", rawSubId)
                     records.pushMap(map)
                 }
             }

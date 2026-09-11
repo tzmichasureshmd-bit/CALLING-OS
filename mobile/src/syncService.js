@@ -14,8 +14,19 @@ import {
   uploadRecording,
 } from "./callLogService";
 import {
+  upsertCallStatus,
+  updateSyncStatus,
+  updateRecordingStatus,
+  updateTranscriptStatus,
+  STATUS,
+} from "./callStatusStore";
+import {
   setupNotificationChannels,
   requestNotificationPermission,
+  notifyCallSyncing,
+  notifyCallSynced,
+  notifyRecordingUploading,
+  notifyRecordingUploaded,
 } from "./notificationManager";
 import { checkPermissions } from "./nativeModules";
 import { api } from "./api";
@@ -48,15 +59,37 @@ async function batchPost(deviceId, calls) {
   const confirmed = [];
   for (let i = 0; i < calls.length; i += BATCH_SIZE) {
     const batch = calls.slice(i, i + BATCH_SIZE);
+    // Mark SYNCING in status store before request
+    await Promise.all(batch.map(c =>
+      updateSyncStatus(c.client_event_id, STATUS.SYNCING, {
+        phone_number: c.phone_number,
+        contact_name: c.contact_name || null,
+        call_type: c.call_type,
+        duration_seconds: c.duration_seconds,
+        start_time: c.start_time,
+      }).catch(() => {})
+    ));
     try {
       const res = await api.syncCalls(deviceId, batch);
-      // Only mark synced if server confirmed (accepted or duplicate = already in DB)
       if ((res.accepted || 0) + (res.duplicates || 0) > 0) {
         confirmed.push(...batch);
+        // Update per-call status with server-assigned call_id
+        if (res.results?.length) {
+          await Promise.all(res.results.map(r =>
+            updateSyncStatus(r.client_event_id, STATUS.SYNCED, { call_id: r.call_id }).catch(() => {})
+          ));
+        }
+      } else {
+        await Promise.all(batch.map(c =>
+          updateSyncStatus(c.client_event_id, STATUS.SYNC_FAILED).catch(() => {})
+        ));
       }
       console.log(`[SYNC] batch ${Math.floor(i / BATCH_SIZE) + 1}: +${res.accepted} dup=${res.duplicates} failed=${res.failed}`);
     } catch (e) {
       console.warn(`[SYNC] batch failed: ${e?.message}`);
+      await Promise.all(batch.map(c =>
+        updateSyncStatus(c.client_event_id, STATUS.SYNC_FAILED, { last_error: e?.message }).catch(() => {})
+      ));
     }
     if (i + BATCH_SIZE < calls.length)
       await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
@@ -72,19 +105,120 @@ async function processUploadQueue(token) {
   const queue = await getUploadQueue();
   if (!queue.length) return;
   const remaining = [];
+  const MAX_RETRIES = 5;
+
   for (const item of queue) {
-    if ((item.retryCount || 0) >= 3) continue;
+    if ((item.retryCount || 0) >= MAX_RETRIES) {
+      await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_FAILED, {
+        last_error: `Max retries (${MAX_RETRIES}) exceeded`,
+      }).catch(() => {});
+      continue;
+    }
+
+    // Resolve server call_id: status store first, then backend lookup
+    let callId = item.call_id || null;
+    if (!callId) {
+      try {
+        const { getCallStatus } = require("./callStatusStore");
+        const st = await getCallStatus(item.client_event_id);
+        callId = st?.call_id || null;
+      } catch {}
+    }
+    if (!callId) {
+      try {
+        const calls = await api.getCalls({ q: item.client_event_id, page_size: 1 });
+        callId = calls?.items?.[0]?.id || null;
+      } catch {}
+    }
+    if (!callId) {
+      remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1 });
+      continue;
+    }
+
+    // Mark UPLOADING in status store
+    await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_UPLOADING).catch(() => {});
+    await notifyRecordingUploading({ client_event_id: item.client_event_id, contact_name: null, phone_number: null }).catch(() => {});
+
     try {
-      const calls = await api.getCalls({ q: item.client_event_id, page_size: 1 });
-      const call  = calls?.items?.[0];
-      if (!call) { remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1 }); continue; }
-      const result = await uploadRecording(call.id, item.path, token);
-      if (!result) remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1 });
-    } catch {
+      const result = await uploadRecording(callId, item.path, token);
+      if (result) {
+        // Backend confirmed — mark UPLOADED
+        await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_UPLOADED, {
+          call_id: callId,
+          recording_path: item.path,
+        }).catch(() => {});
+        await notifyRecordingUploaded({ client_event_id: item.client_event_id, call_id: callId, contact_name: null, phone_number: null }).catch(() => {});
+
+        // Auto-trigger transcription immediately after confirmed upload
+        await updateTranscriptStatus(item.client_event_id, STATUS.TRANSCRIPTION_PENDING).catch(() => {});
+        _triggerTranscription(callId, item.client_event_id, token).catch(() => {});
+      } else {
+        await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_FAILED, {
+          last_error: 'Upload returned null — server rejected or network error',
+        }).catch(() => {});
+        remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1 });
+      }
+    } catch (e) {
+      await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_FAILED, {
+        last_error: e?.message,
+      }).catch(() => {});
       remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1 });
     }
   }
   await saveUploadQueue(remaining);
+}
+
+// ── Auto-trigger transcription after confirmed upload ─────────────────────────
+async function _triggerTranscription(callId, clientEventId, token) {
+  if (!callId || !token) return;
+  try {
+    const { BASE_URL } = require("./api");
+    const resp = await fetch(`${BASE_URL}/transcripts/${callId}/transcribe`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIBING).catch(() => {});
+      console.log(`[TRANSCRIPTION] triggered for call ${callId}: ${data.status}`);
+      _pollTranscriptionStatus(callId, clientEventId, token, 0).catch(() => {});
+    } else {
+      await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
+      console.warn(`[TRANSCRIPTION] trigger failed for ${callId}: ${data.detail || resp.status}`);
+    }
+  } catch (e) {
+    await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
+    console.warn(`[TRANSCRIPTION] trigger error: ${e?.message}`);
+  }
+}
+
+// Poll backend until transcription completes or fails (max 60s)
+async function _pollTranscriptionStatus(callId, clientEventId, token, attempt) {
+  const MAX_ATTEMPTS = 12;
+  if (attempt >= MAX_ATTEMPTS) {
+    await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
+    return;
+  }
+  await new Promise(r => setTimeout(r, 5000));
+  try {
+    const { BASE_URL } = require("./api");
+    const resp = await fetch(`${BASE_URL}/transcripts/${callId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) { _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {}); return; }
+    const data = await resp.json().catch(() => ({}));
+    const status = data.transcript_status;
+    if (status === 'completed') {
+      await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_COMPLETED).catch(() => {});
+      console.log(`[TRANSCRIPTION] completed for call ${callId}`);
+    } else if (status === 'failed') {
+      await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
+    } else {
+      _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {});
+    }
+  } catch {
+    _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {});
+  }
 }
 
 // ── Main sync cycle ───────────────────────────────────────────────────────────
@@ -99,12 +233,25 @@ export async function runSyncCycle(deviceId, mode) {
     } else {
       const lastTs = await AsyncStorage.getItem(LAST_SYNC_TS_KEY).catch(() => null);
       const msSince = lastTs ? Date.now() - parseInt(lastTs) : 24 * 60 * 60 * 1000;
-      // Look back at least 2h, at most 2 days
       const daysSince = Math.min(30, Math.max(2 / 24, msSince / 86400000 + 0.05));
       candidates = await getCallsLastDays(daysSince);
     }
 
-    const newCalls = await filterUnsynced(candidates);
+    // Apply selected-SIM filter before sync
+    let filtered = candidates;
+    try {
+      const { getSelectedSimIdentity } = require("./callLogService");
+      const { subscriptionId: selSubId, slot: selSlot } = await getSelectedSimIdentity();
+      if (selSubId !== null || selSlot !== null) {
+        filtered = candidates.filter((c) => {
+          if (selSubId && c.subscription_id) return c.subscription_id === selSubId;
+          if (selSlot !== null && c.sim_slot !== null) return c.sim_slot === selSlot + 1;
+          return true;
+        });
+      }
+    } catch { /* fallback: use all candidates */ }
+
+    const newCalls = await filterUnsynced(filtered);
     if (!newCalls.length) return;
 
     console.log(`[SYNC] ${mode}: ${newCalls.length} new calls`);

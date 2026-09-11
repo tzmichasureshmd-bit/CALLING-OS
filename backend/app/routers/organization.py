@@ -43,7 +43,29 @@ def current_organization(
     org = db.get(Organization, user.organization_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
-    return org
+    # Include admin fields so the Settings > Organization card can populate them
+    admin_user = db.query(User).filter(
+        User.organization_id == org.id,
+        User.role == "ADMIN",
+        User.status == "active",
+    ).first()
+    from ..models import Employee as _Emp
+    admin_emp = db.query(_Emp).filter(_Emp.user_id == admin_user.id).first() if admin_user else None
+    return {
+        "id": org.id,
+        "name": org.name,
+        "company_code": org.code,
+        "companyCode": org.code,
+        "slug": org.slug,
+        "email": org.email,
+        "phone": org.phone,
+        "status": org.status,
+        "plan": org.plan,
+        "admin": {
+            "name": admin_emp.name if admin_emp else (admin_user.email if admin_user else None),
+            "email": admin_user.email if admin_user else None,
+        } if admin_user else None,
+    }
 
 
 @router.get("/")

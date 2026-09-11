@@ -62,7 +62,7 @@ def list_leads(
 
 
 @router.post("", status_code=201)
-def create_lead(body: LeadCreate, db: Session = Depends(get_db), user: User = Depends(require_role("TEAM_LEAD"))):
+def create_lead(body: LeadCreate, db: Session = Depends(get_db), user: User = Depends(require_role("ADMIN"))):
     if body.employee_id and not db.query(Employee).filter(Employee.id == body.employee_id, Employee.organization_id == user.organization_id).first():
         raise HTTPException(status_code=400, detail="Employee not found in your organization")
     lead = Lead(organization_id=user.organization_id, **body.model_dump())
@@ -73,7 +73,7 @@ def create_lead(body: LeadCreate, db: Session = Depends(get_db), user: User = De
 
 
 @router.patch("/{lead_id}")
-def update_lead(lead_id: str, body: LeadUpdate, db: Session = Depends(get_db), user: User = Depends(require_role("TEAM_LEAD"))):
+def update_lead(lead_id: str, body: LeadUpdate, db: Session = Depends(get_db), user: User = Depends(require_role("ADMIN"))):
     lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == user.organization_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")

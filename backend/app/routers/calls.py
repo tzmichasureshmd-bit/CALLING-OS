@@ -4,7 +4,7 @@ import uuid
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request, BackgroundTasks
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
@@ -360,6 +360,7 @@ async def upload_recording(
     call_id: str,
     request: Request,
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -431,7 +432,8 @@ async def upload_recording(
     call.recording_mime_type     = content_type or "audio/mp4"
     call.recording_uploaded_at   = datetime.now(timezone.utc)
     call.recording_error         = None
-    if call.transcript_status is None:
+    # Auto-queue transcription — do not require manual trigger
+    if call.transcript_status not in ("processing", "completed"):
         call.transcript_status = "pending"
 
     audit.log(
@@ -446,11 +448,16 @@ async def upload_recording(
     )
     db.commit()
 
+    # Auto-trigger transcription in background — no manual button needed
+    from .transcripts import _run_whisper_sync
+    background_tasks.add_task(_run_whisper_sync, call_id, storage_path, user.organization_id)
+
     # Broadcast recording available event
     try:
         await manager.broadcast(
             user.organization_id,
-            {"event": "recording_uploaded", "call_id": call_id},
+            {"event": "recording_uploaded", "call_id": call_id,
+             "recording_status": "uploaded", "transcript_status": "processing"},
         )
     except Exception:
         pass

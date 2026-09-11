@@ -5,6 +5,46 @@ import { findSimForCall, buildCallSource } from "./simInventoryService";
 import { BASE_URL } from "./api";
 import { upsertCallStatus, STATUS } from "./callStatusStore";
 
+// ── Selected SIM keys (must match simSelectionService.js) ─────────────────────
+const SELECTED_SUB_ID_KEY = "callos_selected_subscription_id";
+const SELECTED_SLOT_KEY   = "callos_selected_sim_slot";
+
+/**
+ * Returns the employee's selected SIM identity.
+ * Primary: subscriptionId. Fallback: slot (0-indexed Android slot).
+ */
+export async function getSelectedSimIdentity() {
+  const subId = await AsyncStorage.getItem(SELECTED_SUB_ID_KEY).catch(() => null);
+  const slot  = await AsyncStorage.getItem(SELECTED_SLOT_KEY).catch(() => null);
+  return {
+    subscriptionId: subId || null,
+    slot: slot !== null && slot !== "" ? parseInt(slot, 10) : null,
+  };
+}
+
+/**
+ * Returns true if a call belongs to the selected SIM.
+ * If no SIM is selected (null), all calls are eligible.
+ * If Android did not expose SIM identity for the call, returns null (unknown).
+ */
+function _callMatchesSelectedSim(call, selectedSubId, selectedSlot) {
+  // No SIM selected → all calls eligible
+  if (selectedSubId === null && selectedSlot === null) return true;
+
+  // Primary: subscriptionId match
+  if (selectedSubId !== null && call.subscription_id !== null) {
+    return call.subscription_id === selectedSubId;
+  }
+
+  // Fallback: slot match (sim_slot is 1-indexed backend value)
+  if (selectedSlot !== null && call.sim_slot !== null) {
+    return call.sim_slot === selectedSlot + 1; // sim_slot is 1-indexed
+  }
+
+  // SIM identity unavailable for this call — cannot confirm match
+  return null; // caller decides policy
+}
+
 // -- Storage keys
 const LAST_SYNC_KEY    = "callos_last_sync_ts";
 const SYNCED_IDS_KEY   = "callos_synced_ids";
@@ -189,12 +229,34 @@ export async function getCallLogDiagnostics() {
 
 // -- TASK 9: Sliding-window -- get unsynced calls
 // Re-reads last 7 days. Filters out already-confirmed-synced IDs.
+// Applies selected-SIM filter: only calls from the employee's chosen SIM.
 // Server deduplicates by client_event_id so re-sending is safe.
 export async function getNewCallsSinceLastSync() {
   const all = await getRealCallLog(7);
   if (!all.length) return [];
   const syncedSet = await _getSyncedIds();
-  const unsync = all.filter((c) => !syncedSet.has(c.client_event_id));
+  const { subscriptionId: selSubId, slot: selSlot } = await getSelectedSimIdentity();
+
+  const unsync = [];
+  let skippedWrongSim = 0, skippedUnknownSim = 0;
+
+  for (const c of all) {
+    if (syncedSet.has(c.client_event_id)) continue;
+    const match = _callMatchesSelectedSim(c, selSubId, selSlot);
+    if (match === false) { skippedWrongSim++; continue; }
+    if (match === null)  { skippedUnknownSim++; } // include with unknown SIM tag
+    unsync.push(c);
+  }
+
+  if (skippedWrongSim > 0 || skippedUnknownSim > 0) {
+    console.log(
+      "[CALLLOG] SIM filter: kept=" + unsync.length +
+      " wrong_sim=" + skippedWrongSim +
+      " unknown_sim=" + skippedUnknownSim +
+      " selected_sub=" + (selSubId || "none") +
+      " selected_slot=" + (selSlot !== null ? selSlot : "none")
+    );
+  }
   console.log("[CALLLOG] queued calls = " + unsync.length + " (of " + all.length + " total in 7d window)");
   return unsync;
 }
@@ -263,26 +325,53 @@ export async function enqueueRecordings(calls) {
   const queue    = await getUploadQueue();
   const existing = new Set(queue.map((q) => q.client_event_id));
   const toAdd    = [];
+
   for (const c of calls) {
     if (existing.has(c.client_event_id)) continue;
-    const recordingPath = await _findRecordingFile(c._start_ms || new Date(c.start_time).getTime(), c._raw_number || c.phone_number);
-    if (!recordingPath) continue;
+
+    // Attempt recording detection with retry window (OEM may write file seconds after call)
+    let recordingPath = null;
+    const startMs = c._start_ms || new Date(c.start_time).getTime();
+    const delays = [0, 3000, 8000]; // immediate, 3s, 8s
+    for (const delay of delays) {
+      if (delay > 0) await new Promise(r => setTimeout(r, delay));
+      recordingPath = await _findRecordingFile(startMs, c._raw_number || c.phone_number);
+      if (recordingPath) break;
+    }
+
+    if (!recordingPath) {
+      // No recording found after retries — mark NOT_AVAILABLE, do not fabricate
+      await upsertCallStatus(c.client_event_id, {
+        recording_status: STATUS.RECORDING_NOT_AVAILABLE,
+        recording_error: 'No recording file found in OEM directories after retry',
+      }).catch(() => {});
+      continue;
+    }
+
     let fileSize = null;
     try {
       const info = await FileSystem.getInfoAsync(recordingPath);
       if (info.exists) fileSize = info.size || null;
     } catch {}
+
     toAdd.push({
       client_event_id: c.client_event_id,
       path:            recordingPath,
       file_size:       fileSize,
       mime_type:       null,
       retry_count:     0,
-      status:          "queued",
+      status:          'queued',
       last_error:      null,
       created_at:      new Date().toISOString(),
     });
+
+    // Mark RECORDING_QUEUED in status store
+    await upsertCallStatus(c.client_event_id, {
+      recording_status: STATUS.RECORDING_QUEUED,
+      recording_path:   recordingPath,
+    }).catch(() => {});
   }
+
   if (toAdd.length) {
     await saveUploadQueue([...queue, ...toAdd]);
     console.log("[CALLLOG] recording queued = " + toAdd.length + " files");

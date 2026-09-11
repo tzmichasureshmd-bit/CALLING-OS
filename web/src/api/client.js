@@ -70,7 +70,7 @@ client.interceptors.response.use(
           : status === 404 ? "NOT_FOUND"
           : error.code === "ECONNABORTED" || !error.response ? "NETWORK_ERROR"
           : "SERVER_ERROR"),
-      message: data?.message || error.message || "Request failed",
+      message: data?.detail || data?.message || error.message || "Request failed",
       status,
       details: data?.details,
     };

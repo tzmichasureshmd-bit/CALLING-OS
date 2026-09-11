@@ -153,7 +153,7 @@ def dashboard_analytics(
         Lead.status.in_(["hot", "interested", "follow_up"]),
     ).count()
 
-    days = 30 if range == "30d" else 7
+    days = 1 if range in ("today", "yesterday") else 30 if range == "30d" else 7
     kpis = _build_kpis(calls)
     kpis.hot_leads = hot_leads
     return DashboardAnalytics(

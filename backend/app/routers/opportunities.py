@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -63,7 +63,7 @@ def list_opportunities(closed: Optional[bool] = None, db: Session = Depends(get_
 
 
 @router.post("", status_code=201)
-def create_opportunity(body: OpportunityCreate, db: Session = Depends(get_db), user: User = Depends(require_role("TEAM_LEAD"))):
+def create_opportunity(body: OpportunityCreate, db: Session = Depends(get_db), user: User = Depends(require_role("ADMIN"))):
     _validate_references(body, user, db)
     item = Opportunity(id=str(uuid.uuid4()), organization_id=user.organization_id, **body.model_dump())
     db.add(item)
@@ -73,7 +73,7 @@ def create_opportunity(body: OpportunityCreate, db: Session = Depends(get_db), u
 
 
 @router.patch("/{opportunity_id}")
-def update_opportunity(opportunity_id: str, body: OpportunityUpdate, db: Session = Depends(get_db), user: User = Depends(require_role("TEAM_LEAD"))):
+def update_opportunity(opportunity_id: str, body: OpportunityUpdate, db: Session = Depends(get_db), user: User = Depends(require_role("ADMIN"))):
     item = db.query(Opportunity).filter(Opportunity.id == opportunity_id, Opportunity.organization_id == user.organization_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Opportunity not found")
@@ -83,7 +83,7 @@ def update_opportunity(opportunity_id: str, body: OpportunityUpdate, db: Session
         setattr(item, field, value)
     if values.get("stage") in {"Won", "Lost"}:
         item.is_closed = values["stage"].lower()
-        item.closed_at = datetime.utcnow()
+        item.closed_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(item)
     return _item(item)

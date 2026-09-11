@@ -136,6 +136,10 @@ export async function clearSession() {
     "callos_install_date",
     "callos_hw_device_id",
     "callos_upload_queue",
+    "callos_selected_subscription_id",
+    "callos_selected_sim_slot",
+    "callos_selected_sim_carrier",
+    "callos_selected_sim_snapshot",
   ]);
 }
 

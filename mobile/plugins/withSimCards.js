@@ -28,6 +28,7 @@ function withSimCards(config) {
 
     const REQUIRED = [
       "android.permission.READ_PHONE_STATE",
+      "android.permission.READ_PHONE_NUMBERS",
       "android.permission.READ_CONTACTS",
     ];
 

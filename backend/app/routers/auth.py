@@ -9,6 +9,7 @@ from ..auth import create_access_token, create_refresh_token, decode_token, veri
 from ..auth.password import hash_password
 from .. import audit
 from pydantic import BaseModel
+from typing import Optional
 import re, random, string
 import pyotp, qrcode, qrcode.image.svg, io, base64
 import firebase_admin
@@ -271,25 +272,29 @@ def register_employee(body: EmployeeRegisterRequest, db: Session = Depends(get_d
     )
 
 
+class UpdateMeRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+
+
 @router.patch("/me")
 def update_me(
-    body: dict,
+    body: UpdateMeRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Update the current user's name and/or email."""
     emp = db.query(Employee).filter(Employee.user_id == user.id).first()
-    if "name" in body and body["name"].strip():
+    if body.name and body.name.strip():
         if emp:
-            emp.name = body["name"].strip()
-    if "email" in body and body["email"].strip():
-        # Check uniqueness
-        existing = db.query(User).filter(User.email == body["email"], User.id != user.id).first()
+            emp.name = body.name.strip()
+    if body.email and body.email.strip():
+        existing = db.query(User).filter(User.email == body.email, User.id != user.id).first()
         if existing:
             raise HTTPException(status_code=409, detail="Email already in use")
-        user.email = body["email"].strip()
+        user.email = body.email.strip()
         if emp:
-            emp.email = body["email"].strip()
+            emp.email = body.email.strip()
     db.commit()
     org = db.query(Organization).filter(Organization.id == user.organization_id).first()
     emp = db.query(Employee).filter(Employee.user_id == user.id).first()

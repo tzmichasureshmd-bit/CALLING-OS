@@ -13,6 +13,7 @@ import { useAuth } from "../../src/AuthContext";
 import { checkPermissions, requestAllPermissions, readSimInfo, getDeviceInfo } from "../../src/nativeModules";
 import { api } from "../../src/api";
 import { getSyncHealthSummary } from "../../src/callStatusStore";
+import { saveSimSelection, getSimSelection, checkSimChange } from "../../src/simSelectionService";
 import {
   getNotificationPreferences,
   setNotificationPreference,
@@ -31,7 +32,8 @@ export default function Profile() {
   const [lastSync, setLastSync]           = useState(null);
   const [permissions, setPermissions]     = useState({});
   const [sims, setSims]                   = useState([]);
-  const [selectedSim, setSelectedSim]     = useState(null); // null = all SIMs
+  const [selectedSim, setSelectedSim]     = useState(null); // full SIM object or null
+  const [simChangeAlert, setSimChangeAlert] = useState(null); // { previous, current } or null
   const [deviceInfo, setDeviceInfo]       = useState({});
   const [stats, setStats]                 = useState({ totalCalls: "—", connectedPct: "—", talkTime: "—" });
   const [editOpen, setEditOpen]           = useState(false);
@@ -56,8 +58,19 @@ export default function Profile() {
     setPermissions(perms);
     if (simList.length) {
       setSims(simList);
-      const saved = await AsyncStorage.getItem("callos_selected_sim_slot");
-      setSelectedSim(saved !== null && saved !== "" ? parseInt(saved, 10) : null);
+      const sel = await getSimSelection();
+      let found = null;
+      if (sel.subscriptionId) {
+        found = simList.find((s) => s.subscriptionId && String(s.subscriptionId) === sel.subscriptionId) || null;
+      }
+      if (!found && sel.slot !== null) {
+        found = simList.find((s) => s.slot === sel.slot) || null;
+      }
+      setSelectedSim(found);
+      const changeResult = await checkSimChange(simList);
+      if (changeResult.changed) {
+        setSimChangeAlert({ previous: changeResult.previous, current: changeResult.current });
+      }
     }
     setDeviceInfo(getDeviceInfo());
     setRecordingEnabled(recPref === "true");
@@ -104,12 +117,17 @@ export default function Profile() {
     }
     setSyncing(true); setSyncResult(null);
     try {
-      const { getRealCallLog, markCallsSynced } = require('../../src/callLogService');
+      const { getRealCallLog, markCallsSynced, getSelectedSimIdentity } = require('../../src/callLogService');
       const { api: _api } = require('../../src/api');
       const BATCH = 50;
       let allCalls = await getRealCallLog(7);
-      if (selectedSim !== null) {
-        allCalls = allCalls.filter((c) => (c.sim_slot !== undefined ? c.sim_slot - 1 : null) === selectedSim);
+      const { subscriptionId: selSubId, slot: selSlot } = await getSelectedSimIdentity();
+      if (selSubId !== null || selSlot !== null) {
+        allCalls = allCalls.filter((c) => {
+          if (selSubId && c.subscription_id) return c.subscription_id === selSubId;
+          if (selSlot !== null && c.sim_slot !== null) return c.sim_slot === selSlot + 1;
+          return true;
+        });
       }
       if (!allCalls.length) {
         setSyncResult({ accepted: 0, duplicates: 0, failed: 0, total: 0 });
@@ -265,7 +283,7 @@ export default function Profile() {
               <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>
                 {sims.length
                   ? selectedSim !== null
-                    ? `Tracking SIM ${selectedSim + 1} only  ${sims.length} SIM${sims.length > 1 ? "s" : ""} detected`
+                    ? `Tracking SIM ${selectedSim?.display_slot ?? (selectedSim?.slot != null ? selectedSim.slot + 1 : 1)}${selectedSim?.carrierName ? ' — ' + selectedSim.carrierName : ''} · ${sims.length} SIM${sims.length > 1 ? 's' : ''} detected`
                     : `All SIMs  ${sims.length} SIM${sims.length > 1 ? "s" : ""} detected`
                   : "Tap to view SIM details"}
               </Text>
@@ -465,7 +483,7 @@ export default function Profile() {
                     ? `✓ ${syncResult.accepted} new · ${syncResult.duplicates} duplicates`
                     : lastSync
                       ? `Last synced: ${lastSync}`
-                      : "Auto-syncs every 5s · tap to sync now"}
+                      : "Auto-syncs every 5 min · tap to sync now"}
               </Text>
             </View>
             {!syncing && <Ionicons name="chevron-forward" size={20} color={palette.teal} />}
@@ -505,8 +523,49 @@ export default function Profile() {
         </View>
       </ScrollView>
 
+
+      {/* SIM Change Alert */}
+      {simChangeAlert && (
+        <Modal visible={true} transparent animationType="fade">
+          <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.6)", padding: 24 }}>
+            <View style={{ backgroundColor: theme.bg, borderRadius: 20, padding: 24, width: "100%", maxWidth: 360, borderWidth: 1, borderColor: palette.amber + "55" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                <Ionicons name="warning-outline" size={24} color={palette.amber} />
+                <Text style={{ fontSize: 17, fontWeight: "800", color: theme.primary }}>SIM Changed</Text>
+              </View>
+              <Text style={{ fontSize: 13, color: theme.muted, marginBottom: 12, lineHeight: 20 }}>
+                Your previously selected SIM is no longer detected.
+              </Text>
+              <View style={{ backgroundColor: theme.surface, borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: theme.border }}>
+                <Text style={{ fontSize: 11, fontWeight: "700", color: theme.dim, marginBottom: 4 }}>PREVIOUS</Text>
+                <Text style={{ fontSize: 13, color: palette.red }}>SIM {simChangeAlert.previous?.slot != null ? simChangeAlert.previous.slot + 1 : "?"} — {simChangeAlert.previous?.carrierName || "Unknown"}</Text>
+              </View>
+              {simChangeAlert.current && (
+                <View style={{ backgroundColor: theme.surface, borderRadius: 10, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: theme.border }}>
+                  <Text style={{ fontSize: 11, fontWeight: "700", color: theme.dim, marginBottom: 4 }}>NOW IN SAME SLOT</Text>
+                  <Text style={{ fontSize: 13, color: palette.teal }}>SIM {simChangeAlert.current?.slot != null ? simChangeAlert.current.slot + 1 : "?"} — {simChangeAlert.current?.carrierName || "Unknown"}</Text>
+                </View>
+              )}
+              <Text style={{ fontSize: 12, color: theme.muted, marginBottom: 16, lineHeight: 18 }}>
+                Please reselect your CallNexa SIM to avoid syncing calls to the wrong SIM.
+              </Text>
+              <Pressable onPress={() => { setSimChangeAlert(null); setSimOpen(true); }}
+                style={{ backgroundColor: palette.amber, borderRadius: 12, padding: 14, alignItems: "center" }}>
+                <Text style={{ fontSize: 14, fontWeight: "700", color: "#fff" }}>Reselect SIM</Text>
+              </Pressable>
+              <Pressable onPress={() => setSimChangeAlert(null)} style={{ marginTop: 10, alignItems: "center" }}>
+                <Text style={{ fontSize: 13, color: theme.dim }}>Dismiss</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+      )}
       <EditProfileModal visible={editOpen} onClose={() => setEditOpen(false)} onSaved={handleProfileSaved} user={user} theme={theme} />
-      <SimConfigModal visible={simOpen} onClose={() => setSimOpen(false)} sims={sims} selectedSim={selectedSim} onSelectSim={async (slot) => { setSelectedSim(slot); await AsyncStorage.setItem("callos_selected_sim_slot", slot === null ? "" : String(slot)); }} theme={theme} />
+      <SimConfigModal visible={simOpen} onClose={() => setSimOpen(false)} sims={sims} selectedSim={selectedSim} onSelectSim={async (sim) => {
+          setSelectedSim(sim);
+          const { saveSimSelection, clearSimSelection } = require('../../src/simSelectionService');
+          if (sim) { await saveSimSelection(sim); } else { await clearSimSelection(); }
+        }} theme={theme} />
     </SafeAreaView>
   );
 }
@@ -613,9 +672,9 @@ function SimConfigModal({ visible, onClose, sims, selectedSim, onSelectSim, them
                 <Ionicons name={selectedSim === null ? "checkmark-circle" : "ellipse-outline"} size={22} color={selectedSim === null ? palette.teal : theme.dim} />
               </Pressable>
               {sims.map((s) => {
-                const on = selectedSim === s.slot;
+                const on = selectedSim && (selectedSim.subscriptionId ? selectedSim.subscriptionId === s.subscriptionId : selectedSim.slot === s.slot);
                 return (
-                  <Pressable key={s.slot} onPress={() => onSelectSim(s.slot)}
+                  <Pressable key={s.slot} onPress={() => onSelectSim(s)}
                     style={{ flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 14, padding: 14, borderWidth: 2,
                       borderColor: on ? palette.teal : theme.border,
                       backgroundColor: on ? palette.teal + "12" : theme.surface }}>
@@ -623,10 +682,11 @@ function SimConfigModal({ visible, onClose, sims, selectedSim, onSelectSim, them
                       <Ionicons name="phone-portrait-outline" size={20} color={on ? palette.teal : theme.muted} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 15, fontWeight: "700", color: on ? palette.teal : theme.primary }}>SIM {s.slot + 1}</Text>
+                      <Text style={{ fontSize: 15, fontWeight: "700", color: on ? palette.teal : theme.primary }}>SIM {s.display_slot ?? (s.slot + 1)}</Text>
                       {s.carrierName ? <Text style={{ fontSize: 12, color: theme.muted, marginTop: 1 }}>{s.carrierName}</Text> : null}
-                      {s.phoneNumber ? <Text style={{ fontSize: 12, color: theme.muted }}>{s.phoneNumber}</Text> : null}
-                      {s.countryIso  ? <Text style={{ fontSize: 11, color: theme.dim }}>{s.countryIso.toUpperCase()}</Text> : null}
+                      {s.phoneNumber ? <Text style={{ fontSize: 12, color: theme.muted }}>{s.phoneNumber}</Text> : <Text style={{ fontSize: 11, color: theme.dim }}>Phone number not available</Text>}
+                      {s.networkType && s.networkType !== "UNKNOWN" ? <Text style={{ fontSize: 11, color: theme.dim }}>{s.networkType}{s.countryIso ? " · " + s.countryIso.toUpperCase() : ""}</Text> : null}
+                      {s.subscriptionId ? <Text style={{ fontSize: 10, color: theme.dim }}>Sub ID: {s.subscriptionId}</Text> : null}
                     </View>
                     <Ionicons name={on ? "checkmark-circle" : "ellipse-outline"} size={22} color={on ? palette.teal : theme.dim} />
                   </Pressable>

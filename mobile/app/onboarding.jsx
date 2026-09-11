@@ -10,6 +10,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { palette, gradientBrand, useTheme } from "../src/theme";
 import { useAuth, doFirstFullSync } from "../src/AuthContext";
 import { requestAllPermissions, checkPermissions, readSimInfo } from "../src/nativeModules";
+import { saveSimSelection } from "../src/simSelectionService";
 import { getRealCallLog } from "../src/callLogService";
 import { BASE_URL } from "../src/api";
 
@@ -380,23 +381,30 @@ function PermissionsStep({ onDone }) {
 function SimDetectStep({ onDone }) {
   const { theme } = useTheme();
   const [sims, setSims] = useState([]);
-  const [selected, setSelected] = useState(0);
+  const [selectedIdx, setSelectedIdx] = useState(0);
   const [detecting, setDetecting] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     readSimInfo().then((s) => { setSims(s); setDetecting(false); }).catch(() => setDetecting(false));
   }, []);
 
-  const display = sims.length
-    ? sims
-    : [{ slot: 0, carrierName: null, phoneNumber: null }, { slot: 1, carrierName: null, phoneNumber: null }];
+  // Only show real detected SIMs — never fabricate placeholder SIMs
+  const display = sims;
 
-  // Label helper
   function simLabel(s) {
-    if (s.carrierName && s.phoneNumber) return `${s.carrierName} · ${s.phoneNumber}`;
-    if (s.carrierName) return s.carrierName;
-    if (s.phoneNumber) return s.phoneNumber;
-    return `SIM ${s.slot + 1}`;
+    const slot = `SIM ${s.display_slot ?? (s.slot + 1)}`;
+    if (s.carrierName) return `${slot} — ${s.carrierName}`;
+    return slot;
+  }
+
+  async function handleSelect() {
+    if (!display.length) { onDone({}); return; }
+    setSaving(true);
+    const chosen = display[selectedIdx];
+    await saveSimSelection(chosen);
+    setSaving(false);
+    onDone({ sim: chosen });
   }
 
   return (
@@ -405,33 +413,56 @@ function SimDetectStep({ onDone }) {
         <View style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: palette.teal + "1a", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
           <Ionicons name="phone-portrait-outline" size={30} color={palette.teal} />
         </View>
-        <Text style={{ fontSize: 17, fontWeight: "800", color: theme.primary }}>SIM Detection</Text>
-        <Text style={{ fontSize: 13, color: theme.muted, textAlign: "center", marginTop: 6, lineHeight: 19 }}>Select which SIM to use for call tracking.{"\n"}Calls from this SIM will sync to the dashboard.</Text>
+        <Text style={{ fontSize: 17, fontWeight: "800", color: theme.primary }}>Select Your CallNexa SIM</Text>
+        <Text style={{ fontSize: 13, color: theme.muted, textAlign: "center", marginTop: 6, lineHeight: 19 }}>Choose which SIM CallNexa should monitor.{"\n"}Only calls from this SIM will sync to the dashboard.</Text>
       </View>
       {detecting ? (
         <View style={{ alignItems: "center", padding: 20 }}>
           <ActivityIndicator color={palette.teal} size="large" />
-          <Text style={{ color: theme.muted, marginTop: 10 }}>Detecting SIM cards...</Text>
+          <Text style={{ color: theme.muted, marginTop: 10 }}>Reading SIM cards from Android…</Text>
+        </View>
+      ) : display.length === 0 ? (
+        <View style={{ backgroundColor: palette.amber + "15", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: palette.amber + "44" }}>
+          <Text style={{ fontSize: 13, color: palette.amber, fontWeight: "700" }}>No SIM detected</Text>
+          <Text style={{ fontSize: 12, color: theme.muted, marginTop: 4 }}>Make sure Phone State permission is granted and a SIM is inserted.</Text>
         </View>
       ) : display.map((s, i) => {
-        const on = selected === i;
+        const on = selectedIdx === i;
         return (
-          <Pressable key={i} onPress={() => setSelected(i)} style={{ flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 14, padding: 14, borderWidth: 2, borderColor: on ? palette.teal : theme.border, backgroundColor: on ? palette.teal + "12" : theme.bg }}>
+          <Pressable key={s.subscriptionId || s.slot} onPress={() => setSelectedIdx(i)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 14, padding: 14, borderWidth: 2, borderColor: on ? palette.teal : theme.border, backgroundColor: on ? palette.teal + "12" : theme.bg }}>
             <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: on ? palette.teal + "22" : theme.surface, alignItems: "center", justifyContent: "center" }}>
               <Ionicons name="phone-portrait-outline" size={22} color={on ? palette.teal : theme.muted} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 15, fontWeight: "700", color: on ? palette.teal : theme.primary }}>{simLabel(s)}</Text>
-              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 2 }}>{s.phoneNumber ? s.phoneNumber : s.carrierName ? "Number not shared by carrier" : "Grant Phone State permission"}</Text>
+              {s.networkType && s.networkType !== "UNKNOWN" && (
+                <Text style={{ fontSize: 12, color: theme.muted, marginTop: 1 }}>{s.networkType}</Text>
+              )}
+              <Text style={{ fontSize: 12, color: theme.muted, marginTop: 1 }}>
+                {s.phoneNumber ? s.phoneNumber : "Phone number unavailable"}
+              </Text>
+              {s.subscriptionId && (
+                <Text style={{ fontSize: 10, color: theme.dim, marginTop: 1 }}>Sub ID: {s.subscriptionId}</Text>
+              )}
             </View>
-            <Ionicons name={on ? "checkmark-circle" : "ellipse-outline"} size={22} color={on ? palette.teal : theme.dim} />
+            <View style={{ alignItems: "flex-end", gap: 4 }}>
+              <View style={{ backgroundColor: palette.emerald + "22", borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 }}>
+                <Text style={{ fontSize: 9, fontWeight: "700", color: palette.emerald }}>ACTIVE</Text>
+              </View>
+              <Ionicons name={on ? "checkmark-circle" : "ellipse-outline"} size={22} color={on ? palette.teal : theme.dim} />
+            </View>
           </Pressable>
         );
       })}
-      <Pressable onPress={() => onDone({ sim: display[selected] })}>
+      <Pressable onPress={handleSelect} disabled={saving || detecting}>
         <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ height: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 }}>
-          <Ionicons name="checkmark-circle" size={18} color="#fff" />
-          <Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>Use This SIM</Text>
+          {saving ? <ActivityIndicator color="#fff" size="small" /> : (
+            <><Ionicons name="checkmark-circle" size={18} color="#fff" />
+            <Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>
+              {display.length ? `Use SIM ${(display[selectedIdx]?.display_slot ?? (display[selectedIdx]?.slot + 1)) ?? 1}` : "Continue"}
+            </Text></>
+          )}
         </LinearGradient>
       </Pressable>
     </View>

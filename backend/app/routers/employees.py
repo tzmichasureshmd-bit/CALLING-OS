@@ -24,6 +24,10 @@ def list_employees(
     user: User = Depends(get_current_user),
 ):
     query = db.query(Employee).filter(Employee.organization_id == _org_scope(user))
+    # Exclude the admin's own employee record — admins are auto-created as employees
+    # during registration but are not field employees and should not appear in the roster.
+    if user.role in ("ADMIN", "admin"):
+        query = query.filter(Employee.user_id != user.id)
     if status:
         query = query.filter(Employee.status == status)
     if q:
