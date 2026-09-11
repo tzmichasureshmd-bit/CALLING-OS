@@ -358,9 +358,9 @@ def get_call(
 @router.post("/{call_id}/recording")
 async def upload_recording(
     call_id: str,
+    background_tasks: BackgroundTasks,
     request: Request,
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
