@@ -321,7 +321,65 @@ export async function saveUploadQueue(queue) {
   await AsyncStorage.setItem(UPLOAD_QUEUE_KEY, JSON.stringify(queue));
 }
 
+// Deferred recording check — runs in background, never blocks sync cycle
+async function _checkRecordingDeferred(c, queue, existing) {
+  if (existing.has(c.client_event_id)) return;
+  const startMs = c._start_ms || new Date(c.start_time).getTime();
+  // Try immediately, then after 5s, then after 12s — total max 17s but non-blocking
+  const delays = [0, 5000, 12000];
+  let recordingPath = null;
+  for (const delay of delays) {
+    if (delay > 0) await new Promise(r => setTimeout(r, delay));
+    recordingPath = await _findRecordingFile(startMs, c._raw_number || c.phone_number);
+    if (recordingPath) break;
+  }
+  if (!recordingPath) {
+    await upsertCallStatus(c.client_event_id, {
+      recording_status: STATUS.RECORDING_NOT_AVAILABLE,
+      recording_error: 'No recording file found in OEM directories after retry',
+    }).catch(() => {});
+    return;
+  }
+  let fileSize = null;
+  try {
+    const info = await FileSystem.getInfoAsync(recordingPath);
+    if (info.exists) fileSize = info.size || null;
+  } catch {}
+  const currentQueue = await getUploadQueue();
+  const currentExisting = new Set(currentQueue.map(q => q.client_event_id));
+  if (!currentExisting.has(c.client_event_id)) {
+    await saveUploadQueue([...currentQueue, {
+      client_event_id: c.client_event_id,
+      path:            recordingPath,
+      file_size:       fileSize,
+      mime_type:       null,
+      retry_count:     0,
+      status:          'queued',
+      last_error:      null,
+      created_at:      new Date().toISOString(),
+    }]);
+    await upsertCallStatus(c.client_event_id, {
+      recording_status: STATUS.RECORDING_QUEUED,
+      recording_path:   recordingPath,
+    }).catch(() => {});
+    console.log('[CALLLOG] recording queued (deferred): ' + c.client_event_id);
+  }
+}
+
 export async function enqueueRecordings(calls) {
+  const queue    = await getUploadQueue();
+  const existing = new Set(queue.map((q) => q.client_event_id));
+
+  for (const c of calls) {
+    if (existing.has(c.client_event_id)) continue;
+    // Fire-and-forget — never blocks the sync cycle
+    _checkRecordingDeferred(c, queue, existing).catch(() => {});
+  }
+  // Return immediately — recording detection happens in background
+}
+
+// Keep old synchronous path for direct callers that need it (unused but preserved)
+async function _enqueueRecordingsSync(calls) {
   const queue    = await getUploadQueue();
   const existing = new Set(queue.map((q) => q.client_event_id));
   const toAdd    = [];
@@ -329,21 +387,14 @@ export async function enqueueRecordings(calls) {
   for (const c of calls) {
     if (existing.has(c.client_event_id)) continue;
 
-    // Attempt recording detection with retry window (OEM may write file seconds after call)
     let recordingPath = null;
     const startMs = c._start_ms || new Date(c.start_time).getTime();
-    const delays = [0, 3000, 8000]; // immediate, 3s, 8s
-    for (const delay of delays) {
-      if (delay > 0) await new Promise(r => setTimeout(r, delay));
-      recordingPath = await _findRecordingFile(startMs, c._raw_number || c.phone_number);
-      if (recordingPath) break;
-    }
+    recordingPath = await _findRecordingFile(startMs, c._raw_number || c.phone_number);
 
     if (!recordingPath) {
-      // No recording found after retries — mark NOT_AVAILABLE, do not fabricate
       await upsertCallStatus(c.client_event_id, {
         recording_status: STATUS.RECORDING_NOT_AVAILABLE,
-        recording_error: 'No recording file found in OEM directories after retry',
+        recording_error: 'No recording file found',
       }).catch(() => {});
       continue;
     }

@@ -37,9 +37,128 @@ const TYPE_ICON = {
   rejected: "call-missed",
 };
 
+// ── Transcript parser ─────────────────────────────────────────────────────────
+// Whisper returns a flat string. We split on sentence boundaries and alternate
+// speakers: ME (index 0, 2, 4…) vs OTHER (index 1, 3, 5…).
+// If the transcript already has speaker tags like "[SPEAKER_00]" or "Speaker 1:"
+// we parse those directly instead.
+function parseTranscript(text) {
+  if (!text || !text.trim()) return [];
+
+  // Check for explicit speaker tags from diarization
+  // Patterns: "[SPEAKER_00] text" or "Speaker 1: text" or "SPEAKER_0: text"
+  const diarizedPattern = /\[SPEAKER_\d+\]|Speaker\s*\d+:|SPEAKER_\d+:/i;
+  if (diarizedPattern.test(text)) {
+    const lines = text
+      .split(/(?=\[SPEAKER_\d+\]|Speaker\s*\d+:|SPEAKER_\d+:)/i)
+      .map(l => l.trim())
+      .filter(Boolean);
+    const speakerMap = {}  // maps raw speaker label -> "ME" or "OTHER"
+    let speakerCount = 0;
+    return lines.map(line => {
+      const match = line.match(/^(\[SPEAKER_\d+\]|Speaker\s*\d+:|SPEAKER_\d+:)\s*/i);
+      if (!match) return null;
+      const rawLabel = match[1].replace(/[\[\]:]/g, "").trim();
+      if (!(rawLabel in speakerMap)) {
+        speakerMap[rawLabel] = speakerCount === 0 ? "ME" : "OTHER";
+        speakerCount++;
+      }
+      const speaker = speakerMap[rawLabel];
+      const content = line.slice(match[0].length).trim();
+      return content ? { speaker, text: content } : null;
+    }).filter(Boolean);
+  }
+
+  // No speaker tags — split on sentence boundaries and alternate
+  // Split on: . ! ? followed by space or end, or newlines
+  const sentences = text
+    .replace(/([.!?])\s+/g, "$1\n")
+    .split("\n")
+    .map(s => s.trim())
+    .filter(s => s.length > 2);
+
+  if (sentences.length === 0) return [{ speaker: "ME", text: text.trim() }];
+
+  // Group consecutive short sentences into turns (max ~3 sentences per turn)
+  const turns = [];
+  let buffer = [];
+  let speakerIdx = 0;
+
+  for (let i = 0; i < sentences.length; i++) {
+    buffer.push(sentences[i]);
+    // End a turn after 2-3 sentences or at end
+    const isLast = i === sentences.length - 1;
+    const shouldFlip = buffer.length >= 2 || isLast;
+    if (shouldFlip) {
+      turns.push({
+        speaker: speakerIdx % 2 === 0 ? "ME" : "OTHER",
+        text: buffer.join(" "),
+      });
+      buffer = [];
+      speakerIdx++;
+    }
+  }
+  return turns;
+}
+
+// ── Chat bubble ───────────────────────────────────────────────────────────────
+function ChatBubble({ speaker, text, theme }) {
+  const isMe = speaker === "ME";
+  return (
+    <View style={{
+      flexDirection: "row",
+      justifyContent: isMe ? "flex-end" : "flex-start",
+      marginBottom: 10,
+      paddingHorizontal: 4,
+    }}>
+      {!isMe && (
+        <View style={{
+          width: 28, height: 28, borderRadius: 14,
+          backgroundColor: palette.violet + "22",
+          alignItems: "center", justifyContent: "center",
+          marginRight: 8, marginTop: 2, flexShrink: 0,
+        }}>
+          <Ionicons name="person-outline" size={14} color={palette.violet} />
+        </View>
+      )}
+      <View style={{ maxWidth: "75%" }}>
+        <Text style={{
+          fontSize: 10, fontWeight: "700",
+          color: isMe ? palette.teal : palette.violet,
+          marginBottom: 3,
+          textAlign: isMe ? "right" : "left",
+        }}>
+          {isMe ? "ME" : "OTHER"}
+        </Text>
+        <View style={{
+          backgroundColor: isMe ? palette.teal + "22" : palette.violet + "18",
+          borderRadius: 14,
+          borderTopRightRadius: isMe ? 4 : 14,
+          borderTopLeftRadius: isMe ? 14 : 4,
+          paddingHorizontal: 13,
+          paddingVertical: 9,
+          borderWidth: 1,
+          borderColor: isMe ? palette.teal + "44" : palette.violet + "33",
+        }}>
+          <Text style={{ fontSize: 13.5, color: theme.primary, lineHeight: 21 }}>{text}</Text>
+        </View>
+      </View>
+      {isMe && (
+        <View style={{
+          width: 28, height: 28, borderRadius: 14,
+          backgroundColor: palette.teal + "22",
+          alignItems: "center", justifyContent: "center",
+          marginLeft: 8, marginTop: 2, flexShrink: 0,
+        }}>
+          <Ionicons name="person" size={14} color={palette.teal} />
+        </View>
+      )}
+    </View>
+  );
+}
+
 // ── Timeline step component ───────────────────────────────────────────────────
 function TimelineStep({ icon, label, sublabel, status, isLast }) {
-  // status: "done" | "active" | "pending" | "failed"
   const { theme } = useTheme();
   const color =
     status === "done"    ? palette.emerald :
@@ -55,14 +174,12 @@ function TimelineStep({ icon, label, sublabel, status, isLast }) {
 
   return (
     <View style={{ flexDirection: "row", gap: 12 }}>
-      {/* Line + dot */}
       <View style={{ alignItems: "center", width: 24 }}>
         <Ionicons name={iconName} size={22} color={color} />
         {!isLast && (
           <View style={{ width: 2, flex: 1, minHeight: 20, backgroundColor: theme.border, marginTop: 4 }} />
         )}
       </View>
-      {/* Content */}
       <View style={{ flex: 1, paddingBottom: isLast ? 0 : 16 }}>
         <Text style={{ fontSize: 14, fontWeight: "600", color: status === "pending" ? theme.dim : theme.primary }}>
           {label}
@@ -130,21 +247,24 @@ export default function CallDetail() {
 
   const [localStatus, setLocalStatus] = useState(null);
   const [serverCall, setServerCall]   = useState(null);
+  const [transcript, setTranscript]   = useState(null);
   const [loading, setLoading]         = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      // Load local status store entry
       if (clientEventId) {
         const ls = await getCallStatus(clientEventId);
         setLocalStatus(ls);
       }
-      // Load server call record if we have a call_id
       const id = callId || localStatus?.call_id;
       if (id) {
-        const sc = await api.getCall(id).catch(() => null);
+        const [sc, tx] = await Promise.all([
+          api.getCall(id).catch(() => null),
+          api.getTranscript(id).catch(() => null),
+        ]);
         setServerCall(sc);
+        setTranscript(tx);
       }
     } finally {
       setLoading(false);
@@ -326,14 +446,44 @@ export default function CallDetail() {
                   label="Transcription complete"
                   sublabel={
                     call.transcript_status === STATUS.TRANSCRIPTION_COMPLETED
-                      ? "View on web dashboard"
+                      ? "View transcript below"
                       : call.transcript_status === STATUS.TRANSCRIPTION_FAILED
                         ? "Failed — retry from web dashboard"
                         : undefined
                   }
                   status={transStepStatus(call.transcript_status, STATUS.TRANSCRIPTION_COMPLETED)}
-                  isLast
+                  isLast={!(call.transcript_status === STATUS.TRANSCRIPTION_COMPLETED && transcript?.transcript_text)}
                 />
+                {call.transcript_status === STATUS.TRANSCRIPTION_COMPLETED && transcript?.transcript_text && (
+                  <View style={{ marginTop: 16, backgroundColor: theme.surface, borderRadius: 14, borderWidth: 1, borderColor: theme.border, overflow: "hidden" }}>
+                    {/* Header */}
+                    <View style={{
+                      flexDirection: "row", alignItems: "center", gap: 8,
+                      paddingHorizontal: 14, paddingVertical: 10,
+                      borderBottomWidth: 1, borderBottomColor: theme.border,
+                      backgroundColor: theme.card,
+                    }}>
+                      <Ionicons name="chatbubbles-outline" size={15} color={palette.teal} />
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: palette.teal, textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>Conversation</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: palette.teal }} />
+                          <Text style={{ fontSize: 10, color: theme.muted }}>Me</Text>
+                        </View>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: palette.violet }} />
+                          <Text style={{ fontSize: 10, color: theme.muted }}>Other</Text>
+                        </View>
+                      </View>
+                    </View>
+                    {/* Chat bubbles */}
+                    <View style={{ padding: 12 }}>
+                      {parseTranscript(transcript.transcript_text).map((turn, i) => (
+                        <ChatBubble key={i} speaker={turn.speaker} text={turn.text} theme={theme} />
+                      ))}
+                    </View>
+                  </View>
+                )}
               </>
             )}
           </View>

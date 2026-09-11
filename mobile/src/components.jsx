@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
-import { View, Text, Pressable, Image, Modal, ScrollView, TouchableOpacity } from "react-native";
+import { useState, useEffect, useRef } from "react";
+import { View, Text, Pressable, Image, Modal, ScrollView } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { palette, gradientBrand, useTheme } from "./theme";
-import { api } from "./api";
+import { getInAppNotifications, markAllRead } from "./notificationStore";
 
 // ---- Logo — uses real Os_logo.png ----
 export function Logo({ size = 19 }) {
@@ -23,37 +23,28 @@ export function Logo({ size = 19 }) {
 }
 
 // ---- Notification Panel ----
-function NotifPanel({ visible, onClose }) {
+function NotifPanel({ visible, onClose, onRead }) {
   const { theme } = useTheme();
   const [notifs, setNotifs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!visible) return;
+    let cancelled = false;
     setLoading(true);
-    // Pull last 20 calls as notification feed
-    api.getCalls({ page_size: 20 })
-      .then((res) => {
-        const items = (res.items || []).map((c) => ({
-          id: c.id,
-          type: c.call_type,
-          title: c.call_type === "missed"
-            ? `Missed call from ${c.contact_name || c.phone_number}`
-            : `${c.call_type === "incoming" ? "Incoming" : "Outgoing"} · ${c.contact_name || c.phone_number}`,
-          sub: `${c.source || "SIM 1"} · ${fmtDur(c.duration_seconds)} · ${relTime(c.start_time)}`,
-          tone: c.call_type === "missed" ? "danger" : c.call_type === "incoming" ? "success" : "info",
-        }));
-        setNotifs(items);
-      })
-      .catch(() => setNotifs([]))
-      .finally(() => setLoading(false));
+    getInAppNotifications()
+      .then((items) => { if (!cancelled) setNotifs(items); })
+      .catch(() => { if (!cancelled) setNotifs([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [visible]);
 
-  function fmtDur(s) {
-    if (!s) return "0s";
-    const m = Math.floor(s / 60), sec = s % 60;
-    return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+  async function handleClose() {
+    await markAllRead().catch(() => {});
+    onRead?.();
+    onClose();
   }
+
   function relTime(iso) {
     const diff = Date.now() - new Date(iso).getTime();
     const m = Math.floor(diff / 60000);
@@ -63,34 +54,63 @@ function NotifPanel({ visible, onClose }) {
     return `${Math.floor(m / 1440)}d ago`;
   }
 
-  const toneColor = { danger: palette.red, success: palette.emerald, info: palette.teal };
-  const toneIcon  = { danger: "call-outline", success: "call-outline", info: "arrow-up-outline" };
+  const typeColor = {
+    call_completed:          palette.teal,
+    call_synced:             palette.emerald,
+    recording_uploaded:      palette.violet,
+    transcription_completed: palette.cyan,
+    sync_failed:             palette.red,
+    missed_call:             palette.red,
+  };
+
+  const typeIcon = {
+    call_completed:          "call-outline",
+    call_synced:             "cloud-done-outline",
+    recording_uploaded:      "mic-outline",
+    transcription_completed: "sparkles-outline",
+    sync_failed:             "alert-circle-outline",
+    missed_call:             "call-outline",
+  };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }} onPress={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+      <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }} onPress={handleClose}>
         <View style={{ position: "absolute", top: 90, right: 16, left: 16, backgroundColor: theme.card, borderRadius: 20, borderWidth: 1, borderColor: theme.border, maxHeight: 480, overflow: "hidden" }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, borderBottomWidth: 1, borderBottomColor: theme.border }}>
-            <Text style={{ fontSize: 16, fontWeight: "800", color: theme.primary }}>Recent Calls</Text>
-            <Pressable onPress={onClose}><Ionicons name="close" size={22} color={theme.muted} /></Pressable>
+            <Text style={{ fontSize: 16, fontWeight: "800", color: theme.primary }}>Notifications</Text>
+            <Pressable onPress={handleClose}><Ionicons name="close" size={22} color={theme.muted} /></Pressable>
           </View>
           <ScrollView>
             {loading ? (
               <Text style={{ textAlign: "center", color: theme.muted, padding: 32 }}>Loading...</Text>
             ) : notifs.length === 0 ? (
-              <Text style={{ textAlign: "center", color: theme.muted, padding: 32 }}>No recent calls</Text>
-            ) : notifs.map((n) => (
-              <View key={n.id} style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderBottomWidth: 1, borderBottomColor: theme.border, backgroundColor: n.tone === "danger" ? palette.red + "08" : "transparent" }}>
-                <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: toneColor[n.tone] + "22", alignItems: "center", justifyContent: "center" }}>
-                  <Ionicons name={toneIcon[n.tone]} size={18} color={toneColor[n.tone]} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 13.5, fontWeight: n.tone === "danger" ? "700" : "600", color: n.tone === "danger" ? palette.red : theme.primary }} numberOfLines={1}>{n.title}</Text>
-                  <Text style={{ fontSize: 11.5, color: theme.muted, marginTop: 2 }}>{n.sub}</Text>
-                </View>
-                {n.tone === "danger" && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: palette.red }} />}
+              <View style={{ alignItems: "center", padding: 40, gap: 10 }}>
+                <Ionicons name="notifications-off-outline" size={36} color={theme.dim} />
+                <Text style={{ fontSize: 14, color: theme.muted }}>No notifications yet</Text>
               </View>
-            ))}
+            ) : notifs.map((n) => {
+              const color = typeColor[n.type] || palette.teal;
+              const icon  = typeIcon[n.type]  || "notifications-outline";
+              return (
+                <View key={n.id} style={{
+                  flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 14,
+                  borderBottomWidth: 1, borderBottomColor: theme.border,
+                  backgroundColor: n.read ? "transparent" : color + "08",
+                }}>
+                  <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: color + "22", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Ionicons name={icon} size={18} color={color} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text style={{ fontSize: 13.5, fontWeight: n.read ? "600" : "700", color: theme.primary, flex: 1 }} numberOfLines={1}>{n.title}</Text>
+                      {!n.read && <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} />}
+                    </View>
+                    <Text style={{ fontSize: 12, color: theme.muted, marginTop: 2, lineHeight: 17 }}>{n.message}</Text>
+                    <Text style={{ fontSize: 11, color: theme.dim, marginTop: 3 }}>{relTime(n.timestamp)}</Text>
+                  </View>
+                </View>
+              );
+            })}
           </ScrollView>
         </View>
       </Pressable>
@@ -99,39 +119,45 @@ function NotifPanel({ visible, onClose }) {
 }
 
 // ---- Connection Status Hook ----
-// Shows whether the backend sync is reachable — not internet connectivity.
-// App always works offline (local call log). Only shows "Offline" if backend unreachable.
-function useConnectionStatus() {
-  const [status, setStatus] = useState("connected");
+// Module-level cache so all AppHeader instances share one check — no duplicate fetches
+let _connStatus = "connected";
+let _connListeners = [];
+let _connTimer = null;
+let _connFailCount = 0;
+let _connStarted = false;
 
-  useEffect(() => {
-    let cancelled = false;
-    let timer;
-    let failCount = 0;
-
-    async function check() {
-      try {
-        const BASE = process.env.EXPO_PUBLIC_API_URL || "https://api.callingos.tzmicha.com/api/v1";
-        const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 8000); // 8s timeout
-        const res = await fetch(BASE.replace("/api/v1", "") + "/health", { signal: ctrl.signal });
-        clearTimeout(t);
-        if (!cancelled) {
-          failCount = 0;
-          setStatus(res.ok ? "connected" : "disconnected");
-        }
-      } catch {
-        failCount++;
-        // Only show disconnected after 2 consecutive failures — prevents flicker from single timeout
-        if (!cancelled && failCount >= 2) setStatus("disconnected");
+function _startConnCheck() {
+  if (_connStarted) return;
+  _connStarted = true;
+  async function check() {
+    try {
+      const BASE = process.env.EXPO_PUBLIC_API_URL || "https://api.callingos.tzmicha.com/api/v1";
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      const res = await fetch(BASE.replace("/api/v1", "") + "/health", { signal: ctrl.signal });
+      clearTimeout(t);
+      _connFailCount = 0;
+      const next = res.ok ? "connected" : "disconnected";
+      if (next !== _connStatus) { _connStatus = next; _connListeners.forEach(fn => fn(next)); }
+    } catch {
+      _connFailCount++;
+      if (_connFailCount >= 2) {
+        const next = "disconnected";
+        if (next !== _connStatus) { _connStatus = next; _connListeners.forEach(fn => fn(next)); }
       }
-      if (!cancelled) timer = setTimeout(check, 90000); // check every 90s
     }
+    _connTimer = setTimeout(check, 120000); // 2 min — not 90s
+  }
+  check();
+}
 
-    check();
-    return () => { cancelled = true; clearTimeout(timer); };
+function useConnectionStatus() {
+  const [status, setStatus] = useState(_connStatus);
+  useEffect(() => {
+    _startConnCheck();
+    _connListeners.push(setStatus);
+    return () => { _connListeners = _connListeners.filter(fn => fn !== setStatus); };
   }, []);
-
   return status;
 }
 
@@ -149,17 +175,14 @@ export function AppHeader({ title, subtitle, right, showStatus = true }) {
   const cm = connMeta[connStatus];
 
   useEffect(() => {
-    // Only fetch unread count once per session, not on every tab switch
-    const t = setTimeout(() => {
-      api.getCalls({ page_size: 5 })
-        .then((res) => {
-          const missed = (res.items || []).filter((c) => c.call_type === "missed").length;
-          setUnread(missed);
-        })
-        .catch(() => {});
-    }, 3000); // delay 3s so it doesn't block startup
-    return () => clearTimeout(t);
-  }, []); // [] = only once on mount, not on every re-render
+    let cancelled = false;
+    getInAppNotifications()
+      .then((items) => {
+        if (!cancelled) setUnread(items.filter(n => !n.read).length);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const today = new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" });
 
@@ -183,7 +206,7 @@ export function AppHeader({ title, subtitle, right, showStatus = true }) {
               <Text style={{ fontSize: 11, fontWeight: "700", color: cm.color }}>{cm.label}</Text>
             </View>
           )}
-          <Pressable onPress={() => setShowNotifs(true)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}>
+          <Pressable onPress={() => setShowNotifs(true)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }} accessibilityLabel="Notifications">
             <Ionicons name="notifications-outline" size={22} color={theme.secondary} />
             {unread > 0 && (
               <View style={{ position: "absolute", top: -6, right: -8, backgroundColor: palette.red, borderRadius: 9, minWidth: 16, height: 16, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 }}>
@@ -193,7 +216,7 @@ export function AppHeader({ title, subtitle, right, showStatus = true }) {
           </Pressable>
         </View>
       </View>
-      <NotifPanel visible={showNotifs} onClose={() => setShowNotifs(false)} />
+      <NotifPanel visible={showNotifs} onClose={() => setShowNotifs(false)} onRead={() => setUnread(0)} />
     </>
   );
 }

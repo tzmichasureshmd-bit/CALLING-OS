@@ -93,14 +93,20 @@ function computeStats(calls) {
 // ── Call List Bottom Sheet ────────────────────────────────────────────────────
 function CallSheet({ visible, onClose, title, calls, color }) {
   const { theme } = useTheme();
+  const router = useRouter();
   const renderItem = useCallback(({ item: c }) => {
     const meta = TYPE_META[c.call_type] || TYPE_META.incoming;
     return (
-      <View style={{
-        flexDirection: "row", alignItems: "center", gap: 12,
-        paddingVertical: 13, paddingHorizontal: 16,
-        borderBottomWidth: 1, borderBottomColor: theme.border,
-      }}>
+      <Pressable
+        onPress={() => {
+          onClose();
+          router.push({ pathname: "/call-detail", params: { clientEventId: c.client_event_id || "", callId: "" } });
+        }}
+        style={{
+          flexDirection: "row", alignItems: "center", gap: 12,
+          paddingVertical: 13, paddingHorizontal: 16,
+          borderBottomWidth: 1, borderBottomColor: theme.border,
+        }}>
         <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: meta.color + "18", alignItems: "center", justifyContent: "center" }}>
           <MaterialCommunityIcons name={meta.icon} size={19} color={meta.color} />
         </View>
@@ -116,9 +122,10 @@ function CallSheet({ visible, onClose, title, calls, color }) {
           <Text style={{ fontSize: 12, fontWeight: "700", color: meta.color }}>{meta.label}</Text>
           <Text style={{ fontSize: 11, color: theme.dim, marginTop: 2 }}>{fmtDur(c.duration_seconds)}</Text>
         </View>
-      </View>
+        <Ionicons name="chevron-forward" size={14} color={theme.dim} />
+      </Pressable>
     );
-  }, [theme]);
+  }, [theme, router, onClose]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -185,13 +192,16 @@ function StatPill({ label, value, color, icon, onPress }) {
 }
 
 // ── Recent Call Row ───────────────────────────────────────────────────────────
-function RecentCallRow({ c, theme }) {
+function RecentCallRow({ c, theme, onPress }) {
   const meta = TYPE_META[c.call_type] || TYPE_META.incoming;
   return (
-    <View style={{
-      flexDirection: "row", alignItems: "center", gap: 12,
-      paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: theme.border,
-    }}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: "row", alignItems: "center", gap: 12,
+        paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: theme.border,
+        opacity: pressed ? 0.7 : 1,
+      })}>
       <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: meta.color + "18", alignItems: "center", justifyContent: "center" }}>
         <MaterialCommunityIcons name={meta.icon} size={17} color={meta.color} />
       </View>
@@ -211,21 +221,21 @@ function RecentCallRow({ c, theme }) {
           <Text style={{ fontSize: 10.5, color: theme.dim }}>{fmtDur(c.duration_seconds)}</Text>
         )}
       </View>
-    </View>
+      <Ionicons name="chevron-forward" size={14} color={theme.dim} />
+    </Pressable>
   );
 }
 
 // ── Sync Status Row ───────────────────────────────────────────────────────────
 function SyncStatusRow({ theme }) {
   const [lastSync, setLastSync] = useState(null);
-  const [pending, setPending]   = useState(0);
+  const loadedRef = useRef(false);
 
   useEffect(() => {
+    if (loadedRef.current) return;
+    loadedRef.current = true;
     AsyncStorage.getItem("callos_last_sync_ts").then(ts => {
       if (ts) setLastSync(parseInt(ts, 10));
-    }).catch(() => {});
-    AsyncStorage.getItem("callos_synced_ids").then(raw => {
-      // pending = calls read but not yet confirmed synced — approximate
     }).catch(() => {});
   }, []);
 
@@ -376,14 +386,15 @@ export default function Home() {
               {/* Stats row */}
               <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                 {[
-                  { label: "Talk Time",  value: fmtSecs(stats.totalSecs), color: palette.teal   },
-                  { label: "Avg Call",   value: fmtDur(stats.avgSecs),    color: palette.violet },
-                  { label: "Connected",  value: stats.connected,          color: palette.emerald },
+                  { label: "Talk Time", value: fmtSecs(stats.totalSecs), color: palette.teal,    onPress: () => openSheet("All Calls", "all", palette.teal) },
+                  { label: "Avg Call",  value: fmtDur(stats.avgSecs),    color: palette.violet,  onPress: null },
+                  { label: "Connected", value: stats.connected,          color: palette.emerald, onPress: () => openSheet("Connected Calls", "all", palette.emerald) },
                 ].map(s => (
-                  <View key={s.label} style={{ alignItems: "center", flex: 1 }}>
+                  <Pressable key={s.label} onPress={s.onPress || undefined} style={{ alignItems: "center", flex: 1 }}>
                     <Text style={{ fontSize: 16, fontWeight: "800", color: s.color }}>{s.value}</Text>
                     <Text style={{ fontSize: 10.5, color: theme.muted, marginTop: 3 }}>{s.label}</Text>
-                  </View>
+                    {s.onPress && <Text style={{ fontSize: 9, color: s.color, marginTop: 1 }}>tap →</Text>}
+                  </Pressable>
                 ))}
               </View>
             </View>
@@ -440,7 +451,12 @@ export default function Home() {
                 </View>
                 <View style={{ paddingHorizontal: 16 }}>
                   {recentCalls.map((c, i) => (
-                    <RecentCallRow key={c.client_event_id || i} c={c} theme={theme} />
+                    <RecentCallRow
+                      key={c.client_event_id || i}
+                      c={c}
+                      theme={theme}
+                      onPress={() => router.push({ pathname: "/call-detail", params: { clientEventId: c.client_event_id || "", callId: "" } })}
+                    />
                   ))}
                 </View>
                 <View style={{ height: 8 }} />

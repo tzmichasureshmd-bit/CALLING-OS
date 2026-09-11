@@ -198,10 +198,20 @@ async function _triggerTranscription(callId, clientEventId, token) {
   }
 }
 
+// Active poll set — prevents duplicate polling chains for same call
+const _activePolls = new Set();
+
 // Poll backend until transcription completes or fails (max 60s)
 async function _pollTranscriptionStatus(callId, clientEventId, token, attempt) {
   const MAX_ATTEMPTS = 12;
+  // Deduplicate: if already polling this call, skip
+  const pollKey = `${callId}-${clientEventId}`;
+  if (attempt === 0) {
+    if (_activePolls.has(pollKey)) return;
+    _activePolls.add(pollKey);
+  }
   if (attempt >= MAX_ATTEMPTS) {
+    _activePolls.delete(pollKey);
     await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
     return;
   }
@@ -211,15 +221,19 @@ async function _pollTranscriptionStatus(callId, clientEventId, token, attempt) {
     const resp = await fetch(`${BASE_URL}/transcripts/${callId}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!resp.ok) { _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {}); return; }
+    if (!resp.ok) {
+      _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {});
+      return;
+    }
     const data = await resp.json().catch(() => ({}));
     const status = data.transcript_status;
     if (status === 'completed') {
+      _activePolls.delete(pollKey);
       await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_COMPLETED).catch(() => {});
       console.log(`[TRANSCRIPTION] completed for call ${callId}`);
-      // Update notification to show full pipeline complete
       await notifyTranscriptionCompleted({ client_event_id: clientEventId, call_id: callId, contact_name: null }).catch(() => {});
     } else if (status === 'failed') {
+      _activePolls.delete(pollKey);
       await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
     } else {
       _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {});
@@ -334,6 +348,10 @@ export function useAutoSync() {
   const heartbeatRef = useRef(null);
   const pollRef      = useRef(null);
   const syncingRef   = useRef(false);
+  const deviceIdRef  = useRef(deviceId);
+
+  // Keep ref in sync so AppState closure always has latest deviceId
+  useEffect(() => { deviceIdRef.current = deviceId; }, [deviceId]);
 
   useEffect(() => {
     if (!deviceId) return;
@@ -342,26 +360,27 @@ export function useAutoSync() {
     requestNotificationPermission();
     registerBackgroundSync();
 
-    async function sendHeartbeat() {
+    async function doHeartbeat() {
+      const dId = deviceIdRef.current;
+      if (!dId) return;
       try {
         const [perms, battery] = await Promise.all([checkPermissions(), getBatteryLevel()]);
-        const res = await api.heartbeat(deviceId, {
+        const res = await api.heartbeat(dId, {
           is_online: true,
           battery_level: battery,
           permissions_status: {
-            callLog: perms.callLog ?? false,
+            callLog:    perms.callLog    ?? false,
             phoneState: perms.phoneState ?? false,
-            contacts: perms.contacts ?? false,
-            recording: perms.recording ?? false,
+            contacts:   perms.contacts   ?? false,
+            recording:  perms.recording  ?? false,
           },
           background_sync_status: "active",
           app_version: "1.0.0",
         });
-        // Manager clicked "Connect" — trigger full sync immediately
         if (res?.sync_now) {
           console.log("[SYNC] sync_now received from server — triggering full sync");
           const { doFirstFullSync } = require("./AuthContext");
-          doFirstFullSync(deviceId).catch(() => {});
+          doFirstFullSync(dId).catch(() => {});
         }
       } catch {}
     }
@@ -369,19 +388,19 @@ export function useAutoSync() {
     async function runSync(mode) {
       if (syncingRef.current) return;
       syncingRef.current = true;
-      try { await runSyncCycle(deviceId, mode); }
+      try { await runSyncCycle(deviceIdRef.current, mode); }
       catch {} finally { syncingRef.current = false; }
     }
 
-    sendHeartbeat();
+    doHeartbeat();
     runSync("reconcile");
 
-    pollRef.current      = setInterval(() => runSync("foreground"), 300_000);  // 5 min — not 30s, prevents Vivo process kill
-    heartbeatRef.current = setInterval(sendHeartbeat, 60_000);
+    pollRef.current      = setInterval(() => runSync("foreground"), 300_000);
+    heartbeatRef.current = setInterval(doHeartbeat, 60_000);
 
     const sub = AppState.addEventListener("change", (next) => {
       if (appState.current.match(/inactive|background/) && next === "active") {
-        sendHeartbeat();
+        doHeartbeat();
         runSync("reconcile");
       }
       appState.current = next;

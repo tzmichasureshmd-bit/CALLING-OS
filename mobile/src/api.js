@@ -105,9 +105,9 @@ export const api = {
     const q = new URLSearchParams(params).toString();
     return request("GET", `/calls${q ? "?" + q : ""}`);
   },
-  getCall:   (callId) => request("GET", `/calls/${callId}`),
-  syncCalls: (deviceId, calls) =>
-    request("POST", "/calls/sync", { device_id: deviceId, calls }),
+  getCall:        (callId) => request("GET", `/calls/${callId}`),
+  syncCalls:      (deviceId, calls) => request("POST", "/calls/sync", { device_id: deviceId, calls }),
+  getTranscript:  (callId) => request("GET", `/transcripts/${callId}`),
 
   // Analytics
   getAnalytics: (range = "today") =>
@@ -140,6 +140,7 @@ export async function clearSession() {
     "callos_selected_sim_slot",
     "callos_selected_sim_carrier",
     "callos_selected_sim_snapshot",
+    "callos_inapp_notifications",
   ]);
 }
 

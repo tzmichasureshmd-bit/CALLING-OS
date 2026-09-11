@@ -20,6 +20,7 @@ import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import { STATUS } from "./callStatusStore";
+import { addNotification } from "./notificationStore";
 
 // ── Preference keys ───────────────────────────────────────────────────────────
 const PREF_CALL_NOTIF    = "callos_notif_calls";
@@ -177,15 +178,24 @@ async function _schedule(identifier, content, channelId) {
  */
 export async function notifyCallCompleted(call) {
   const prefs = await getNotificationPreferences();
-  if (!prefs.calls) return;
-
-  const name = call.contact_name || "Unknown";
   const typeLabel = _typeLabel(call.call_type);
   const dur = _fmtDuration(call.duration_seconds);
   const body = dur
     ? `${typeLabel} call completed · ${dur}`
     : `${typeLabel} call completed`;
 
+  // Always write to in-app store regardless of OS notification preference
+  const typeMap = { incoming: "call_completed", outgoing: "call_completed", missed: "missed_call", rejected: "call_completed" };
+  await addNotification({
+    id:            `call-${call.client_event_id}`,
+    type:          typeMap[call.call_type] || "call_completed",
+    title:         `CallNexa — New Call`,
+    message:       body,
+    callId:        call.call_id || null,
+    clientEventId: call.client_event_id,
+  }).catch(() => {});
+
+  if (!prefs.calls) return;
   await _schedule(
     _notifIdentifier(call.client_event_id),
     {
@@ -203,9 +213,18 @@ export async function notifyCallCompleted(call) {
  */
 export async function notifyTranscriptionCompleted(call) {
   const prefs = await getNotificationPreferences();
-  if (!prefs.transcription) return;
-
   const name = call.contact_name || "Unknown";
+
+  await addNotification({
+    id:            `transcript-${call.client_event_id}`,
+    type:          "transcription_completed",
+    title:         "Transcription Completed",
+    message:       `Call transcription is ready.`,
+    callId:        call.call_id || null,
+    clientEventId: call.client_event_id,
+  }).catch(() => {});
+
+  if (!prefs.transcription) return;
   await _schedule(
     _notifIdentifier(call.client_event_id),
     {
@@ -291,8 +310,16 @@ export async function notifyCallSynced(call) {
  */
 export async function notifyCallSyncFailed(call, errorMsg) {
   const prefs = await getNotificationPreferences();
-  if (!prefs.sync) return;
 
+  await addNotification({
+    id:            `syncfail-${call.client_event_id}`,
+    type:          "sync_failed",
+    title:         "Sync Failed",
+    message:       "Call synchronization failed. Will retry automatically.",
+    clientEventId: call.client_event_id,
+  }).catch(() => {});
+
+  if (!prefs.sync) return;
   await _schedule(
     _notifIdentifier(call.client_event_id),
     {
@@ -348,8 +375,17 @@ export async function notifyRecordingUploading(call) {
  */
 export async function notifyRecordingUploaded(call) {
   const prefs = await getNotificationPreferences();
-  if (!prefs.recording) return;
 
+  await addNotification({
+    id:            `recording-${call.client_event_id}`,
+    type:          "recording_uploaded",
+    title:         "Recording Uploaded",
+    message:       "Recording uploaded successfully.",
+    callId:        call.call_id || null,
+    clientEventId: call.client_event_id,
+  }).catch(() => {});
+
+  if (!prefs.recording) return;
   await _schedule(
     _notifIdentifier(call.client_event_id),
     {
