@@ -64,4 +64,18 @@ class CallMonitorService : Service() {
             .setSilent(true)
             .build()
     }
+
+    // Called from JS bridge to update the persistent notification text
+    fun updateNotificationText(title: String, body: String) {
+        val manager = getSystemService(NotificationManager::class.java)
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setSmallIcon(android.R.drawable.ic_menu_call)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+        manager.notify(NOTIFICATION_ID, notification)
+    }
 }

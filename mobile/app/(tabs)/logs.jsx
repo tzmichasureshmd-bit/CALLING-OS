@@ -10,6 +10,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { palette, gradientBrand, useTheme } from "../../src/theme";
 import { AppHeader } from "../../src/components";
 import { getRealCallLog } from "../../src/callLogService";
+import { getAllCallStatuses, STATUS } from "../../src/callStatusStore";
 import { useAuth } from "../../src/AuthContext";
 import { api } from "../../src/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -285,13 +286,35 @@ function DetailsSheet({ visible, onClose, call, allCalls, syncedIds, theme }) {
             })}
           </View>
 
-          {/* Status summary */}
+          {/* Status summary — real state from callStatusStore */}
           <View style={{ backgroundColor:theme.surface, borderRadius:12, padding:14, borderWidth:1, borderColor:theme.border, marginBottom:20 }}>
             {[
-              { label:"Sync",        val: call.synced ? "Synced ✓" : "Pending",          color: call.synced ? palette.emerald : palette.amber },
-              { label:"Recording",   val: call.hasRecording ? "Available" : "Not available", color: call.hasRecording ? palette.teal : theme.dim },
-              { label:"Upload",      val: call.recordingUploaded ? "Uploaded ✓" : "Not uploaded", color: call.recordingUploaded ? palette.emerald : theme.dim },
-              { label:"Transcription", val: call.transcribed ? "Completed ✓" : "Pending", color: call.transcribed ? palette.emerald : theme.dim },
+              { label:"Sync",
+                val:   call.synced ? "Synced ✓" : "Pending",
+                color: call.synced ? palette.emerald : palette.amber },
+              { label:"Recording",
+                val:   call.recordingStatus === "RECORDING_UPLOADED"      ? "Uploaded ✓"
+                     : call.recordingStatus === "RECORDING_UPLOADING"     ? "Uploading…"
+                     : call.recordingStatus === "RECORDING_QUEUED"        ? "Queued"
+                     : call.recordingStatus === "RECORDING_FAILED"        ? "Upload failed"
+                     : call.recordingStatus === "RECORDING_NOT_AVAILABLE" ? "Not available"
+                     : "Checking…",
+                color: call.recordingStatus === "RECORDING_UPLOADED"      ? palette.emerald
+                     : call.recordingStatus === "RECORDING_UPLOADING"     ? palette.violet
+                     : call.recordingStatus === "RECORDING_QUEUED"        ? palette.amber
+                     : call.recordingStatus === "RECORDING_FAILED"        ? palette.red
+                     : theme.dim },
+              { label:"Transcription",
+                val:   call.transcriptStatus === "TRANSCRIPTION_COMPLETED" ? "Completed ✓"
+                     : call.transcriptStatus === "TRANSCRIBING"            ? "Processing…"
+                     : call.transcriptStatus === "TRANSCRIPTION_PENDING"   ? "Pending"
+                     : call.transcriptStatus === "TRANSCRIPTION_FAILED"    ? "Failed"
+                     : call.recordingStatus === "RECORDING_NOT_AVAILABLE"  ? "—"
+                     : "Waiting for recording",
+                color: call.transcriptStatus === "TRANSCRIPTION_COMPLETED" ? palette.emerald
+                     : call.transcriptStatus === "TRANSCRIBING"            ? palette.violet
+                     : call.transcriptStatus === "TRANSCRIPTION_FAILED"    ? palette.red
+                     : theme.dim },
             ].map((r,i) => (
               <View key={r.label} style={{ flexDirection:"row", justifyContent:"space-between", paddingVertical:7,
                 borderTopWidth: i===0 ? 0 : 1, borderTopColor:theme.border }}>
@@ -473,29 +496,45 @@ export default function Calls() {
   const load = useCallback(async (days = rangeDays, isRefresh = false) => {
     if (isRefresh) { setRefreshing(true); setPage(1); } else setLoading(true);
     try {
-      const [raw, ids] = await Promise.all([
+      const [raw, ids, statuses] = await Promise.all([
         getRealCallLog(days),
         AsyncStorage.getItem("callos_synced_ids").catch(() => null),
+        getAllCallStatuses(),
       ]);
       const synced = ids ? new Set(JSON.parse(ids)) : new Set();
       setSyncedIds(synced);
-      const mapped = raw.map(c => ({
-        id:               c.client_event_id,
-        type:             c.call_type || "incoming",
-        name:             c.contact_name || "Unknown",
-        phone:            c.phone_number || "",
-        duration:         fmtDur(c.duration_seconds),
-        durationSec:      c.duration_seconds,
-        time:             new Date(c._start_ms || c.start_time).toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" }),
-        ago:              relTime(c.start_time),
-        group:            groupLabel(c.start_time),
-        sim:              c.source || "SIM 1",
-        synced:           synced.has(c.client_event_id),
-        hasRecording:     c.recording_available || false,
-        recordingUploaded:false,
-        transcribed:      false,
-        _ts:              c._start_ms || new Date(c.start_time).getTime(),
-      }));
+      // Build a map of client_event_id -> status store entry for O(1) lookup
+      const statusMap = {};
+      statuses.forEach(s => { statusMap[s.client_event_id] = s; });
+
+      const mapped = raw.map(c => {
+        const st = statusMap[c.client_event_id] || {};
+        const recStatus = st.recording_status || STATUS.RECORDING_NOT_AVAILABLE;
+        const txStatus  = st.transcript_status || null;
+        return {
+          id:               c.client_event_id,
+          type:             c.call_type || "incoming",
+          name:             c.contact_name || "Unknown",
+          phone:            c.phone_number || "",
+          duration:         fmtDur(c.duration_seconds),
+          durationSec:      c.duration_seconds,
+          time:             new Date(c._start_ms || c.start_time).toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" }),
+          ago:              relTime(c.start_time),
+          group:            groupLabel(c.start_time),
+          sim:              c.source || "Unknown SIM",
+          synced:           synced.has(c.client_event_id) || st.sync_status === STATUS.SYNCED,
+          // Real recording state from status store
+          hasRecording:     recStatus === STATUS.RECORDING_QUEUED ||
+                            recStatus === STATUS.RECORDING_UPLOADING ||
+                            recStatus === STATUS.RECORDING_UPLOADED,
+          recordingUploaded: recStatus === STATUS.RECORDING_UPLOADED,
+          recordingStatus:  recStatus,
+          // Real transcription state from status store
+          transcribed:      txStatus === STATUS.TRANSCRIPTION_COMPLETED,
+          transcriptStatus: txStatus,
+          _ts:              c._start_ms || new Date(c.start_time).getTime(),
+        };
+      });
       setAllCalls(mapped);
     } catch { /* silent */ }
     finally { setLoading(false); setRefreshing(false); }

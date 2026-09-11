@@ -25,8 +25,10 @@ import {
   requestNotificationPermission,
   notifyCallSyncing,
   notifyCallSynced,
+  notifyCallCompleted,
   notifyRecordingUploading,
   notifyRecordingUploaded,
+  notifyTranscriptionCompleted,
 } from "./notificationManager";
 import { checkPermissions } from "./nativeModules";
 import { api } from "./api";
@@ -79,6 +81,10 @@ async function batchPost(deviceId, calls) {
             updateSyncStatus(r.client_event_id, STATUS.SYNCED, { call_id: r.call_id }).catch(() => {})
           ));
         }
+        // Fire "CallNexa — New Call" notification for each confirmed call
+        await Promise.all(batch.map(c =>
+          notifyCallCompleted({ ...c, call_id: res.results?.find(r => r.client_event_id === c.client_event_id)?.call_id }).catch(() => {})
+        ));
       } else {
         await Promise.all(batch.map(c =>
           updateSyncStatus(c.client_event_id, STATUS.SYNC_FAILED).catch(() => {})
@@ -211,6 +217,8 @@ async function _pollTranscriptionStatus(callId, clientEventId, token, attempt) {
     if (status === 'completed') {
       await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_COMPLETED).catch(() => {});
       console.log(`[TRANSCRIPTION] completed for call ${callId}`);
+      // Update notification to show full pipeline complete
+      await notifyTranscriptionCompleted({ client_event_id: clientEventId, call_id: callId, contact_name: null }).catch(() => {});
     } else if (status === 'failed') {
       await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
     } else {

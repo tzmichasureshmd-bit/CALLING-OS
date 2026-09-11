@@ -171,6 +171,54 @@ async function _schedule(identifier, content, channelId) {
 // ── Public notification functions ─────────────────────────────────────────────
 
 /**
+ * Show "CallNexa — New Call" notification after a call is synced.
+ * This is the primary user-facing notification per the spec.
+ * Updates in-place as pipeline progresses.
+ */
+export async function notifyCallCompleted(call) {
+  const prefs = await getNotificationPreferences();
+  if (!prefs.calls) return;
+
+  const name = call.contact_name || "Unknown";
+  const typeLabel = _typeLabel(call.call_type);
+  const dur = _fmtDuration(call.duration_seconds);
+  const body = dur
+    ? `${typeLabel} call completed · ${dur}`
+    : `${typeLabel} call completed`;
+
+  await _schedule(
+    _notifIdentifier(call.client_event_id),
+    {
+      title: `CallNexa — New Call`,
+      body,
+      data: { clientEventId: call.client_event_id, callId: call.call_id, screen: "logs" },
+      android: { publicVersion: { title: "CallNexa", body: "New call recorded" } },
+    },
+    "call_status"
+  );
+}
+
+/**
+ * Update the existing call notification to show transcription completed.
+ */
+export async function notifyTranscriptionCompleted(call) {
+  const prefs = await getNotificationPreferences();
+  if (!prefs.transcription) return;
+
+  const name = call.contact_name || "Unknown";
+  await _schedule(
+    _notifIdentifier(call.client_event_id),
+    {
+      title: `CallNexa — Call Complete ✓`,
+      body:  `${name} · Synced · Recorded · Transcribed`,
+      data:  { clientEventId: call.client_event_id, callId: call.call_id, screen: "logs" },
+      android: { publicVersion: { title: "CallNexa", body: "Call fully processed" } },
+    },
+    "call_status"
+  );
+}
+
+/**
  * Show "Call detected" — fires immediately when a new call is found in CallLog.
  */
 export async function notifyCallDetected(call) {
