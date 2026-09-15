@@ -66,6 +66,13 @@ class CallOut(BaseModel):
     recording_size_bytes: Optional[int] = None
     recording_mime_type: Optional[str] = None
     transcript_status: Optional[str] = None
+    transcript_text: Optional[str] = None
+    transcript_error: Optional[str] = None
+    transcription_started_at: Optional[datetime] = None
+    transcription_completed_at: Optional[datetime] = None
+    summary_status: Optional[str] = None
+    summary_text: Optional[str] = None
+    summary_data: Optional[str] = None
     created_at: datetime
     # Joined fields
     employee_name: Optional[str] = None

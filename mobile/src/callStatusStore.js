@@ -31,10 +31,11 @@ export const STATUS = {
   RECORDING_UPLOADED:      "RECORDING_UPLOADED",
   RECORDING_NOT_AVAILABLE: "RECORDING_NOT_AVAILABLE",
   RECORDING_FAILED:        "RECORDING_FAILED",
-  TRANSCRIPTION_PENDING:   "TRANSCRIPTION_PENDING",
-  TRANSCRIBING:            "TRANSCRIBING",
-  TRANSCRIPTION_COMPLETED: "TRANSCRIPTION_COMPLETED",
-  TRANSCRIPTION_FAILED:    "TRANSCRIPTION_FAILED",
+  TRANSCRIPTION_PENDING:         "TRANSCRIPTION_PENDING",
+  TRANSCRIBING:                  "TRANSCRIBING",
+  TRANSCRIPTION_COMPLETED:       "TRANSCRIPTION_COMPLETED",
+  TRANSCRIPTION_FAILED:          "TRANSCRIPTION_FAILED",
+  TRANSCRIPTION_STILL_PROCESSING: "TRANSCRIPTION_STILL_PROCESSING",
 };
 
 // Human-readable labels for UI display
@@ -51,10 +52,11 @@ export const STATUS_LABEL = {
   [STATUS.RECORDING_UPLOADED]:      "Recording uploaded ✓",
   [STATUS.RECORDING_NOT_AVAILABLE]: "Recording unavailable",
   [STATUS.RECORDING_FAILED]:        "Recording upload failed",
-  [STATUS.TRANSCRIPTION_PENDING]:   "Transcription pending",
-  [STATUS.TRANSCRIBING]:            "Transcribing…",
-  [STATUS.TRANSCRIPTION_COMPLETED]: "Transcription complete ✓",
-  [STATUS.TRANSCRIPTION_FAILED]:    "Transcription failed",
+  [STATUS.TRANSCRIPTION_PENDING]:          "Transcription pending",
+  [STATUS.TRANSCRIBING]:                   "Transcribing…",
+  [STATUS.TRANSCRIPTION_COMPLETED]:        "Transcription complete ✓",
+  [STATUS.TRANSCRIPTION_FAILED]:           "Transcription failed",
+  [STATUS.TRANSCRIPTION_STILL_PROCESSING]: "Still processing…",
 };
 
 // ── Store shape ───────────────────────────────────────────────────────────────

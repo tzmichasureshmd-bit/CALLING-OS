@@ -33,11 +33,37 @@ import {
 import { checkPermissions } from "./nativeModules";
 import { api } from "./api";
 
-const BG_TASK_NAME     = "CALLNEXA_BG_SYNC";
-const SYNCED_IDS_KEY   = "callos_synced_ids";
-const LAST_SYNC_TS_KEY = "callos_last_sync_ts";
-const BATCH_SIZE       = 50;
-const BATCH_DELAY_MS   = 600;
+const BG_TASK_NAME        = "CALLNEXA_BG_SYNC";
+const SYNCED_IDS_KEY      = "callos_synced_ids";
+const LAST_SYNC_TS_KEY    = "callos_last_sync_ts";
+const LAST_ANDROID_ID_KEY = "callos_last_android_id";
+const BATCH_SIZE          = 50;
+const BATCH_DELAY_MS      = 600;
+const INSTANT_POLL_MS     = 8_000;  // check for new call log entry every 8s
+
+let _lastKnownAndroidId = null;
+
+async function _hasNewCallLogEntry() {
+  try {
+    const { getLatestCallLogId } = require("./callLogService");
+    const latest = await getLatestCallLogId();
+    if (!latest) return false;
+    if (_lastKnownAndroidId === null) {
+      const stored = await AsyncStorage.getItem(LAST_ANDROID_ID_KEY).catch(() => null);
+      _lastKnownAndroidId = stored || latest;
+      await AsyncStorage.setItem(LAST_ANDROID_ID_KEY, latest);
+      return false;
+    }
+    if (latest !== _lastKnownAndroidId) {
+      _lastKnownAndroidId = latest;
+      await AsyncStorage.setItem(LAST_ANDROID_ID_KEY, latest);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 // ── Battery ───────────────────────────────────────────────────────────────────
 async function getBatteryLevel() {
@@ -121,6 +147,16 @@ async function processUploadQueue(token) {
       continue;
     }
 
+    // Exponential backoff: skip items that failed recently (fixes Bug 4)
+    if (item.last_attempt_at && item.retryCount > 0) {
+      const backoffMs = Math.min(Math.pow(2, item.retryCount) * 10000, 300000); // 10s, 20s, 40s … max 5min
+      const elapsed = Date.now() - new Date(item.last_attempt_at).getTime();
+      if (elapsed < backoffMs) {
+        remaining.push(item);
+        continue;
+      }
+    }
+
     // Resolve server call_id: status store first, then backend lookup
     let callId = item.call_id || null;
     if (!callId) {
@@ -137,7 +173,7 @@ async function processUploadQueue(token) {
       } catch {}
     }
     if (!callId) {
-      remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1 });
+      remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1, last_attempt_at: new Date().toISOString() });
       continue;
     }
 
@@ -147,28 +183,27 @@ async function processUploadQueue(token) {
 
     try {
       const result = await uploadRecording(callId, item.path, token);
-      if (result) {
-        // Backend confirmed — mark UPLOADED
-        await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_UPLOADED, {
-          call_id: callId,
-          recording_path: item.path,
-        }).catch(() => {});
-        await notifyRecordingUploaded({ client_event_id: item.client_event_id, call_id: callId, contact_name: null, phone_number: null }).catch(() => {});
+      // uploadRecording now throws on failure — reaching here means success
+      await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_UPLOADED, {
+        call_id: callId,
+        recording_path: item.path,
+      }).catch(() => {});
+      await notifyRecordingUploaded({ client_event_id: item.client_event_id, call_id: callId, contact_name: null, phone_number: null }).catch(() => {});
 
-        // Auto-trigger transcription immediately after confirmed upload
-        await updateTranscriptStatus(item.client_event_id, STATUS.TRANSCRIPTION_PENDING).catch(() => {});
-        _triggerTranscription(callId, item.client_event_id, token).catch(() => {});
-      } else {
-        await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_FAILED, {
-          last_error: 'Upload returned null — server rejected or network error',
-        }).catch(() => {});
-        remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1 });
-      }
+      // Auto-trigger transcription immediately after confirmed upload
+      await updateTranscriptStatus(item.client_event_id, STATUS.TRANSCRIPTION_PENDING).catch(() => {});
+      _triggerTranscription(callId, item.client_event_id, token).catch(() => {});
     } catch (e) {
       await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_FAILED, {
         last_error: e?.message,
       }).catch(() => {});
-      remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1 });
+      remaining.push({
+        ...item,
+        call_id: callId,
+        retryCount: (item.retryCount || 0) + 1,
+        last_attempt_at: new Date().toISOString(),
+        last_error: e?.message,
+      });
     }
   }
   await saveUploadQueue(remaining);
@@ -201,21 +236,27 @@ async function _triggerTranscription(callId, clientEventId, token) {
 // Active poll set — prevents duplicate polling chains for same call
 const _activePolls = new Set();
 
-// Poll backend until transcription completes or fails (max 60s)
+// Poll backend until transcription completes or fails.
+// Extended: up to 40 attempts × 10s = ~6.5 minutes (fixes Bug 6).
+// After initial window, marks TRANSCRIPTION_STILL_PROCESSING instead of FAILED.
 async function _pollTranscriptionStatus(callId, clientEventId, token, attempt) {
-  const MAX_ATTEMPTS = 12;
-  // Deduplicate: if already polling this call, skip
+  const MAX_ATTEMPTS      = 40;   // 40 × 10s = ~6.5 min
+  const STILL_PROC_AFTER  = 12;   // after 12 attempts (~2 min), show "still processing"
   const pollKey = `${callId}-${clientEventId}`;
+
   if (attempt === 0) {
     if (_activePolls.has(pollKey)) return;
     _activePolls.add(pollKey);
   }
+
   if (attempt >= MAX_ATTEMPTS) {
     _activePolls.delete(pollKey);
-    await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
+    // Do NOT mark as failed — backend may still be processing a long recording
+    await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_STILL_PROCESSING).catch(() => {});
     return;
   }
-  await new Promise(r => setTimeout(r, 5000));
+
+  await new Promise(r => setTimeout(r, 10000));
   try {
     const { BASE_URL } = require("./api");
     const resp = await fetch(`${BASE_URL}/transcripts/${callId}`, {
@@ -236,6 +277,10 @@ async function _pollTranscriptionStatus(callId, clientEventId, token, attempt) {
       _activePolls.delete(pollKey);
       await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
     } else {
+      // Still processing — update status label after threshold
+      if (attempt >= STILL_PROC_AFTER) {
+        await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_STILL_PROCESSING).catch(() => {});
+      }
       _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {});
     }
   } catch {
@@ -243,14 +288,15 @@ async function _pollTranscriptionStatus(callId, clientEventId, token, attempt) {
   }
 }
 
-// ── Main sync cycle ───────────────────────────────────────────────────────────
-// foreground = last 2h only (every 30s while app open)
+// ── Main sync cycle ─────────────────────────────────────────────────────────
+// instant    = new call log entry detected — sync immediately
+// foreground = last 2h fallback while app open
 // reconcile  = since last sync ts (app-start / resume / background)
 export async function runSyncCycle(deviceId, mode) {
   if (!deviceId) return;
   try {
     let candidates;
-    if (mode === "foreground") {
+    if (mode === "instant" || mode === "foreground") {
       candidates = await getRecentCalls();
     } else {
       const lastTs = await AsyncStorage.getItem(LAST_SYNC_TS_KEY).catch(() => null);
@@ -395,7 +441,18 @@ export function useAutoSync() {
     doHeartbeat();
     runSync("reconcile");
 
-    pollRef.current      = setInterval(() => runSync("foreground"), 300_000);
+    // Instant detection: poll call log ID every 8s.
+    // The moment Android writes a new call log entry (seconds after call ends)
+    // _hasNewCallLogEntry() returns true and we sync immediately.
+    pollRef.current = setInterval(async () => {
+      const hasNew = await _hasNewCallLogEntry();
+      if (hasNew) {
+        console.log("[SYNC] new call log entry — instant sync");
+        runSync("instant");
+      } else {
+        runSync("foreground");
+      }
+    }, INSTANT_POLL_MS);
     heartbeatRef.current = setInterval(doHeartbeat, 60_000);
 
     const sub = AppState.addEventListener("change", (next) => {

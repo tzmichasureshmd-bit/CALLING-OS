@@ -138,11 +138,11 @@ function _notifIdentifier(clientEventId) {
 // ── Call type labels ──────────────────────────────────────────────────────────
 function _typeLabel(callType) {
   switch (callType) {
-    case "incoming": return "📞 Incoming";
-    case "outgoing": return "📤 Outgoing";
-    case "missed":   return "📵 Missed";
-    case "rejected": return "🚫 Rejected";
-    default:         return "📞 Call";
+    case "incoming": return "Incoming";
+    case "outgoing": return "Outgoing";
+    case "missed":   return "Missed";
+    case "rejected": return "Rejected";
+    default:         return "Call";
   }
 }
 
@@ -228,7 +228,7 @@ export async function notifyTranscriptionCompleted(call) {
   await _schedule(
     _notifIdentifier(call.client_event_id),
     {
-      title: `CallNexa — Call Complete ✓`,
+      title: `CallNexa — Call Complete`,
       body:  `${name} · Synced · Recorded · Transcribed`,
       data:  { clientEventId: call.client_event_id, callId: call.call_id, screen: "logs" },
       android: { publicVersion: { title: "CallNexa", body: "Call fully processed" } },
@@ -296,7 +296,7 @@ export async function notifyCallSynced(call) {
   await _schedule(
     _notifIdentifier(call.client_event_id),
     {
-      title: `${typeLabel} synced ✓`,
+      title: `${typeLabel} synced`,
       body:  dur ? `${name} · ${dur}` : `${name} · Synced to dashboard`,
       data:  { clientEventId: call.client_event_id, callId: call.call_id, screen: "call_detail" },
       android: { publicVersion: { title: "CallNexa", body: "Call synced successfully" } },
@@ -389,7 +389,7 @@ export async function notifyRecordingUploaded(call) {
   await _schedule(
     _notifIdentifier(call.client_event_id),
     {
-      title: "Recording uploaded ✓",
+      title: "Recording uploaded",
       body:  `${call.contact_name || call.phone_number || "Call"} · Audio available on dashboard`,
       data:  { clientEventId: call.client_event_id, callId: call.call_id, screen: "call_detail" },
       android: { publicVersion: { title: "CallNexa", body: "Recording uploaded" } },
@@ -406,7 +406,7 @@ export async function notifySystemSyncAlert(failCount) {
   await _schedule(
     "callos-system-sync-alert",
     {
-      title: "⚠️ CallNexa: Sync not working",
+      title: "CallNexa: Sync not working",
       body:  "Calls are not syncing. Open the app to check your connection.",
       data:  { screen: "sync_health" },
     },

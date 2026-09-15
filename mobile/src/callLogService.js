@@ -72,47 +72,81 @@ function _deriveCallStatus(callType, durationSec) {
 
 // -- Recording file search
 const RECORDING_SEARCH_DIRS = [
-  "file:///storage/emulated/0/Sounds/CallRecord/",
-  "file:///storage/emulated/0/Record/Call/",
-  "file:///storage/emulated/0/PhoneRecord/",
-  "file:///storage/emulated/0/Vivo/CallRecord/",
+  // Stock Android
   "file:///storage/emulated/0/Recordings/Call/",
-  "file:///storage/emulated/0/DCIM/Call Recordings/",
-  "file:///storage/emulated/0/MIUI/sound_recorder/call_rec/",
-  "file:///storage/emulated/0/Xiaomi/sound_recorder/call_rec/",
-  "file:///storage/emulated/0/ColorOS/Recording/",
   "file:///storage/emulated/0/Recordings/",
   "file:///storage/emulated/0/CallRecordings/",
   "file:///storage/emulated/0/Call/",
+  // Samsung
+  "file:///storage/emulated/0/Record/Call/",
+  "file:///storage/emulated/0/PhoneRecord/",
+  // Xiaomi / MIUI
+  "file:///storage/emulated/0/MIUI/sound_recorder/call_rec/",
+  "file:///storage/emulated/0/Xiaomi/sound_recorder/call_rec/",
+  "file:///storage/emulated/0/Sounds/CallRecord/",
+  // Vivo
+  "file:///storage/emulated/0/Vivo/CallRecord/",
+  // OPPO / ColorOS / Realme
+  "file:///storage/emulated/0/ColorOS/Recording/",
+  "file:///storage/emulated/0/DCIM/Call Recordings/",
+  // Huawei
+  "file:///storage/emulated/0/Sounds/",
+  // OnePlus
+  "file:///storage/emulated/0/OnePlus/CallRecord/",
+  // Generic fallback
   "file:///storage/emulated/0/Android/data/com.android.phone/files/",
 ];
 const RECORDING_EXTENSIONS = ["mp3", "mp4", "m4a", "aac", "wav", "3gp", "amr", "ogg"];
+const RECORDING_MIME_MAP = {
+  mp3: "audio/mpeg", mp4: "audio/mp4", m4a: "audio/x-m4a",
+  aac: "audio/aac", wav: "audio/wav", "3gp": "audio/3gpp",
+  amr: "audio/amr", ogg: "audio/ogg",
+};
+const MIN_RECORDING_BYTES = 1024;       // 1 KB minimum — reject empty/corrupt files
+const MATCH_WINDOW_SEC    = 180;        // 3-minute window — recording apps write late
 
-async function _findRecordingFile(startMs, phoneNumber) {
+/**
+ * Find a real recording file for a call.
+ * Returns { path, mimeType, fileSize } or null.
+ * Validates: exists, readable, size >= 1KB, valid extension.
+ * Never returns a fake or zero-byte file.
+ */
+async function _findRecordingFile(startMs, phoneNumber, durationSec) {
   try {
     const startSec = Math.floor(startMs / 1000);
-    const windowSec = 60;
+    // End of call + buffer: recording finishes writing after call ends
+    const endSec = startSec + (durationSec || 0) + MATCH_WINDOW_SEC;
+    const digits = phoneNumber && phoneNumber !== "unknown"
+      ? phoneNumber.replace(/\D/g, "").slice(-7)
+      : null;
+
     for (const dir of RECORDING_SEARCH_DIRS) {
       try {
-        const info = await FileSystem.getInfoAsync(dir);
-        if (!info.exists || !info.isDirectory) continue;
+        const dirInfo = await FileSystem.getInfoAsync(dir);
+        if (!dirInfo.exists || !dirInfo.isDirectory) continue;
         const contents = await FileSystem.readDirectoryAsync(dir);
         for (const filename of contents) {
           const ext = filename.split(".").pop()?.toLowerCase();
           if (!RECORDING_EXTENSIONS.includes(ext)) continue;
           try {
             const fileInfo = await FileSystem.getInfoAsync(dir + filename, { md5: false });
-            if (fileInfo.exists && fileInfo.modificationTime) {
+            if (!fileInfo.exists) continue;
+            // Validate file size
+            if (!fileInfo.size || fileInfo.size < MIN_RECORDING_BYTES) continue;
+            // Match by modification time: file must have been written during/after the call
+            if (fileInfo.modificationTime) {
               const fileSec = Math.floor(fileInfo.modificationTime);
-              if (Math.abs(fileSec - startSec) <= windowSec) return dir + filename;
+              if (fileSec >= startSec && fileSec <= endSec) {
+                return { path: dir + filename, mimeType: RECORDING_MIME_MAP[ext] || "audio/mp4", fileSize: fileInfo.size };
+              }
             }
-          } catch { /* skip */ }
-          if (phoneNumber && phoneNumber !== "unknown") {
-            const digits = phoneNumber.replace(/\D/g, "").slice(-7);
-            if (digits.length >= 7 && filename.includes(digits)) return dir + filename;
-          }
+            // Match by phone number digits in filename
+            if (digits && digits.length >= 7 && filename.includes(digits)) {
+              return { path: dir + filename, mimeType: RECORDING_MIME_MAP[ext] || "audio/mp4", fileSize: fileInfo.size };
+            }
+          } catch { /* skip unreadable file */ }
         }
-      } catch { /* dir not accessible */ }
+      } catch { /* dir not accessible — skip */ }
     }
   } catch { /* silent */ }
   return null;
@@ -321,111 +355,73 @@ export async function saveUploadQueue(queue) {
   await AsyncStorage.setItem(UPLOAD_QUEUE_KEY, JSON.stringify(queue));
 }
 
-// Deferred recording check — runs in background, never blocks sync cycle
-async function _checkRecordingDeferred(c, queue, existing) {
-  if (existing.has(c.client_event_id)) return;
+/**
+ * Deferred recording check — runs in background, never blocks sync cycle.
+ * Reads the live queue each time to avoid race conditions (fixes Bug 11).
+ * Bounded retries: max 3 attempts with increasing delays.
+ */
+async function _checkRecordingDeferred(c) {
   const startMs = c._start_ms || new Date(c.start_time).getTime();
-  // Try immediately, then after 5s, then after 12s — total max 17s but non-blocking
-  const delays = [0, 5000, 12000];
-  let recordingPath = null;
+  const phone   = c._raw_number || c.phone_number;
+  const dur     = c.duration_seconds || 0;
+
+  // Mark as CHECKING
+  await upsertCallStatus(c.client_event_id, {
+    recording_status: STATUS.RECORDING_CHECK,
+  }).catch(() => {});
+
+  // Attempt detection with increasing delays (0s, 10s, 30s)
+  // Recording apps may finish writing 30–120s after call ends
+  const delays = [0, 10000, 30000];
+  let found = null;
+
   for (const delay of delays) {
     if (delay > 0) await new Promise(r => setTimeout(r, delay));
-    recordingPath = await _findRecordingFile(startMs, c._raw_number || c.phone_number);
-    if (recordingPath) break;
+    found = await _findRecordingFile(startMs, phone, dur);
+    if (found) break;
   }
-  if (!recordingPath) {
+
+  if (!found) {
     await upsertCallStatus(c.client_event_id, {
       recording_status: STATUS.RECORDING_NOT_AVAILABLE,
-      recording_error: 'No recording file found in OEM directories after retry',
+      recording_error:  'No recording file found in any OEM directory after 3 attempts',
     }).catch(() => {});
+    console.log('[CALLLOG] recording not available: ' + c.client_event_id);
     return;
   }
-  let fileSize = null;
-  try {
-    const info = await FileSystem.getInfoAsync(recordingPath);
-    if (info.exists) fileSize = info.size || null;
-  } catch {}
+
+  // Re-read live queue to avoid race condition (fixes Bug 11)
   const currentQueue = await getUploadQueue();
-  const currentExisting = new Set(currentQueue.map(q => q.client_event_id));
-  if (!currentExisting.has(c.client_event_id)) {
-    await saveUploadQueue([...currentQueue, {
-      client_event_id: c.client_event_id,
-      path:            recordingPath,
-      file_size:       fileSize,
-      mime_type:       null,
-      retry_count:     0,
-      status:          'queued',
-      last_error:      null,
-      created_at:      new Date().toISOString(),
-    }]);
-    await upsertCallStatus(c.client_event_id, {
-      recording_status: STATUS.RECORDING_QUEUED,
-      recording_path:   recordingPath,
-    }).catch(() => {});
-    console.log('[CALLLOG] recording queued (deferred): ' + c.client_event_id);
-  }
+  const alreadyQueued = currentQueue.some(q => q.client_event_id === c.client_event_id);
+  if (alreadyQueued) return;
+
+  await saveUploadQueue([...currentQueue, {
+    client_event_id: c.client_event_id,
+    call_id:         null,   // resolved later from status store
+    path:            found.path,
+    file_size:       found.fileSize,
+    mime_type:       found.mimeType,
+    retry_count:     0,
+    status:          'queued',
+    last_error:      null,
+    created_at:      new Date().toISOString(),
+  }]);
+
+  await upsertCallStatus(c.client_event_id, {
+    recording_status: STATUS.RECORDING_QUEUED,
+    recording_path:   found.path,
+  }).catch(() => {});
+  console.log('[CALLLOG] recording queued: ' + c.client_event_id + ' size=' + found.fileSize);
 }
 
 export async function enqueueRecordings(calls) {
-  const queue    = await getUploadQueue();
-  const existing = new Set(queue.map((q) => q.client_event_id));
-
   for (const c of calls) {
-    if (existing.has(c.client_event_id)) continue;
+    // Re-read queue per call to avoid stale snapshot (fixes Bug 11)
+    const queue = await getUploadQueue();
+    const alreadyQueued = queue.some(q => q.client_event_id === c.client_event_id);
+    if (alreadyQueued) continue;
     // Fire-and-forget — never blocks the sync cycle
-    _checkRecordingDeferred(c, queue, existing).catch(() => {});
-  }
-  // Return immediately — recording detection happens in background
-}
-
-// Keep old synchronous path for direct callers that need it (unused but preserved)
-async function _enqueueRecordingsSync(calls) {
-  const queue    = await getUploadQueue();
-  const existing = new Set(queue.map((q) => q.client_event_id));
-  const toAdd    = [];
-
-  for (const c of calls) {
-    if (existing.has(c.client_event_id)) continue;
-
-    let recordingPath = null;
-    const startMs = c._start_ms || new Date(c.start_time).getTime();
-    recordingPath = await _findRecordingFile(startMs, c._raw_number || c.phone_number);
-
-    if (!recordingPath) {
-      await upsertCallStatus(c.client_event_id, {
-        recording_status: STATUS.RECORDING_NOT_AVAILABLE,
-        recording_error: 'No recording file found',
-      }).catch(() => {});
-      continue;
-    }
-
-    let fileSize = null;
-    try {
-      const info = await FileSystem.getInfoAsync(recordingPath);
-      if (info.exists) fileSize = info.size || null;
-    } catch {}
-
-    toAdd.push({
-      client_event_id: c.client_event_id,
-      path:            recordingPath,
-      file_size:       fileSize,
-      mime_type:       null,
-      retry_count:     0,
-      status:          'queued',
-      last_error:      null,
-      created_at:      new Date().toISOString(),
-    });
-
-    // Mark RECORDING_QUEUED in status store
-    await upsertCallStatus(c.client_event_id, {
-      recording_status: STATUS.RECORDING_QUEUED,
-      recording_path:   recordingPath,
-    }).catch(() => {});
-  }
-
-  if (toAdd.length) {
-    await saveUploadQueue([...queue, ...toAdd]);
-    console.log("[CALLLOG] recording queued = " + toAdd.length + " files");
+    _checkRecordingDeferred(c).catch(() => {});
   }
 }
 
@@ -433,7 +429,12 @@ export async function uploadRecording(callId, filePath, token) {
   if (!filePath || !callId) return null;
   try {
     const info = await FileSystem.getInfoAsync(filePath);
-    if (!info.exists) return null;
+    if (!info.exists) {
+      throw new Error('Recording file no longer exists at path: ' + filePath);
+    }
+    if (!info.size || info.size < 1024) {
+      throw new Error('Recording file is empty or too small: ' + info.size + ' bytes');
+    }
     const result = await FileSystem.uploadAsync(
       `${BASE_URL}/calls/${callId}/recording`,
       filePath,
@@ -444,9 +445,19 @@ export async function uploadRecording(callId, filePath, token) {
         headers:     { Authorization: `Bearer ${token}` },
       }
     );
-    return result.status === 200 ? JSON.parse(result.body) : null;
-  } catch {
-    return null;
+    // Fix Bug 12: accept both 200 and 201
+    if (result.status === 200 || result.status === 201) {
+      try {
+        return result.body ? JSON.parse(result.body) : { status: 'uploaded' };
+      } catch {
+        return { status: 'uploaded' };
+      }
+    }
+    let detail = 'Upload failed';
+    try { detail = JSON.parse(result.body)?.detail || detail; } catch {}
+    throw new Error(`HTTP ${result.status}: ${detail}`);
+  } catch (e) {
+    throw e;  // re-throw so processUploadQueue can record the error
   }
 }
 

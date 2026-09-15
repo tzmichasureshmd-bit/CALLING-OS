@@ -462,7 +462,14 @@ async def upload_recording(
     except Exception:
         pass
 
-    return {"status": "uploaded", "size_bytes": len(content)}
+    return {
+        "status": "uploaded",
+        "call_id": call_id,
+        "recording_available": True,
+        "recording_status": "uploaded",
+        "transcript_status": call.transcript_status,
+        "size_bytes": len(content),
+    }
 
 
 # ── signed playback URL ───────────────────────────────────────────────────────

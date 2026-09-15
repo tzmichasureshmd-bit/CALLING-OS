@@ -80,8 +80,11 @@ export const subscriptionApi = {
 
 export const transcriptsApi = {
   list: (params) => client.get("/transcripts", { params }).then((r) => r.data),
+  get: (callId) => client.get(`/transcripts/${callId}`).then((r) => r.data),
   transcribe: (callId) => client.post(`/transcripts/${callId}/transcribe`).then((r) => r.data),
   retry: (callId) => client.post(`/transcripts/${callId}/transcribe/retry`).then((r) => r.data),
+  summarize: (callId) => client.post(`/transcripts/${callId}/summarize`).then((r) => r.data),
+  retrySummary: (callId) => client.post(`/transcripts/${callId}/summarize/retry`).then((r) => r.data),
 };
 
 export const auditApi = {

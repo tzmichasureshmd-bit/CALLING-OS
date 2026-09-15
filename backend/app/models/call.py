@@ -57,6 +57,15 @@ class Call(Base):
     # Transcription
     transcript_status           = Column(String(20), nullable=True)
     transcript_text             = Column(String, nullable=True)
+    transcript_error            = Column(String(500), nullable=True)
+    transcription_started_at    = Column(DateTime, nullable=True)
+    transcription_completed_at  = Column(DateTime, nullable=True)
+
+    # AI Summary
+    summary_status              = Column(String(20), nullable=True)   # pending|processing|completed|failed
+    summary_text                = Column(String, nullable=True)
+    summary_error               = Column(String(500), nullable=True)
+    summary_data                = Column(String, nullable=True)        # JSON string: points, sentiment, keywords
 
     # Sync
     sync_status                 = Column(String(20), default="synced")

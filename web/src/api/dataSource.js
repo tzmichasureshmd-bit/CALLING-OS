@@ -24,7 +24,18 @@ function normalizeCall(c) {
     durationSeconds: c.duration_seconds,
     source: c.source || "SIM 1",
     device: c.device_model || "—",
-    recordingUrl: c.recording_url || null,
+    // recording — never expose raw URL, use signed URL endpoint
+    hasRecording:    c.recording_available === true,
+    recordingStatus: c.recording_status || "not_available",
+    // transcript
+    transcriptStatus: c.transcript_status || null,
+    transcriptText:   c.transcript_text   || null,
+    // summary
+    summaryStatus: c.summary_status || null,
+    summaryText:   c.summary_text   || null,
+    summaryData:   c.summary_data
+      ? (() => { try { return JSON.parse(c.summary_data); } catch { return null; } })()
+      : null,
   };
 }
 
@@ -258,20 +269,40 @@ export const dataSource = {
     };
   },
 
-  getRecordedCalls: async () => {
-    const res = await api.transcriptsApi.list();
+  getRecordedCalls: async (params) => {
+    const res = await api.transcriptsApi.list(params);
     return {
       items: (res.items || []).map((c) => ({
-        id: c.id,
-        contact: c.contact || "Unknown",
-        phone: c.phone,
-        employee: c.employee || "—",
-        date: c.date,
-        durationSeconds: c.duration_seconds,
-        recordingUrl: c.recording_url || null,
-        transcriptStatus: c.transcript_status || "pending",
-        transcriptText: c.transcript_text || null,
+        id:                      c.id,
+        contact:                 c.contact || "Unknown",
+        phone:                   c.phone,
+        employee:                c.employee || "—",
+        date:                    c.date,
+        durationSeconds:         c.duration_seconds,
+        callType:                c.call_type,
+        callStatus:              c.call_status,
+        source:                  c.source || "SIM 1",
+        simSlot:                 c.sim_slot,
+        // recording_url is a private storage path — NEVER use directly as a URL
+        // The web must call GET /calls/{id}/recording-url to get a signed URL
+        hasRecording:            c.recording_available === true,
+        recordingStatus:         c.recording_status || "not_available",
+        recordingMimeType:       c.recording_mime_type || null,
+        recordingSizeBytes:      c.recording_size_bytes || null,
+        // transcript
+        transcriptStatus:        c.transcript_status || "pending",
+        transcriptText:          c.transcript_text || null,
+        transcriptError:         c.transcript_error || null,
+        transcriptionStartedAt:  c.transcription_started_at || null,
+        transcriptionCompletedAt: c.transcription_completed_at || null,
+        // summary
+        summaryStatus:           c.summary_status || null,
+        summaryText:             c.summary_text || null,
+        summaryData:             c.summary_data ? (() => { try { return JSON.parse(c.summary_data); } catch { return null; } })() : null,
       })),
+      total: res.total || 0,
+      page: res.page || 1,
+      totalPages: res.total_pages || 1,
     };
   },
 

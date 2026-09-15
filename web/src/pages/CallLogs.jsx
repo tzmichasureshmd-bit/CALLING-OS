@@ -77,7 +77,7 @@ export default function CallLogs() {
   const filtered = CALL_LOGS.filter((c) => {
     const q = [c.phone, c.contact, c.employee].join(" ").toLowerCase().includes(query.toLowerCase());
     let f = true;
-    if (filter === "Recorded")    f = !!c.recordingUrl;
+    if (filter === "Recorded")    f = c.hasRecording;
     else if (filter !== "All")    f = TYPE_META[c.type]?.label === filter;
     return q && f;
   });
@@ -123,7 +123,11 @@ export default function CallLogs() {
                       <td style={{ padding: "11px 16px", color: "var(--text-secondary)", fontFamily: "Space Grotesk" }}>{formatDuration(c.durationSeconds)}</td>
                       <td style={{ padding: "11px 16px", color: "var(--text-muted)" }}>{c.source}</td>
                       <td style={{ padding: "11px 16px", color: "var(--text-muted)" }}>{c.device}</td>
-                      <td style={{ padding: "11px 16px" }}>{c.recordingUrl ? <Play size={15} color="var(--accent)" /> : <span style={{ color: "var(--text-dim)" }}>—</span>}</td>
+                      <td style={{ padding: "11px 16px" }}>
+                        {c.hasRecording
+                          ? <Play size={15} color="var(--accent)" />
+                          : <span style={{ color: "var(--text-dim)" }}>—</span>}
+                      </td>
                     </tr>
                   );
                 })}
@@ -140,139 +144,243 @@ export default function CallLogs() {
 }
 
 function CallIntelligenceDrawer({ call, onClose }) {
-  const [playing, setPlaying]     = useState(false);
-  const [progress, setProgress]   = useState(0);
-  const [signedUrl, setSignedUrl] = useState(null);
+  const [playing, setPlaying]       = useState(false);
+  const [progress, setProgress]     = useState(0);
+  const [audioDur, setAudioDur]     = useState(0);
+  const [signedUrl, setSignedUrl]   = useState(null);
   const [loadingUrl, setLoadingUrl] = useState(false);
-  const [urlError, setUrlError]   = useState(null);
+  const [urlError, setUrlError]     = useState(null);
+  const [txData, setTxData]         = useState(null);  // live transcript/summary
+  const [loadingTx, setLoadingTx]   = useState(false);
   const audioRef = useRef(null);
 
-  // Reset state when a different call is selected
+  // Reset on call change
   useEffect(() => {
-    setPlaying(false);
-    setProgress(0);
-    setSignedUrl(null);
-    setUrlError(null);
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current = null;
-    }
-  }, [call?.id]);
+    setPlaying(false); setProgress(0); setAudioDur(0);
+    setSignedUrl(null); setUrlError(null); setTxData(null);
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    if (call?.id) loadTxData(call.id);
+  }, [call?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function togglePlay() {
-    if (!call?.id || !call?.recordingUrl) return;
+  async function loadTxData(id) {
+    setLoadingTx(true);
+    try {
+      const res = await import("../api/client.js").then(m => m.default.get(`/transcripts/${id}`));
+      setTxData(res.data);
+    } catch { /* silent — call may not have transcript yet */ }
+    finally { setLoadingTx(false); }
+  }
 
-    // Fetch a fresh signed URL on first play (or if previous expired)
-    if (!signedUrl) {
-      setLoadingUrl(true);
-      setUrlError(null);
-      try {
-        const res = await callsApi.getRecordingUrl(call.id);
-        setSignedUrl(res.signed_url);
-        audioRef.current = new Audio(res.signed_url);
-      } catch {
-        setUrlError("Could not load recording. Try again.");
-        setLoadingUrl(false);
-        return;
-      }
-      setLoadingUrl(false);
-    }
-
-    if (!audioRef.current) return;
-
-    if (playing) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play().catch(() => {
-        setUrlError("Playback failed. The signed URL may have expired.");
-        setSignedUrl(null);
-        audioRef.current = null;
-      });
-      audioRef.current.ontimeupdate = () => {
-        const pct = audioRef.current?.duration
-          ? (audioRef.current.currentTime / audioRef.current.duration) * 100
-          : 0;
-        setProgress(pct);
-      };
-      audioRef.current.onended = () => { setPlaying(false); setProgress(0); };
-    }
-    setPlaying((p) => !p);
+  async function handlePlay() {
+    if (!call?.id || !call?.hasRecording) return;
+    if (playing && audioRef.current) { audioRef.current.pause(); setPlaying(false); return; }
+    if (audioRef.current && signedUrl) { audioRef.current.play(); setPlaying(true); return; }
+    setLoadingUrl(true); setUrlError(null);
+    try {
+      const res = await callsApi.getRecordingUrl(call.id);
+      const audio = new Audio(res.signed_url);
+      audioRef.current = audio;
+      setSignedUrl(res.signed_url);
+      audio.onloadedmetadata = () => setAudioDur(audio.duration || 0);
+      audio.ontimeupdate = () => setProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0);
+      audio.onended = () => { setPlaying(false); setProgress(0); };
+      audio.onerror = () => { setUrlError("Playback failed — signed URL may have expired."); setSignedUrl(null); audioRef.current = null; setPlaying(false); };
+      await audio.play();
+      setPlaying(true);
+    } catch (e) {
+      setUrlError(e?.message || "Could not load recording.");
+    } finally { setLoadingUrl(false); }
   }
 
   if (!call) return null;
   const meta = TYPE_META[call.type] || TYPE_META.rejected;
 
+  // Pipeline steps derived from call fields
+  const recStatus = call.recordingStatus || "not_available";
+  const txStatus  = txData?.transcript_status || call.transcriptStatus;
+  const sumStatus = txData?.summary_status    || call.summaryStatus;
+  const txText    = txData?.transcript_text   || call.transcriptText;
+  const sumText   = txData?.summary_text      || call.summaryText;
+  const sumData   = txData?.summary_data
+    ? (() => { try { return JSON.parse(txData.summary_data); } catch { return null; } })()
+    : call.summaryData;
+
+  const PIPELINE = [
+    { label: "Synced",      done: true,                                    color: "var(--success)" },
+    { label: "Recording",   done: recStatus === "uploaded",                color: recStatus === "uploaded" ? "var(--success)" : recStatus === "not_available" ? "var(--text-dim)" : "var(--warning)" },
+    { label: "Transcribed", done: txStatus === "completed",                color: txStatus === "completed" ? "var(--success)" : txStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
+    { label: "Summarized",  done: sumStatus === "completed",               color: sumStatus === "completed" ? "var(--success)" : sumStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
+  ];
+
+  const fmtDur = (s) => s > 0 ? `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}` : "";
+
   return (
-    <Drawer open={!!call} onClose={onClose} title="Call Intelligence" width={480}>
+    <Drawer open={!!call} onClose={onClose} title="Call Intelligence" width={500}>
+
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
-        <div style={{ width: 46, height: 46, borderRadius: 12, background: meta.color + "1f", color: meta.color, display: "flex", alignItems: "center", justifyContent: "center" }}><meta.icon size={22} /></div>
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:18 }}>
+        <div style={{ width:46, height:46, borderRadius:12, background:meta.color+"1f", color:meta.color, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <meta.icon size={22}/>
+        </div>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>{call.contact}</div>
-          <div style={{ fontSize: 13, color: "var(--accent)" }}>{call.phone}</div>
+          <div style={{ fontSize:16, fontWeight:700, color:"var(--text-primary)", fontFamily:"Space Grotesk" }}>{call.contact}</div>
+          <div style={{ fontSize:13, color:"var(--accent)" }}>{call.phone}</div>
         </div>
       </div>
 
       {/* Detail grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:18 }}>
         <Detail icon={User}     label="Employee" value={call.employee} />
         <Detail icon={Calendar} label="Date"     value={formatDateTime(call.date)} />
-        <Detail label="Type"     value={<span style={{ color: meta.color, fontWeight: 600 }}>{meta.label}</span>} />
+        <Detail label="Type"     value={<span style={{ color:meta.color, fontWeight:600 }}>{meta.label}</span>} />
         <Detail label="Duration" value={formatDuration(call.durationSeconds)} />
         <Detail label="SIM"      value={call.source} />
         <Detail label="Device"   value={call.device} />
       </div>
 
+      {/* Pipeline progress */}
+      <div style={{ marginBottom:18 }}>
+        <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:10 }}>Processing Pipeline</div>
+        <div style={{ display:"flex", gap:0 }}>
+          {PIPELINE.map((p, i) => (
+            <div key={p.label} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", position:"relative" }}>
+              {i > 0 && <div style={{ position:"absolute", top:10, right:"50%", left:"-50%", height:2, background: PIPELINE[i-1].done ? "var(--success)" : "var(--border)", zIndex:0 }}/>}
+              <div style={{ width:22, height:22, borderRadius:11, border:`2px solid ${p.color}`, background: p.done ? p.color : "var(--bg-card)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1, position:"relative" }}>
+                {p.done && <span style={{ color:"#fff", fontSize:11, fontWeight:700 }}>&#10003;</span>}
+              </div>
+              <div style={{ fontSize:9.5, color:p.color, fontWeight:600, marginTop:4, textAlign:"center" }}>{p.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Recording player */}
-      <div style={{ background: "var(--bg-hover)", borderRadius: 12, padding: 14, marginBottom: 18, display: "flex", alignItems: "center", gap: 12 }}>
-        <button
-          onClick={togglePlay}
-          disabled={!call.recordingUrl || loadingUrl}
-          style={{ width: 40, height: 40, borderRadius: 20, border: "none", cursor: call.recordingUrl && !loadingUrl ? "pointer" : "not-allowed", background: call.recordingUrl ? "var(--grad-brand)" : "var(--border)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
-        >
-          {loadingUrl
-            ? <RefreshCw size={16} style={{ animation: "spin 1s linear infinite" }} />
-            : playing ? <Pause size={18} /> : <Play size={18} />}
-        </button>
-        <div style={{ flex: 1 }}>
-          <div style={{ height: 5, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
-            <div style={{ width: `${progress}%`, height: "100%", background: "var(--grad-brand)", transition: "width 0.4s" }} />
-          </div>
-          <div style={{ fontSize: 11.5, color: urlError ? "var(--danger)" : "var(--text-muted)", marginTop: 6 }}>
-            {urlError
-              ? urlError
-              : call.recordingUrl
-                ? (playing ? "Playing…" : "Recording available · click to play")
-                : "No recording for this call"}
+      <div style={{ background:"var(--bg-hover)", borderRadius:12, padding:14, marginBottom:18 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          <button onClick={handlePlay} disabled={!call.hasRecording || loadingUrl}
+            style={{ width:40, height:40, borderRadius:20, border:"none", flexShrink:0,
+              cursor: call.hasRecording && !loadingUrl ? "pointer" : "not-allowed",
+              background: call.hasRecording ? "var(--grad-brand)" : "var(--border)",
+              color:"#fff", display:"flex", alignItems:"center", justifyContent:"center" }}>
+            {loadingUrl
+              ? <RefreshCw size={16} style={{ animation:"spin 1s linear infinite" }}/>
+              : playing ? <Pause size={18}/> : <Play size={18}/>}
+          </button>
+          <div style={{ flex:1 }}>
+            <div style={{ height:5, background:"var(--border)", borderRadius:3, overflow:"hidden" }}>
+              <div style={{ width:`${progress}%`, height:"100%", background:"var(--grad-brand)", transition:"width 0.4s" }}/>
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", marginTop:5 }}>
+              <div style={{ fontSize:11.5, color: urlError ? "var(--danger)" : "var(--text-muted)" }}>
+                {urlError ? urlError
+                  : !call.hasRecording ? `Recording ${recStatus === "not_available" ? "not available" : recStatus}`
+                  : playing ? "Playing…" : "Click to play recording"}
+              </div>
+              {audioDur > 0 && <div style={{ fontSize:11, color:"var(--text-dim)" }}>{fmtDur(audioDur * progress / 100)} / {fmtDur(audioDur)}</div>}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* AI summary */}
-      <div style={{ marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <Sparkles size={15} color="var(--accent-2)" />
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>AI Summary</span>
-          <Badge tone="violet">Beta</Badge>
+      {/* Transcript */}
+      {(txStatus || loadingTx) && (
+        <div style={{ marginBottom:18 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:10, display:"flex", alignItems:"center", gap:8 }}>
+            <Sparkles size={13} color="var(--accent-2)"/> Transcript
+            {txStatus === "processing" && <span style={{ fontSize:10, color:"var(--accent)", fontWeight:600 }}>Processing…</span>}
+            {txStatus === "completed"  && <span style={{ fontSize:10, color:"var(--success)", fontWeight:600 }}>Done</span>}
+            {txStatus === "failed"     && <span style={{ fontSize:10, color:"var(--danger)",  fontWeight:600 }}>Failed</span>}
+          </div>
+          {txText ? (
+            <div style={{ fontSize:13, color:"var(--text-secondary)", lineHeight:1.6, background:"var(--bg-hover)", borderRadius:10, padding:"10px 12px", border:"1px solid var(--border)", maxHeight:160, overflowY:"auto", whiteSpace:"pre-wrap" }}>
+              {txText}
+            </div>
+          ) : txStatus === "processing" ? (
+            <div style={{ fontSize:13, color:"var(--text-muted)" }}>Whisper is transcribing… check back in a moment.</div>
+          ) : txStatus === "pending" ? (
+            <div style={{ fontSize:13, color:"var(--text-muted)" }}>Transcription queued.</div>
+          ) : null}
         </div>
-        <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.55, margin: 0 }}>
-          AI transcription and call scoring will appear here once the recording is processed.
-        </p>
+      )}
+
+      {/* AI Summary */}
+      <div style={{ marginBottom:18 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+          <Sparkles size={15} color="var(--accent-2)"/>
+          <span style={{ fontSize:13, fontWeight:600, color:"var(--text-primary)", fontFamily:"Space Grotesk" }}>AI Summary</span>
+          {sumStatus === "completed"  && <Badge tone="success">Done</Badge>}
+          {sumStatus === "processing" && <Badge tone="info">Processing</Badge>}
+          {sumStatus === "failed"     && <Badge tone="danger">Failed</Badge>}
+          {!sumStatus && txStatus === "completed" && <Badge tone="neutral">Pending</Badge>}
+        </div>
+        {sumText ? (
+          <div style={{ fontSize:13, color:"var(--text-secondary)", lineHeight:1.6, marginBottom:10 }}>{sumText}</div>
+        ) : null}
+        {sumData && (
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {sumData.discussion_points?.length > 0 && (
+              <SumSection title="Discussion" items={sumData.discussion_points}/>
+            )}
+            {sumData.follow_up_actions?.length > 0 && (
+              <SumSection title="Follow-up" items={sumData.follow_up_actions}/>
+            )}
+            {sumData.suggested_next_step && (
+              <div style={{ fontSize:12.5, color:"var(--text-secondary)" }}>
+                <span style={{ fontWeight:600, color:"var(--text-primary)" }}>Next step: </span>
+                {sumData.suggested_next_step}
+              </div>
+            )}
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:4 }}>
+              {sumData.sentiment && (
+                <span style={{ fontSize:11, padding:"2px 8px", borderRadius:999,
+                  background: sumData.sentiment==="positive" ? "var(--success-soft)" : sumData.sentiment==="negative" ? "var(--danger-soft)" : "var(--bg-hover)",
+                  color: sumData.sentiment==="positive" ? "var(--success)" : sumData.sentiment==="negative" ? "var(--danger)" : "var(--text-muted)",
+                  fontWeight:600 }}>{sumData.sentiment}</span>
+              )}
+              {sumData.lead_quality && (
+                <span style={{ fontSize:11, padding:"2px 8px", borderRadius:999,
+                  background: sumData.lead_quality==="hot" ? "var(--danger-soft)" : sumData.lead_quality==="warm" ? "var(--warning-soft)" : "var(--bg-hover)",
+                  color: sumData.lead_quality==="hot" ? "var(--danger)" : sumData.lead_quality==="warm" ? "var(--warning)" : "var(--text-muted)",
+                  fontWeight:600 }}>{sumData.lead_quality}</span>
+              )}
+              {sumData.keywords?.slice(0,6).map(k => (
+                <span key={k} style={{ fontSize:10.5, padding:"2px 7px", borderRadius:999, background:"var(--accent-soft)", color:"var(--accent)" }}>{k}</span>
+              ))}
+            </div>
+          </div>
+        )}
+        {!sumStatus && !txStatus && (
+          <p style={{ fontSize:13, color:"var(--text-muted)", lineHeight:1.55, margin:0 }}>
+            AI summary will appear here once the call recording is transcribed.
+          </p>
+        )}
       </div>
 
       {/* Next action */}
-      <div style={{ background: "var(--grad-brand-soft)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <Target size={15} color="var(--accent)" />
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Next Best Action</span>
+      <div style={{ background:"var(--grad-brand-soft)", border:"1px solid var(--border)", borderRadius:12, padding:14 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+          <Target size={15} color="var(--accent)"/>
+          <span style={{ fontSize:13, fontWeight:600, color:"var(--text-primary)" }}>Actions</span>
         </div>
-        <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           <Button icon={Calendar}>Schedule follow-up</Button>
           <Button variant="outline" icon={MessageSquare}>WhatsApp</Button>
         </div>
       </div>
     </Drawer>
+  );
+}
+
+function SumSection({ title, items }) {
+  return (
+    <div>
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", marginBottom:4 }}>{title}</div>
+      <ul style={{ margin:0, paddingLeft:16 }}>
+        {items.map((item, i) => (
+          <li key={i} style={{ fontSize:12.5, color:"var(--text-secondary)", marginBottom:2 }}>{item}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

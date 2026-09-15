@@ -11,8 +11,6 @@ import { palette, gradientBrand, useTheme } from "../../src/theme";
 import { AppHeader } from "../../src/components";
 import { getRealCallLog } from "../../src/callLogService";
 import { getAllCallStatuses, STATUS } from "../../src/callStatusStore";
-import { useAuth } from "../../src/AuthContext";
-import { api } from "../../src/api";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const NOTES_KEY = "callos_call_notes";
@@ -99,7 +97,7 @@ async function saveNote(phone, data) {
 }
 
 // ── Progress Sheet ────────────────────────────────────────────────────────────
-function ProgressSheet({ visible, onClose, call, theme }) {
+function ProgressSheet({ visible, onClose, call, theme, onNotesUpdated }) {
   const [status, setStatus] = useState(null);
   const [notes,  setNotes]  = useState("");
   const [saving, setSaving] = useState(false);
@@ -120,8 +118,13 @@ function ProgressSheet({ visible, onClose, call, theme }) {
     if (!call) return;
     setSaving(true);
     await saveNote(call.phone, { status, notes, phone: call.phone, name: call.name });
-    setSaving(false); setSaved(true);
-    setTimeout(() => { setSaved(false); onClose(); }, 700);
+    setSaving(false);
+    setSaved(true);
+    // Push updated map to parent immediately — badge on row updates without closing
+    const updated = await loadAllNotes().catch(() => ({}));
+    onNotesUpdated(updated);
+    // Reset saved indicator after 1.5s but keep sheet open for further editing
+    setTimeout(() => setSaved(false), 1500);
   }
 
   if (!call) return null;
@@ -194,18 +197,26 @@ function ProgressSheet({ visible, onClose, call, theme }) {
                 padding:12, fontSize:13.5, color:theme.primary, minHeight:100, textAlignVertical:"top", marginBottom:20 }}
             />
 
-            {/* Save */}
-            <Pressable onPress={handleSave} disabled={saving || saved}>
-              <LinearGradient colors={saved ? [palette.emerald, palette.emerald] : gradientBrand}
-                start={{x:0,y:0}} end={{x:1,y:0}}
-                style={{ height:50, borderRadius:13, alignItems:"center", justifyContent:"center", flexDirection:"row", gap:8 }}>
-                {saving
-                  ? <ActivityIndicator color="#fff"/>
-                  : saved
-                    ? <><Ionicons name="checkmark" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Saved!</Text></>
-                    : <><Ionicons name="save-outline" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Save Progress</Text></>}
-              </LinearGradient>
-            </Pressable>
+            {/* Save + Done row */}
+            <View style={{ flexDirection:"row", gap:10 }}>
+              <Pressable onPress={handleSave} disabled={saving} style={{ flex:1 }}>
+                <LinearGradient
+                  colors={saved ? [palette.emerald, palette.emerald] : gradientBrand}
+                  start={{x:0,y:0}} end={{x:1,y:0}}
+                  style={{ height:50, borderRadius:13, alignItems:"center", justifyContent:"center", flexDirection:"row", gap:8 }}>
+                  {saving
+                    ? <ActivityIndicator color="#fff"/>
+                    : saved
+                      ? <><Ionicons name="checkmark" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Saved!</Text></>
+                      : <><Ionicons name="save-outline" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Save Progress</Text></>}
+                </LinearGradient>
+              </Pressable>
+              <Pressable onPress={onClose}
+                style={{ height:50, paddingHorizontal:18, borderRadius:13, borderWidth:1.5,
+                  borderColor:theme.border, alignItems:"center", justifyContent:"center" }}>
+                <Text style={{ fontSize:14, fontWeight:"700", color:theme.muted }}>Done</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -354,46 +365,12 @@ function DetailsSheet({ visible, onClose, call, allCalls, syncedIds, theme }) {
   );
 }
 
-// ── Dial Pad ──────────────────────────────────────────────────────────────────
-function DialPad({ visible, onClose, theme }) {
-  const [num, setNum] = useState("");
-  const KEYS = ["1","2","3","4","5","6","7","8","9","*","0","#"];
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={{ flex:1, justifyContent:"flex-end", backgroundColor:"rgba(0,0,0,0.6)" }}>
-        <View style={{ backgroundColor:theme.bg, borderTopLeftRadius:28, borderTopRightRadius:28, padding:24, paddingBottom:40 }}>
-          <View style={{ flexDirection:"row", alignItems:"center", justifyContent:"center", marginBottom:20, minHeight:52 }}>
-            <Text style={{ fontSize:32, fontWeight:"700", color:theme.primary, letterSpacing:3, flex:1, textAlign:"center" }}>{num||" "}</Text>
-            {num.length>0 && <Pressable onPress={()=>setNum(n=>n.slice(0,-1))} style={{padding:8}}><Ionicons name="backspace-outline" size={24} color={theme.muted}/></Pressable>}
-          </View>
-          <View style={{ flexDirection:"row", flexWrap:"wrap", justifyContent:"center", gap:16, marginBottom:24 }}>
-            {KEYS.map(k=>(
-              <Pressable key={k} onPress={()=>setNum(n=>n+k)} style={{ width:72, height:72, borderRadius:36, backgroundColor:theme.surface, borderWidth:1, borderColor:theme.border, alignItems:"center", justifyContent:"center" }}>
-                <Text style={{ fontSize:24, fontWeight:"600", color:theme.primary }}>{k}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <View style={{ flexDirection:"row", justifyContent:"center", gap:20 }}>
-            <Pressable onPress={onClose} style={{ width:60, height:60, borderRadius:30, backgroundColor:theme.surface, borderWidth:1, borderColor:theme.border, alignItems:"center", justifyContent:"center" }}>
-              <Ionicons name="close" size={26} color={theme.muted}/>
-            </Pressable>
-            <Pressable onPress={()=>{if(!num)return;onClose();Linking.openURL(`tel:${num.replace(/\s/g,"")}`);}} disabled={!num}>
-              <LinearGradient colors={gradientBrand} style={{ width:72, height:72, borderRadius:36, alignItems:"center", justifyContent:"center" }}>
-                <Ionicons name="call" size={28} color="#fff"/>
-              </LinearGradient>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
 // ── Call Row ──────────────────────────────────────────────────────────────────
-const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteStatus, theme, shadowSoft }) => {
+const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteData, theme, shadowSoft }) => {
   const meta = TYPE[c.type] || TYPE.incoming;
   const open = expanded === c.id;
-  const ns   = STATUSES.find(s => s.key === noteStatus);
+  const ns   = STATUSES.find(s => s.key === noteData?.status);
+  const hasNotes = noteData?.notes && noteData.notes.trim().length > 0;
 
   return (
     <Pressable onPress={onToggle}
@@ -443,6 +420,13 @@ const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteStatus, the
             )}
           </View>
 
+          {/* Notes preview */}
+          {hasNotes && (
+            <Text numberOfLines={1} style={{ fontSize:11.5, color:theme.muted, marginTop:4, fontStyle:"italic" }}>
+              {noteData.notes}
+            </Text>
+          )}
+
           {/* Expanded actions */}
           {open && (
             <View style={{ flexDirection:"row", justifyContent:"space-around", marginTop:12,
@@ -480,7 +464,6 @@ export default function Calls() {
   const [page,         setPage]         = useState(1);
   const [loading,      setLoading]      = useState(true);
   const [refreshing,   setRefreshing]   = useState(false);
-  const [dialOpen,     setDialOpen]     = useState(false);
   const [progressCall, setProgressCall] = useState(null);
   const [detailsCall,  setDetailsCall]  = useState(null);
   const [notesMap,     setNotesMap]     = useState({});
@@ -543,6 +526,12 @@ export default function Calls() {
   useEffect(() => { load(rangeDays); }, [rangeDays]);
   useEffect(() => { loadAllNotes().then(setNotesMap); }, []);
 
+  // Refresh notes map whenever progressCall sheet closes
+  const handleProgressClose = useCallback(() => {
+    setProgressCall(null);
+    loadAllNotes().then(setNotesMap);
+  }, []);
+
   const filtered = useMemo(() => {
     let list = allCalls;
     if      (chip === "In")       list = list.filter(c => c.type === "incoming");
@@ -589,7 +578,7 @@ export default function Calls() {
         onToggle={() => setExpanded(expanded === item.id ? null : item.id)}
         onProgress={c => setProgressCall(c)}
         onDetails={c => setDetailsCall(c)}
-        noteStatus={notesMap[item.phone]?.status || null}
+        noteData={notesMap[item.phone] || null}
         theme={theme}
         shadowSoft={shadowSoft}
       />
@@ -696,18 +685,12 @@ export default function Calls() {
         />
       )}
 
-      {/* Dial FAB */}
-      <Pressable onPress={() => setDialOpen(true)} style={{ position:"absolute", bottom:100, right:20, elevation:8 }}>
-        <LinearGradient colors={gradientBrand} style={{ width:58, height:58, borderRadius:29, alignItems:"center", justifyContent:"center" }}>
-          <Ionicons name="keypad-outline" size={24} color="#fff"/>
-        </LinearGradient>
-      </Pressable>
-
-      <DialPad visible={dialOpen} onClose={() => setDialOpen(false)} theme={theme}/>
+      {/* Dial FAB removed */}
 
       <ProgressSheet
         visible={!!progressCall}
-        onClose={() => { setProgressCall(null); loadAllNotes().then(setNotesMap); }}
+        onClose={handleProgressClose}
+        onNotesUpdated={(updated) => setNotesMap(updated)}
         call={progressCall}
         theme={theme}
       />

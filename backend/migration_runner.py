@@ -18,6 +18,7 @@ MIGRATIONS = [
     "migrations/004_missing_columns.sql",
     "migrations/005_superadmin_tables.sql",
     "migrations/006_device_reconnect.sql",
+    "migrations/008_recording_transcript_summary.sql",
 ]
 
 
