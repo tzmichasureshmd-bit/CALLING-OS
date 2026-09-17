@@ -40,8 +40,8 @@ export const callsApi = {
   list: (params) => client.get("/calls", { params }).then((r) => r.data),
   get: (id) => client.get(`/calls/${id}`).then((r) => r.data),
   sync: (payload) => client.post("/calls/sync", payload).then((r) => r.data),
-  // Get a short-lived signed URL for recording playback (ADMIN only)
   getRecordingUrl: (callId) => client.get(`/calls/${callId}/recording-url`).then((r) => r.data),
+  updateNote: (callId, status, notes) => client.patch(`/calls/${callId}/note`, { call_status: status, notes }).then((r) => r.data),
 };
 
 export const analyticsApi = {

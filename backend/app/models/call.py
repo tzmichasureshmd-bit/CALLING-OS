@@ -69,7 +69,13 @@ class Call(Base):
 
     # Sync
     sync_status                 = Column(String(20), default="synced")
+    sync_confirmed_at           = Column(DateTime, nullable=True)   # set when backend confirms insert/duplicate
     created_at                  = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at                  = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                                         onupdate=lambda: datetime.now(timezone.utc))
+
+    # Salesperson progress (written by mobile, read by web)
+    notes                       = Column(String, nullable=True)
 
     organization = relationship("Organization", back_populates="calls")
     employee     = relationship("Employee",     back_populates="calls")

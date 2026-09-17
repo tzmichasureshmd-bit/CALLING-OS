@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,7 +11,7 @@ from .database import engine, Base
 from .routers import (
     auth_router, employees_router, devices_router, calls_router, analytics_router,
     organization_router, leads_router, opportunities_router, excluded_numbers_router,
-    billing_router, transcripts_router, superadmin_router, audit_router,
+    billing_router, transcripts_router, superadmin_router, audit_router, call_notes_router,
 )
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -111,6 +112,44 @@ async def startup():
     start_offline_watcher()
     logger.info("Device offline watcher started.")
 
+    # ── Stuck-transcription recovery ────────────────────────────────────────────────────────────────
+    # Calls stuck in transcript_status='processing' with transcription_started_at
+    # older than 10 minutes were interrupted by a previous crash or restart.
+    # Reset them to 'failed' so they can be retried. Recent active jobs are untouched.
+    # This block must never raise — a DB error here must not prevent startup.
+    try:
+        from datetime import timedelta
+        from .database import SessionLocal as _SL
+        from .models import Call as _Call
+        _cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+        _db = _SL()
+        try:
+            _stuck = (
+                _db.query(_Call)
+                .filter(
+                    _Call.transcript_status == "processing",
+                    _Call.transcription_started_at < _cutoff,
+                )
+                .all()
+            )
+            if _stuck:
+                for _c in _stuck:
+                    _c.transcript_status = "failed"
+                    _c.transcript_error = (
+                        "Transcription interrupted or timed out. Please retry."
+                    )
+                _db.commit()
+                logger.warning(
+                    "Startup recovery: reset %d stuck transcription(s) to 'failed'.",
+                    len(_stuck),
+                )
+            else:
+                logger.info("Startup recovery: no stuck transcriptions found.")
+        finally:
+            _db.close()
+    except Exception as _exc:
+        logger.error("Startup recovery error (non-fatal): %s", _exc)
+
     if settings.SEED_DEMO_DATA:
         from .seed import seed_demo_data
         from .database import SessionLocal
@@ -169,6 +208,7 @@ app.include_router(billing_router,          prefix=prefix)
 app.include_router(transcripts_router,      prefix=prefix)
 app.include_router(superadmin_router,       prefix=prefix)
 app.include_router(audit_router,            prefix=prefix)
+app.include_router(call_notes_router,       prefix=prefix)
 
 
 @app.get("/", tags=["root"])

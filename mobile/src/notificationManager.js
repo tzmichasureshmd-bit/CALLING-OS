@@ -315,7 +315,7 @@ export async function notifyCallSyncFailed(call, errorMsg) {
     id:            `syncfail-${call.client_event_id}`,
     type:          "sync_failed",
     title:         "Sync Failed",
-    message:       "Call synchronization failed. Will retry automatically.",
+    message:       "Call synchronization failed. Check your connection and try again.",
     clientEventId: call.client_event_id,
   }).catch(() => {});
 
@@ -324,7 +324,7 @@ export async function notifyCallSyncFailed(call, errorMsg) {
     _notifIdentifier(call.client_event_id),
     {
       title: "Call sync failed",
-      body:  "Saved locally · will retry automatically when connected",
+      body:  "Will retry automatically when connected",
       data:  { clientEventId: call.client_event_id, screen: "sync_health" },
       android: { publicVersion: { title: "CallNexa", body: "Call sync failed" } },
     },
@@ -342,7 +342,7 @@ export async function notifyWaitingForConnection(call) {
   await _schedule(
     _notifIdentifier(call.client_event_id),
     {
-      title: "Call saved · waiting for internet",
+      title: "Call detected · waiting for internet",
       body:  "Will sync automatically when connection is restored",
       data:  { clientEventId: call.client_event_id, screen: "sync_health" },
       android: { publicVersion: { title: "CallNexa", body: "Waiting for internet" } },

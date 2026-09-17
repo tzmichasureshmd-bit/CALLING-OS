@@ -73,7 +73,11 @@ class CallOut(BaseModel):
     summary_status: Optional[str] = None
     summary_text: Optional[str] = None
     summary_data: Optional[str] = None
+    sync_status: str = "synced"
+    sync_confirmed_at: Optional[datetime] = None
+    notes: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     # Joined fields
     employee_name: Optional[str] = None
     device_model: Optional[str] = None

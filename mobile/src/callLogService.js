@@ -3,16 +3,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { readCallLog, readSimInfo } from "./nativeModules";
 import { findSimForCall, buildCallSource } from "./simInventoryService";
 import { BASE_URL } from "./api";
-import { upsertCallStatus, STATUS } from "./callStatusStore";
 
 // ── Selected SIM keys (must match simSelectionService.js) ─────────────────────
 const SELECTED_SUB_ID_KEY = "callos_selected_subscription_id";
 const SELECTED_SLOT_KEY   = "callos_selected_sim_slot";
 
-/**
- * Returns the employee's selected SIM identity.
- * Primary: subscriptionId. Fallback: slot (0-indexed Android slot).
- */
 export async function getSelectedSimIdentity() {
   const subId = await AsyncStorage.getItem(SELECTED_SUB_ID_KEY).catch(() => null);
   const slot  = await AsyncStorage.getItem(SELECTED_SLOT_KEY).catch(() => null);
@@ -22,44 +17,26 @@ export async function getSelectedSimIdentity() {
   };
 }
 
-/**
- * Returns true if a call belongs to the selected SIM.
- * If no SIM is selected (null), all calls are eligible.
- * If Android did not expose SIM identity for the call, returns null (unknown).
- */
 function _callMatchesSelectedSim(call, selectedSubId, selectedSlot) {
-  // No SIM selected → all calls eligible
   if (selectedSubId === null && selectedSlot === null) return true;
-
-  // Primary: subscriptionId match
   if (selectedSubId !== null && call.subscription_id !== null) {
     return call.subscription_id === selectedSubId;
   }
-
-  // Fallback: slot match (sim_slot is 1-indexed backend value)
   if (selectedSlot !== null && call.sim_slot !== null) {
-    return call.sim_slot === selectedSlot + 1; // sim_slot is 1-indexed
+    return call.sim_slot === selectedSlot + 1;
   }
-
-  // SIM identity unavailable for this call — cannot confirm match
-  return null; // caller decides policy
+  return null;
 }
 
-// -- Storage keys
-const LAST_SYNC_KEY    = "callos_last_sync_ts";
-const SYNCED_IDS_KEY   = "callos_synced_ids";
-const UPLOAD_QUEUE_KEY = "callos_upload_queue";
-
-// -- Android CallLog type -> CallNexa call_type
-// ALL types mapped. Zero-duration calls are NEVER filtered out.
+// ── Android CallLog type -> call_type ─────────────────────────────────────────
 const TYPE_MAP = {
-  "1": "incoming",  // INCOMING answered
-  "2": "outgoing",  // OUTGOING (answered OR unanswered)
-  "3": "missed",    // MISSED   -- duration=0, MUST sync
-  "4": "incoming",  // VOICEMAIL
-  "5": "rejected",  // REJECTED by user -- duration=0, MUST sync
-  "6": "rejected",  // BLOCKED
-  "7": "incoming",  // ANSWERED_EXTERNALLY
+  "1": "incoming",
+  "2": "outgoing",
+  "3": "missed",
+  "4": "incoming",
+  "5": "rejected",
+  "6": "rejected",
+  "7": "incoming",
 };
 
 function _deriveCallStatus(callType, durationSec) {
@@ -70,30 +47,22 @@ function _deriveCallStatus(callType, durationSec) {
   return "unknown";
 }
 
-// -- Recording file search
+// ── Recording file search ─────────────────────────────────────────────────────
 const RECORDING_SEARCH_DIRS = [
-  // Stock Android
   "file:///storage/emulated/0/Recordings/Call/",
   "file:///storage/emulated/0/Recordings/",
   "file:///storage/emulated/0/CallRecordings/",
   "file:///storage/emulated/0/Call/",
-  // Samsung
   "file:///storage/emulated/0/Record/Call/",
   "file:///storage/emulated/0/PhoneRecord/",
-  // Xiaomi / MIUI
   "file:///storage/emulated/0/MIUI/sound_recorder/call_rec/",
   "file:///storage/emulated/0/Xiaomi/sound_recorder/call_rec/",
   "file:///storage/emulated/0/Sounds/CallRecord/",
-  // Vivo
   "file:///storage/emulated/0/Vivo/CallRecord/",
-  // OPPO / ColorOS / Realme
   "file:///storage/emulated/0/ColorOS/Recording/",
   "file:///storage/emulated/0/DCIM/Call Recordings/",
-  // Huawei
   "file:///storage/emulated/0/Sounds/",
-  // OnePlus
   "file:///storage/emulated/0/OnePlus/CallRecord/",
-  // Generic fallback
   "file:///storage/emulated/0/Android/data/com.android.phone/files/",
 ];
 const RECORDING_EXTENSIONS = ["mp3", "mp4", "m4a", "aac", "wav", "3gp", "amr", "ogg"];
@@ -102,19 +71,12 @@ const RECORDING_MIME_MAP = {
   aac: "audio/aac", wav: "audio/wav", "3gp": "audio/3gpp",
   amr: "audio/amr", ogg: "audio/ogg",
 };
-const MIN_RECORDING_BYTES = 1024;       // 1 KB minimum — reject empty/corrupt files
-const MATCH_WINDOW_SEC    = 180;        // 3-minute window — recording apps write late
+const MIN_RECORDING_BYTES = 1024;
+const MATCH_WINDOW_SEC    = 180;
 
-/**
- * Find a real recording file for a call.
- * Returns { path, mimeType, fileSize } or null.
- * Validates: exists, readable, size >= 1KB, valid extension.
- * Never returns a fake or zero-byte file.
- */
 async function _findRecordingFile(startMs, phoneNumber, durationSec) {
   try {
     const startSec = Math.floor(startMs / 1000);
-    // End of call + buffer: recording finishes writing after call ends
     const endSec = startSec + (durationSec || 0) + MATCH_WINDOW_SEC;
     const digits = phoneNumber && phoneNumber !== "unknown"
       ? phoneNumber.replace(/\D/g, "").slice(-7)
@@ -131,30 +93,25 @@ async function _findRecordingFile(startMs, phoneNumber, durationSec) {
           try {
             const fileInfo = await FileSystem.getInfoAsync(dir + filename, { md5: false });
             if (!fileInfo.exists) continue;
-            // Validate file size
             if (!fileInfo.size || fileInfo.size < MIN_RECORDING_BYTES) continue;
-            // Match by modification time: file must have been written during/after the call
             if (fileInfo.modificationTime) {
               const fileSec = Math.floor(fileInfo.modificationTime);
               if (fileSec >= startSec && fileSec <= endSec) {
                 return { path: dir + filename, mimeType: RECORDING_MIME_MAP[ext] || "audio/mp4", fileSize: fileInfo.size };
               }
             }
-            // Match by phone number digits in filename
             if (digits && digits.length >= 7 && filename.includes(digits)) {
               return { path: dir + filename, mimeType: RECORDING_MIME_MAP[ext] || "audio/mp4", fileSize: fileInfo.size };
             }
           } catch { /* skip unreadable file */ }
         }
-      } catch { /* dir not accessible — skip */ }
+      } catch { /* dir not accessible */ }
     }
   } catch { /* silent */ }
   return null;
 }
 
-// -- TASK 7: Core normalizer
-// Never filters zero-duration calls. Preserves Android _id (TASK 8).
-// Full diagnostic logging (TASK 12).
+// ── Core normalizer ───────────────────────────────────────────────────────────
 async function _readAndNormalize(limitDays) {
   console.log("[CALLLOG] provider query started -- last " + limitDays + " days");
   const raw = await readCallLog(limitDays);
@@ -169,7 +126,6 @@ async function _readAndNormalize(limitDays) {
   let skipped = 0;
 
   for (const c of raw) {
-    // Android _id is the primary identifier -- TASK 8
     const androidId = c.id || c._id;
     if (!androidId) { skipped++; continue; }
     if (!c.date)    { skipped++; continue; }
@@ -177,7 +133,6 @@ async function _readAndNormalize(limitDays) {
     const startMs = parseInt(c.date, 10);
     if (isNaN(startMs) || startMs <= 0) { skipped++; continue; }
 
-    // duration=0 is VALID -- NEVER skip (missed/rejected always 0)
     const durationSec = Math.max(0, parseInt(c.duration, 10) || 0);
     const startISO    = new Date(startMs).toISOString();
     const endISO      = durationSec > 0 ? new Date(startMs + durationSec * 1000).toISOString() : null;
@@ -190,7 +145,7 @@ async function _readAndNormalize(limitDays) {
     const source         = await buildCallSource(simSlotAndroid, subscriptionId);
 
     const entry = {
-      client_event_id:     "android-" + androidId,  // TASK 8: stable collision-safe ID
+      client_event_id:     "android-" + androidId,
       phone_number:        c.number || "unknown",
       contact_name:        c.name || c.cachedName || null,
       call_type:           callType,
@@ -210,7 +165,7 @@ async function _readAndNormalize(limitDays) {
 
     if (__DEV__) {
       console.log(
-        "[CALLLOG] id=" + entry.client_event_id +
+        "[CALL_DETECTED] id=" + entry.client_event_id +
         " type=" + callType + "(" + c.type + ")" +
         " status=" + callStatus +
         " dur=" + durationSec + "s" +
@@ -221,247 +176,124 @@ async function _readAndNormalize(limitDays) {
   }
 
   if (skipped > 0) console.warn("[CALLLOG] skipped " + skipped + " records (missing id/date)");
-  console.log("[CALLLOG] new calls mapped = " + results.length);
+  console.log("[CALLLOG] normalized calls = " + results.length);
   return results;
 }
 
-// -- TASK 7: Public API
+// ── Public API ────────────────────────────────────────────────────────────────
 
-/** Initial reconciliation -- 90 days. Used on first login and app-start (TASK 10). */
 export async function getRealCallLog(limitDays = 90) {
   return _readAndNormalize(limitDays);
 }
 
-/** Recent window -- last 2 hours. Used for normal foreground polling (TASK 7). */
 export async function getRecentCalls() {
-  return _readAndNormalize(2 / 24);
+  return _readAndNormalize(1); // last 24 hours — covers instant/foreground sync modes
 }
 
-/** Calls since a specific timestamp (ms). Used for incremental sync. */
 export async function getCallsSince(sinceMs) {
   const days = Math.max(0.1, Math.min((Date.now() - sinceMs) / (24 * 60 * 60 * 1000) + 0.1, 90));
   const all = await _readAndNormalize(days);
   return all.filter((c) => c._start_ms >= sinceMs);
 }
 
-/** Calls in last N days. */
 export async function getCallsLastDays(days) {
   return _readAndNormalize(days);
 }
 
-/** Latest Android call log _id -- used for change detection (TASK 9). */
 export async function getLatestCallLogId() {
   const calls = await _readAndNormalize(1);
   return calls.length ? (calls[0]._android_id || null) : null;
 }
 
-/** Full diagnostic -- used by diagnostic screen (TASK 5/6). */
 export async function getCallLogDiagnostics() {
   const { runCallLogComparison } = require("./callLogDiagnostic");
   return runCallLogComparison(7);
 }
 
-// -- TASK 9: Sliding-window -- get unsynced calls
-// Re-reads last 7 days. Filters out already-confirmed-synced IDs.
-// Applies selected-SIM filter: only calls from the employee's chosen SIM.
-// Server deduplicates by client_event_id so re-sending is safe.
-export async function getNewCallsSinceLastSync() {
-  const all = await getRealCallLog(7);
-  if (!all.length) return [];
-  const syncedSet = await _getSyncedIds();
+/**
+ * Apply SIM filter to a list of normalized calls.
+ * Returns only calls matching the employee's selected SIM.
+ * No local storage read/write — pure filter.
+ */
+export async function applySimFilter(calls) {
   const { subscriptionId: selSubId, slot: selSlot } = await getSelectedSimIdentity();
+  if (selSubId === null && selSlot === null) return calls;
 
-  const unsync = [];
+  const kept = [];
   let skippedWrongSim = 0, skippedUnknownSim = 0;
 
-  for (const c of all) {
-    if (syncedSet.has(c.client_event_id)) continue;
+  for (const c of calls) {
     const match = _callMatchesSelectedSim(c, selSubId, selSlot);
     if (match === false) { skippedWrongSim++; continue; }
-    if (match === null)  { skippedUnknownSim++; } // include with unknown SIM tag
-    unsync.push(c);
+    if (match === null)  { skippedUnknownSim++; }
+    kept.push(c);
   }
 
   if (skippedWrongSim > 0 || skippedUnknownSim > 0) {
     console.log(
-      "[CALLLOG] SIM filter: kept=" + unsync.length +
+      "[SIM_FILTER_PASSED] kept=" + kept.length +
       " wrong_sim=" + skippedWrongSim +
       " unknown_sim=" + skippedUnknownSim +
       " selected_sub=" + (selSubId || "none") +
       " selected_slot=" + (selSlot !== null ? selSlot : "none")
     );
   }
-  console.log("[CALLLOG] queued calls = " + unsync.length + " (of " + all.length + " total in 7d window)");
-  return unsync;
+  return kept;
 }
 
-// -- Synced ID set
-
-async function _getSyncedIds() {
-  try {
-    const raw = await AsyncStorage.getItem(SYNCED_IDS_KEY);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
-  } catch {
-    return new Set();
-  }
-}
-
-async function _addSyncedIds(ids) {
-  try {
-    const existing = await _getSyncedIds();
-    ids.forEach((id) => existing.add(id));
-    const arr = Array.from(existing);
-    const trimmed = arr.length > 5000 ? arr.slice(arr.length - 5000) : arr;
-    await AsyncStorage.setItem(SYNCED_IDS_KEY, JSON.stringify(trimmed));
-  } catch { /* non-critical */ }
-}
-
-export async function markCallsSynced(calls) {
-  const ids = calls.map((c) => c.client_event_id).filter(Boolean);
-  if (ids.length) {
-    await _addSyncedIds(ids);
-    await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
-    console.log("[CALLLOG] sync confirmed = " + ids.length + " calls marked synced");
-    // Update callStatusStore so Sync Health shows real numbers
-    await Promise.all(calls.map((c) =>
-      upsertCallStatus(c.client_event_id, {
-        sync_status:      STATUS.SYNCED,
-        phone_number:     c.phone_number,
-        contact_name:     c.contact_name || null,
-        call_type:        c.call_type,
-        duration_seconds: c.duration_seconds,
-        start_time:       c.start_time,
-      }).catch(() => {})
-    ));
-  }
-}
-
-export async function markSyncComplete() {
-  await AsyncStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
-}
-
-// -- Recording upload queue
-
-export async function getUploadQueue() {
-  try {
-    const q = await AsyncStorage.getItem(UPLOAD_QUEUE_KEY);
-    return q ? JSON.parse(q) : [];
-  } catch {
-    return [];
-  }
-}
-
-export async function saveUploadQueue(queue) {
-  await AsyncStorage.setItem(UPLOAD_QUEUE_KEY, JSON.stringify(queue));
-}
+// ── Recording helpers (no local queue — used by syncService directly) ─────────
 
 /**
  * Deferred recording check — runs in background, never blocks sync cycle.
- * Reads the live queue each time to avoid race conditions (fixes Bug 11).
- * Bounded retries: max 3 attempts with increasing delays.
+ * Returns { path, mimeType, fileSize } or null after up to 3 attempts.
  */
-async function _checkRecordingDeferred(c) {
+export async function findRecordingForCall(c) {
   const startMs = c._start_ms || new Date(c.start_time).getTime();
   const phone   = c._raw_number || c.phone_number;
   const dur     = c.duration_seconds || 0;
 
-  // Mark as CHECKING
-  await upsertCallStatus(c.client_event_id, {
-    recording_status: STATUS.RECORDING_CHECK,
-  }).catch(() => {});
+  console.log(`[RECORDING_DETECTION_STARTED] client_event_id=${c.client_event_id} dur=${dur}s ts=${Date.now()}`);
 
-  // Attempt detection with increasing delays (0s, 10s, 30s)
-  // Recording apps may finish writing 30–120s after call ends
   const delays = [0, 10000, 30000];
-  let found = null;
-
-  for (const delay of delays) {
-    if (delay > 0) await new Promise(r => setTimeout(r, delay));
-    found = await _findRecordingFile(startMs, phone, dur);
-    if (found) break;
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt] > 0) await new Promise(r => setTimeout(r, delays[attempt]));
+    const found = await _findRecordingFile(startMs, phone, dur);
+    if (found) {
+      console.log(`[RECORDING_FOUND] client_event_id=${c.client_event_id} size=${found.fileSize} mime=${found.mimeType} attempt=${attempt + 1} ts=${Date.now()}`);
+      return found;
+    }
   }
 
-  if (!found) {
-    await upsertCallStatus(c.client_event_id, {
-      recording_status: STATUS.RECORDING_NOT_AVAILABLE,
-      recording_error:  'No recording file found in any OEM directory after 3 attempts',
-    }).catch(() => {});
-    console.log('[CALLLOG] recording not available: ' + c.client_event_id);
-    return;
-  }
-
-  // Re-read live queue to avoid race condition (fixes Bug 11)
-  const currentQueue = await getUploadQueue();
-  const alreadyQueued = currentQueue.some(q => q.client_event_id === c.client_event_id);
-  if (alreadyQueued) return;
-
-  await saveUploadQueue([...currentQueue, {
-    client_event_id: c.client_event_id,
-    call_id:         null,   // resolved later from status store
-    path:            found.path,
-    file_size:       found.fileSize,
-    mime_type:       found.mimeType,
-    retry_count:     0,
-    status:          'queued',
-    last_error:      null,
-    created_at:      new Date().toISOString(),
-  }]);
-
-  await upsertCallStatus(c.client_event_id, {
-    recording_status: STATUS.RECORDING_QUEUED,
-    recording_path:   found.path,
-  }).catch(() => {});
-  console.log('[CALLLOG] recording queued: ' + c.client_event_id + ' size=' + found.fileSize);
-}
-
-export async function enqueueRecordings(calls) {
-  for (const c of calls) {
-    // Re-read queue per call to avoid stale snapshot (fixes Bug 11)
-    const queue = await getUploadQueue();
-    const alreadyQueued = queue.some(q => q.client_event_id === c.client_event_id);
-    if (alreadyQueued) continue;
-    // Fire-and-forget — never blocks the sync cycle
-    _checkRecordingDeferred(c).catch(() => {});
-  }
+  console.log(`[RECORDING_NOT_AVAILABLE] client_event_id=${c.client_event_id} reason="no_file_in_oem_dirs" ts=${Date.now()}`);
+  return null;
 }
 
 export async function uploadRecording(callId, filePath, token) {
   if (!filePath || !callId) return null;
-  try {
-    const info = await FileSystem.getInfoAsync(filePath);
-    if (!info.exists) {
-      throw new Error('Recording file no longer exists at path: ' + filePath);
+  const info = await FileSystem.getInfoAsync(filePath);
+  if (!info.exists) throw new Error("Recording file no longer exists at path: " + filePath);
+  if (!info.size || info.size < 1024) throw new Error("Recording file is empty or too small: " + info.size + " bytes");
+
+  const result = await FileSystem.uploadAsync(
+    `${BASE_URL}/calls/${callId}/recording`,
+    filePath,
+    {
+      httpMethod:  "POST",
+      uploadType:  FileSystem.FileSystemUploadType.MULTIPART,
+      fieldName:   "file",
+      headers:     { Authorization: `Bearer ${token}` },
     }
-    if (!info.size || info.size < 1024) {
-      throw new Error('Recording file is empty or too small: ' + info.size + ' bytes');
-    }
-    const result = await FileSystem.uploadAsync(
-      `${BASE_URL}/calls/${callId}/recording`,
-      filePath,
-      {
-        httpMethod:  "POST",
-        uploadType:  FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName:   "file",
-        headers:     { Authorization: `Bearer ${token}` },
-      }
-    );
-    // Fix Bug 12: accept both 200 and 201
-    if (result.status === 200 || result.status === 201) {
-      try {
-        return result.body ? JSON.parse(result.body) : { status: 'uploaded' };
-      } catch {
-        return { status: 'uploaded' };
-      }
-    }
-    let detail = 'Upload failed';
-    try { detail = JSON.parse(result.body)?.detail || detail; } catch {}
-    throw new Error(`HTTP ${result.status}: ${detail}`);
-  } catch (e) {
-    throw e;  // re-throw so processUploadQueue can record the error
+  );
+  if (result.status === 200 || result.status === 201) {
+    try { return result.body ? JSON.parse(result.body) : { status: "uploaded" }; }
+    catch { return { status: "uploaded" }; }
   }
+  let detail = "Upload failed";
+  try { detail = JSON.parse(result.body)?.detail || detail; } catch {}
+  throw new Error(`HTTP ${result.status}: ${detail}`);
 }
 
-// -- SIM helpers
+// ── SIM helpers ───────────────────────────────────────────────────────────────
 
 export async function getPrimarySimInfo() {
   const sims = await readSimInfo();

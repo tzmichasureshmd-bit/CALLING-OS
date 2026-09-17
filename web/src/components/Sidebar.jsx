@@ -2,7 +2,7 @@ import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, BarChart3, Phone, Users, Target,
-  TrendingUp, FileBarChart, Settings, Smartphone, LogOut, CreditCard,
+  TrendingUp, FileBarChart, Settings, Smartphone, LogOut, CreditCard, CalendarCheck,
 } from "lucide-react";
 import { Logo } from "./ui.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -15,6 +15,7 @@ const NAV = [
   { to: "/leads", icon: Target, label: "Leads" },
   { to: "/opportunities", icon: TrendingUp, label: "Opportunities" },
   { to: "/device-health", icon: Smartphone, label: "Device Health" },
+  { to: "/follow-ups", icon: CalendarCheck, label: "Follow-ups" },
   { to: "/reports", icon: FileBarChart, label: "Reports" },
   { to: "/subscription", icon: CreditCard, label: "Subscription" },
   { to: "/settings", icon: Settings, label: "Settings" },

@@ -24,6 +24,7 @@ const Reports      = lazy(() => import("./pages/Reports.jsx"));
 const Subscription = lazy(() => import("./pages/Subscription.jsx"));
 const Invoices     = lazy(() => import("./pages/Invoices.jsx"));
 const SettingsPage = lazy(() => import("./pages/Settings.jsx"));
+const FollowUps    = lazy(() => import("./pages/FollowUps.jsx"));
 
 const ORG_TITLES = {
   "/": "Dashboard", "/analytics": "Analytics", "/call-logs": "Calls",
@@ -32,6 +33,7 @@ const ORG_TITLES = {
   "/device-health": "Device Health", "/transcribe": "Transcribe",
   "/opportunities-closed": "Closed Deals", "/reports": "Reports",
   "/subscription": "Subscription", "/invoices": "Invoices", "/settings": "Settings",
+  "/follow-ups": "Follow-ups",
 };
 
 // ── Super Admin top bar ───────────────────────────────────────────────────────
@@ -102,6 +104,7 @@ function OrgShell() {
               <Route path="/device-health" element={<DeviceHealth />} />
               <Route path="/transcribe" element={<Transcribe />} />
               <Route path="/opportunities-closed" element={<OpportunitiesClosed />} />
+              <Route path="/follow-ups" element={<FollowUps />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/subscription" element={<Subscription />} />
               <Route path="/invoices" element={<Invoices />} />

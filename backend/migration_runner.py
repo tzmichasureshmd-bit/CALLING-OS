@@ -19,6 +19,9 @@ MIGRATIONS = [
     "migrations/005_superadmin_tables.sql",
     "migrations/006_device_reconnect.sql",
     "migrations/008_recording_transcript_summary.sql",
+    "migrations/009_call_notes.sql",
+    "migrations/010_calls_notes_updated_at.sql",
+    "migrations/011_recording_size_bytes.sql",
 ]
 
 

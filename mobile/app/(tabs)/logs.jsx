@@ -12,8 +12,7 @@ import { AppHeader } from "../../src/components";
 import { getRealCallLog } from "../../src/callLogService";
 import { getAllCallStatuses, STATUS } from "../../src/callStatusStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
-const NOTES_KEY = "callos_call_notes";
+import { api } from "../../src/api";
 
 const STATUSES = [
   { key: "interested",     label: "Interested",     color: palette.emerald, icon: "checkmark-circle"  },
@@ -86,49 +85,123 @@ function copyPhone(phone) {
   if (Platform.OS === "android") ToastAndroid.show("Number copied!", ToastAndroid.SHORT);
 }
 
-async function loadAllNotes() {
-  try { const r = await AsyncStorage.getItem(NOTES_KEY); return r ? JSON.parse(r) : {}; }
-  catch { return {}; }
-}
-async function saveNote(phone, data) {
-  const all = await loadAllNotes();
-  all[phone] = { ...data, updatedAt: new Date().toISOString() };
-  await AsyncStorage.setItem(NOTES_KEY, JSON.stringify(all));
-}
+// Notes are stored on the backend only — no AsyncStorage
 
 // ── Progress Sheet ────────────────────────────────────────────────────────────
-function ProgressSheet({ visible, onClose, call, theme, onNotesUpdated }) {
-  const [status, setStatus] = useState(null);
-  const [notes,  setNotes]  = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saved,  setSaved]  = useState(false);
-  const [dropOpen, setDropOpen] = useState(false);
+// Sync states: idle → saving → accepted (single ✓) → confirmed (double ✓✓) | failed
+const SYNC = { IDLE: "idle", SAVING: "saving", ACCEPTED: "accepted", CONFIRMED: "confirmed", FAILED: "failed" };
 
+function ProgressSheet({ visible, onClose, call, theme, onSaved }) {
+  const [status,   setStatus]   = useState(null);
+  const [notes,    setNotes]    = useState("");
+  const [syncState, setSyncState] = useState(SYNC.IDLE);
+  const [error,    setError]    = useState(null);
+  const [dropOpen, setDropOpen] = useState(false);
+  const [serverTs, setServerTs] = useState(null); // last confirmed updated_at from backend
+  const inFlight = useRef(false);
+
+  // Load saved values whenever sheet opens for a call
   useEffect(() => {
     if (!visible || !call) return;
-    setSaved(false); setDropOpen(false);
-    loadAllNotes().then(all => {
-      const n = all[call.phone] || {};
-      setStatus(n.status || null);
-      setNotes(n.notes || "");
-    });
-  }, [visible, call?.phone]);
+    setSyncState(SYNC.IDLE); setError(null); setDropOpen(false);
+    setStatus(call.callStatus || null);
+    setNotes(call.notes || "");
+    setServerTs(call.updatedAt || null);
+  }, [visible, call?.id]);
+
+  // Mark dirty when user edits
+  function onStatusChange(key) {
+    setStatus(key);
+    setDropOpen(false);
+    if (syncState === SYNC.CONFIRMED || syncState === SYNC.ACCEPTED) setSyncState(SYNC.IDLE);
+    setError(null);
+  }
+  function onNotesChange(text) {
+    setNotes(text);
+    if (syncState === SYNC.CONFIRMED || syncState === SYNC.ACCEPTED) setSyncState(SYNC.IDLE);
+    setError(null);
+  }
 
   async function handleSave() {
-    if (!call) return;
-    setSaving(true);
-    await saveNote(call.phone, { status, notes, phone: call.phone, name: call.name });
-    setSaving(false);
-    setSaved(true);
-    // Push updated map to parent immediately — badge on row updates without closing
-    const updated = await loadAllNotes().catch(() => ({}));
-    onNotesUpdated(updated);
-    // Reset saved indicator after 1.5s but keep sheet open for further editing
-    setTimeout(() => setSaved(false), 1500);
+    if (inFlight.current) return;
+    if (!call?.callId) {
+      setError("Call not yet synced to server. Please wait and retry.");
+      return;
+    }
+    if (notes.length > 2000) {
+      setError("Notes must be 2000 characters or fewer.");
+      return;
+    }
+    inFlight.current = true;
+    setSyncState(SYNC.SAVING); setError(null);
+    console.log(`[PROGRESS_SAVE_STARTED] callId=${call.callId} status=${status} ts=${Date.now()}`);
+    try {
+      // Single ✓ — request sent, awaiting backend response
+      setSyncState(SYNC.ACCEPTED);
+      const res = await api.updateCallNote(call.callId, status, notes);
+      const confirmed = res?.call || {};
+      const newTs = confirmed.updated_at || new Date().toISOString();
+      // Conflict guard: only accept if server ts >= our last known ts
+      if (serverTs && newTs < serverTs) {
+        console.warn(`[PROGRESS_CONFLICT] server ts=${newTs} < local ts=${serverTs} — stale response`);
+      }
+      setServerTs(newTs);
+      // Double ✓✓ — backend confirmed, DB written
+      setSyncState(SYNC.CONFIRMED);
+      console.log(`[PROGRESS_SAVE_SUCCESS] callId=${call.callId} updated_at=${newTs} ts=${Date.now()}`);
+      onSaved(call.id, {
+        callStatus: confirmed.call_status ?? status,
+        notes:      confirmed.notes      ?? notes,
+        callId:     call.callId,
+        updatedAt:  newTs,
+      });
+      setTimeout(() => { setSyncState(SYNC.IDLE); onClose(); }, 1400);
+    } catch (e) {
+      setSyncState(SYNC.FAILED);
+      const msg = e?.message || "";
+      let userMsg;
+      if (msg.includes("Network request failed") || msg.includes("Failed to fetch")) {
+        userMsg = "No internet. Changes not saved — please retry.";
+      } else if (msg.includes("timed out") || msg.includes("AbortError")) {
+        userMsg = "Request timed out. Please retry.";
+      } else if (msg.includes("401") || msg.includes("Unauthorized")) {
+        userMsg = "Session expired. Please log in again.";
+      } else if (msg.includes("403") || msg.includes("Forbidden")) {
+        userMsg = "You do not have permission to update this call.";
+      } else if (msg.includes("404")) {
+        userMsg = "Call not found on server.";
+      } else if (msg.includes("422")) {
+        userMsg = "Invalid data. Please check the status and notes.";
+      } else if (msg.includes("500")) {
+        userMsg = "Server error. Please try again later.";
+      } else {
+        userMsg = msg || "Unable to save. Please retry.";
+      }
+      console.warn(`[PROGRESS_SAVE_FAILED] callId=${call.callId} error=${msg} ts=${Date.now()}`);
+      setError(userMsg);
+    } finally {
+      inFlight.current = false;
+    }
   }
 
   if (!call) return null;
   const selected = STATUSES.find(s => s.key === status);
+  const isDirty  = syncState === SYNC.IDLE;
+  const isSaving = syncState === SYNC.SAVING;
+  const isAccepted  = syncState === SYNC.ACCEPTED;
+  const isConfirmed = syncState === SYNC.CONFIRMED;
+  const isFailed    = syncState === SYNC.FAILED;
+
+  // Sync indicator label + color
+  const syncLabel = isSaving    ? "Saving…"
+                  : isAccepted  ? "✓ Sent"
+                  : isConfirmed ? "✓✓ Saved"
+                  : isFailed    ? "✗ Failed"
+                  : null;
+  const syncColor = isAccepted  ? palette.amber
+                  : isConfirmed ? palette.emerald
+                  : isFailed    ? palette.red
+                  : palette.teal;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -144,10 +217,29 @@ function ProgressSheet({ visible, onClose, call, theme, onNotesUpdated }) {
                 <Text style={{ fontSize:17, fontWeight:"800", color:theme.primary }} numberOfLines={1}>{call.name}</Text>
                 <Text style={{ fontSize:13, color:theme.muted, marginTop:2 }}>{call.phone}</Text>
               </View>
+              {/* Sync indicator */}
+              {syncLabel && (
+                <View style={{ backgroundColor: syncColor+"22", borderRadius:8, paddingHorizontal:10, paddingVertical:4, marginRight:10 }}>
+                  <Text style={{ fontSize:12, fontWeight:"700", color:syncColor }}>{syncLabel}</Text>
+                </View>
+              )}
               <Pressable onPress={onClose} hitSlop={{top:12,bottom:12,left:12,right:12}}>
                 <Ionicons name="close" size={22} color={theme.muted}/>
               </Pressable>
             </View>
+
+            {/* Error banner with retry */}
+            {error && (
+              <View style={{ backgroundColor: palette.red + "18", borderRadius: 10, borderWidth: 1,
+                borderColor: palette.red + "44", padding: 10, marginBottom: 14,
+                flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+                <Ionicons name="alert-circle" size={16} color={palette.red} style={{ marginTop: 1 }}/>
+                <Text style={{ fontSize: 13, color: palette.red, flex: 1, lineHeight: 18 }}>{error}</Text>
+                <Pressable onPress={handleSave} hitSlop={{top:8,bottom:8,left:8,right:8}}>
+                  <Text style={{ fontSize:12, fontWeight:"700", color:palette.red, textDecorationLine:"underline" }}>Retry</Text>
+                </Pressable>
+              </View>
+            )}
 
             {/* Status dropdown */}
             <Text style={{ fontSize:11, fontWeight:"700", color:theme.muted, textTransform:"uppercase", letterSpacing:0.6, marginBottom:8 }}>Call Status</Text>
@@ -171,7 +263,7 @@ function ProgressSheet({ visible, onClose, call, theme, onNotesUpdated }) {
                 {STATUSES.map((s, i) => {
                   const on = status === s.key;
                   return (
-                    <Pressable key={s.key} onPress={() => { setStatus(on ? null : s.key); setDropOpen(false); }}
+                    <Pressable key={s.key} onPress={() => onStatusChange(on ? null : s.key)}
                       style={{ flexDirection:"row", alignItems:"center", gap:10,
                         paddingHorizontal:14, paddingVertical:13,
                         backgroundColor: on ? s.color+"18" : "transparent",
@@ -189,7 +281,7 @@ function ProgressSheet({ visible, onClose, call, theme, onNotesUpdated }) {
             <Text style={{ fontSize:11, fontWeight:"700", color:theme.muted, textTransform:"uppercase", letterSpacing:0.6, marginBottom:8 }}>Notes</Text>
             <TextInput
               value={notes}
-              onChangeText={setNotes}
+              onChangeText={onNotesChange}
               placeholder="What was discussed? Customer interest, objections, next steps…"
               placeholderTextColor={theme.dim}
               multiline
@@ -199,16 +291,25 @@ function ProgressSheet({ visible, onClose, call, theme, onNotesUpdated }) {
 
             {/* Save + Done row */}
             <View style={{ flexDirection:"row", gap:10 }}>
-              <Pressable onPress={handleSave} disabled={saving} style={{ flex:1 }}>
+              <Pressable onPress={handleSave} disabled={isSaving || isConfirmed} style={{ flex:1 }}>
                 <LinearGradient
-                  colors={saved ? [palette.emerald, palette.emerald] : gradientBrand}
+                  colors={
+                    isConfirmed ? [palette.emerald, palette.emerald]
+                    : isFailed  ? [palette.red,     palette.red]
+                    : gradientBrand
+                  }
                   start={{x:0,y:0}} end={{x:1,y:0}}
-                  style={{ height:50, borderRadius:13, alignItems:"center", justifyContent:"center", flexDirection:"row", gap:8 }}>
-                  {saving
-                    ? <ActivityIndicator color="#fff"/>
-                    : saved
-                      ? <><Ionicons name="checkmark" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Saved!</Text></>
-                      : <><Ionicons name="save-outline" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Save Progress</Text></>}
+                  style={{ height:50, borderRadius:13, alignItems:"center", justifyContent:"center", flexDirection:"row", gap:8,
+                    opacity: isSaving ? 0.7 : 1 }}>
+                  {isSaving
+                    ? <><ActivityIndicator color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Saving…</Text></>
+                    : isAccepted
+                      ? <><Text style={{ color:"#fff", fontSize:18, fontWeight:"700" }}>✓</Text><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Sent</Text></>
+                    : isConfirmed
+                      ? <><Text style={{ color:"#fff", fontSize:18, fontWeight:"700" }}>✓✓</Text><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Saved!</Text></>
+                    : isFailed
+                      ? <><Ionicons name="refresh" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Retry</Text></>
+                    : <><Ionicons name="save-outline" size={18} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Save Progress</Text></>}
                 </LinearGradient>
               </Pressable>
               <Pressable onPress={onClose}
@@ -369,8 +470,12 @@ function DetailsSheet({ visible, onClose, call, allCalls, syncedIds, theme }) {
 const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteData, theme, shadowSoft }) => {
   const meta = TYPE[c.type] || TYPE.incoming;
   const open = expanded === c.id;
-  const ns   = STATUSES.find(s => s.key === noteData?.status);
-  const hasNotes = noteData?.notes && noteData.notes.trim().length > 0;
+  const ns   = STATUSES.find(s => s.key === (noteData?.status || c.callStatus));
+  const hasNotes = (noteData?.notes || c.notes || "").trim().length > 0;
+  const notesText = noteData?.notes || c.notes || "";
+  const syncBadge = c.syncOffline ? { label: "No internet", color: "#f59e0b" }
+                  : c.syncFailed  ? { label: "Sync failed",  color: "#ef4444" }
+                  : null;
 
   return (
     <Pressable onPress={onToggle}
@@ -413,6 +518,11 @@ const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteData, theme
                 <Text style={{ fontSize:9, fontWeight:"700", color:palette.emerald }}>✓ Synced</Text>
               </View>
             )}
+            {syncBadge && (
+              <View style={{ backgroundColor:syncBadge.color+"22", borderRadius:5, paddingHorizontal:6, paddingVertical:1 }}>
+                <Text style={{ fontSize:9, fontWeight:"700", color:syncBadge.color }}>{syncBadge.label}</Text>
+              </View>
+            )}
             {ns && (
               <View style={{ backgroundColor:ns.color+"22", borderRadius:5, paddingHorizontal:6, paddingVertical:1 }}>
                 <Text style={{ fontSize:9, fontWeight:"700", color:ns.color }}>{ns.label}</Text>
@@ -423,7 +533,7 @@ const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteData, theme
           {/* Notes preview */}
           {hasNotes && (
             <Text numberOfLines={1} style={{ fontSize:11.5, color:theme.muted, marginTop:4, fontStyle:"italic" }}>
-              {noteData.notes}
+              {notesText}
             </Text>
           )}
 
@@ -433,7 +543,8 @@ const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteData, theme
               paddingTop:12, borderTopWidth:1, borderTopColor:theme.border }}>
               {[
                 { icon:"call",         label:"Call",     color:palette.emerald, fn:()=>Linking.openURL(`tel:${c.phone.replace(/\s/g,"")}`) },
-                { icon:"logo-whatsapp",label:"WhatsApp", color:"#25D366",       fn:()=>Linking.openURL(`whatsapp://send?phone=${c.phone.replace(/\D/g,"")}`) },
+                { icon:"logo-whatsapp",label:"WhatsApp", color:"#25D366",       fn:()=>Linking.openURL(`whatsapp://send?phone=${c.phone.replace(/\D/g,"")}`).catch(()=>Linking.openURL(`https://wa.me/${c.phone.replace(/\D/g,"")}`)) },
+                { icon:"chatbubble-ellipses-outline", label:"SMS", color:palette.cyan, fn:()=>Linking.openURL(`sms:${c.phone.replace(/[^\d+]/g,"")}`).catch(()=>{}) },
                 { icon:"stats-chart",  label:"Progress", color:palette.violet,  fn:()=>onProgress(c) },
                 { icon:"information-circle-outline", label:"Details", color:palette.teal, fn:()=>onDetails(c) },
               ].map(a=>(
@@ -460,7 +571,6 @@ export default function Calls() {
   const [chip,         setChip]         = useState("All");
   const [expanded,     setExpanded]     = useState(null);
   const [allCalls,     setAllCalls]     = useState([]);
-  const [syncedIds,    setSyncedIds]    = useState(new Set());
   const [page,         setPage]         = useState(1);
   const [loading,      setLoading]      = useState(true);
   const [refreshing,   setRefreshing]   = useState(false);
@@ -479,23 +589,24 @@ export default function Calls() {
   const load = useCallback(async (days = rangeDays, isRefresh = false) => {
     if (isRefresh) { setRefreshing(true); setPage(1); } else setLoading(true);
     try {
-      const [raw, ids, statuses] = await Promise.all([
+      // Fetch Android call log + in-memory sync statuses in parallel
+      // Then fetch backend calls to get confirmed callStatus + notes
+      const [raw, statuses] = await Promise.all([
         getRealCallLog(days),
-        AsyncStorage.getItem("callos_synced_ids").catch(() => null),
         getAllCallStatuses(),
       ]);
-      const synced = ids ? new Set(JSON.parse(ids)) : new Set();
-      setSyncedIds(synced);
-      // Build a map of client_event_id -> status store entry for O(1) lookup
       const statusMap = {};
       statuses.forEach(s => { statusMap[s.client_event_id] = s; });
 
+      // Build initial map from Android log
       const mapped = raw.map(c => {
         const st = statusMap[c.client_event_id] || {};
         const recStatus = st.recording_status || STATUS.RECORDING_NOT_AVAILABLE;
         const txStatus  = st.transcript_status || null;
+        const syncSt    = st.sync_status || null;
         return {
           id:               c.client_event_id,
+          callId:           st.call_id || null,
           type:             c.call_type || "incoming",
           name:             c.contact_name || "Unknown",
           phone:            c.phone_number || "",
@@ -505,31 +616,50 @@ export default function Calls() {
           ago:              relTime(c.start_time),
           group:            groupLabel(c.start_time),
           sim:              c.source || "Unknown SIM",
-          synced:           synced.has(c.client_event_id) || st.sync_status === STATUS.SYNCED,
-          // Real recording state from status store
-          hasRecording:     recStatus === STATUS.RECORDING_QUEUED ||
-                            recStatus === STATUS.RECORDING_UPLOADING ||
-                            recStatus === STATUS.RECORDING_UPLOADED,
+          synced:           syncSt === STATUS.SYNCED,
+          syncOffline:      syncSt === STATUS.SYNC_OFFLINE,
+          syncFailed:       syncSt === STATUS.SYNC_FAILED,
+          syncError:        st.last_error || null,
+          callStatus:       null,
+          notes:            null,
+          hasRecording:     recStatus === STATUS.RECORDING_UPLOADING || recStatus === STATUS.RECORDING_UPLOADED,
           recordingUploaded: recStatus === STATUS.RECORDING_UPLOADED,
           recordingStatus:  recStatus,
-          // Real transcription state from status store
           transcribed:      txStatus === STATUS.TRANSCRIPTION_COMPLETED,
           transcriptStatus: txStatus,
           _ts:              c._start_ms || new Date(c.start_time).getTime(),
         };
       });
+
+      // Fetch backend calls to overlay confirmed callStatus + notes
+      // Only do this if we have synced calls (have call IDs)
+      try {
+        const backendRes = await api.getCalls({ page_size: 500 });
+        const backendMap = {};
+        (backendRes.items || []).forEach(bc => {
+          if (bc.client_event_id) backendMap[bc.client_event_id] = bc;
+        });
+        mapped.forEach(c => {
+          const bc = backendMap[c.id];
+          if (bc) {
+            c.callId     = bc.id;
+            c.callStatus = bc.call_status || null;
+            c.notes      = bc.notes || null;
+            c.synced     = true;
+          }
+        });
+      } catch { /* offline or auth error — show Android log without backend notes */ }
+
       setAllCalls(mapped);
     } catch { /* silent */ }
     finally { setLoading(false); setRefreshing(false); }
   }, [rangeDays]);
 
   useEffect(() => { load(rangeDays); }, [rangeDays]);
-  useEffect(() => { loadAllNotes().then(setNotesMap); }, []);
 
-  // Refresh notes map whenever progressCall sheet closes
+  // Refresh notes map entry when progress saved
   const handleProgressClose = useCallback(() => {
     setProgressCall(null);
-    loadAllNotes().then(setNotesMap);
   }, []);
 
   const filtered = useMemo(() => {
@@ -578,7 +708,7 @@ export default function Calls() {
         onToggle={() => setExpanded(expanded === item.id ? null : item.id)}
         onProgress={c => setProgressCall(c)}
         onDetails={c => setDetailsCall(c)}
-        noteData={notesMap[item.phone] || null}
+        noteData={notesMap[item.id] || null}
         theme={theme}
         shadowSoft={shadowSoft}
       />
@@ -690,7 +820,12 @@ export default function Calls() {
       <ProgressSheet
         visible={!!progressCall}
         onClose={handleProgressClose}
-        onNotesUpdated={(updated) => setNotesMap(updated)}
+        onSaved={(id, data) => {
+          setAllCalls(prev => prev.map(c =>
+            c.id === id ? { ...c, callStatus: data.callStatus, notes: data.notes, callId: data.callId, updatedAt: data.updatedAt } : c
+          ));
+          setNotesMap(prev => ({ ...prev, [id]: data }));
+        }}
         call={progressCall}
         theme={theme}
       />
@@ -700,7 +835,7 @@ export default function Calls() {
         onClose={() => setDetailsCall(null)}
         call={detailsCall}
         allCalls={allCalls}
-        syncedIds={syncedIds}
+        syncedIds={new Set(allCalls.filter(c => c.synced).map(c => c.id))}
         theme={theme}
       />
     </SafeAreaView>

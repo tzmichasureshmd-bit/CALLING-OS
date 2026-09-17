@@ -28,6 +28,17 @@ try {
   _SimCardsManager = mod?.default || mod || null;
 } catch { _SimCardsManager = null; }
 
+// ── ContentObserver: start/stop native call log watching ─────────────────────
+export async function startCallLogObserver() {
+  if (Platform.OS !== "android" || !_NativeCallLog) return false;
+  try { return await _NativeCallLog.startObserving(); } catch { return false; }
+}
+
+export async function stopCallLogObserver() {
+  if (Platform.OS !== "android" || !_NativeCallLog) return;
+  try { await _NativeCallLog.stopObserving(); } catch {}
+}
+
 // -- Android call type constants
 const ANDROID_TYPE_MAP = {
   1: "incoming",   // INCOMING_TYPE

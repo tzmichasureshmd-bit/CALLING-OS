@@ -91,12 +91,14 @@ export default function DiagnosticScreen() {
       // Sync stats from status store + synced IDs
       let syncStats = { queued: 0, syncing: 0, synced: 0, failed: 0 };
       try {
-        const raw = await AsyncStorage.getItem("callos_synced_ids").catch(() => null);
-        const syncedSet = raw ? new Set(JSON.parse(raw)) : new Set();
-        syncStats.synced = syncedSet.size;
-        syncStats.queued = statuses.filter(s => s.sync_status === STATUS.SYNC_QUEUED).length;
-        syncStats.syncing = statuses.filter(s => s.sync_status === STATUS.SYNCING).length;
-        syncStats.failed = statuses.filter(s => s.sync_status === STATUS.SYNC_FAILED).length;
+      // Sync stats from in-memory callStatusStore only.
+      // callos_synced_ids was removed from the architecture — do not read it.
+      syncStats.synced  = statuses.filter(s => s.sync_status === STATUS.SYNCED).length;
+      syncStats.queued  = statuses.filter(s => s.sync_status === STATUS.DETECTED).length;
+      syncStats.syncing = statuses.filter(s => s.sync_status === STATUS.SYNCING).length;
+      syncStats.failed  = statuses.filter(s =>
+        s.sync_status === STATUS.SYNC_FAILED || s.sync_status === STATUS.SYNC_OFFLINE
+      ).length;
       } catch {}
 
       // Recording stats

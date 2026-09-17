@@ -194,18 +194,16 @@ function TimelineStep({ icon, label, sublabel, status, isLast }) {
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 function syncStepStatus(currentStatus, targetStatus) {
-  const order = [
-    STATUS.DETECTED, STATUS.LOCAL_SAVED, STATUS.SYNC_QUEUED,
-    STATUS.SYNCING, STATUS.SYNCED,
-  ];
-  const failStatuses = [STATUS.SYNC_FAILED];
+  // Current state machine: DETECTED → SYNCING → SYNCED
+  // Failure: SYNC_FAILED | SYNC_OFFLINE
+  const order = [STATUS.DETECTED, STATUS.SYNCING, STATUS.SYNCED];
+  const failStatuses = [STATUS.SYNC_FAILED, STATUS.SYNC_OFFLINE];
 
   if (failStatuses.includes(currentStatus) && targetStatus === STATUS.SYNCED) return "failed";
   if (failStatuses.includes(currentStatus) && order.indexOf(targetStatus) >= order.indexOf(STATUS.SYNCING)) return "failed";
 
   const currentIdx = order.indexOf(currentStatus);
   const targetIdx  = order.indexOf(targetStatus);
-
   if (currentIdx > targetIdx)  return "done";
   if (currentIdx === targetIdx) return "active";
   return "pending";
@@ -213,10 +211,13 @@ function syncStepStatus(currentStatus, targetStatus) {
 
 function recStepStatus(recStatus, targetStatus) {
   const order = [
-    STATUS.RECORDING_QUEUED, STATUS.RECORDING_UPLOADING, STATUS.RECORDING_UPLOADED,
+    STATUS.RECORDING_CHECK,
+    STATUS.RECORDING_QUEUED,
+    STATUS.RECORDING_UPLOADING,
+    STATUS.RECORDING_UPLOADED,
   ];
   if (recStatus === STATUS.RECORDING_NOT_AVAILABLE) return "pending";
-  if (recStatus === STATUS.RECORDING_FAILED && targetStatus === STATUS.RECORDING_UPLOADED) return "failed";
+  if (recStatus === STATUS.RECORDING_FAILED) return "failed";
 
   const ci = order.indexOf(recStatus);
   const ti = order.indexOf(targetStatus);
@@ -287,6 +288,7 @@ export default function CallDetail() {
     recording_status: localStatus?.recording_status || (
       serverCall?.recording_available ? STATUS.RECORDING_UPLOADED : STATUS.RECORDING_NOT_AVAILABLE
     ),
+    recording_error:   localStatus?.recording_error || serverCall?.recording_error || null,
     transcript_status: localStatus?.transcript_status || serverCall?.transcript_status || null,
     last_error:      localStatus?.last_error,
     sync_attempts:   localStatus?.sync_attempts || 0,
@@ -351,12 +353,6 @@ export default function CallDetail() {
             status={syncStepStatus(call.sync_status, STATUS.DETECTED)}
           />
           <TimelineStep
-            icon="save-outline"
-            label="Saved locally"
-            sublabel="Stored in sync queue"
-            status={syncStepStatus(call.sync_status, STATUS.LOCAL_SAVED)}
-          />
-          <TimelineStep
             icon="cloud-upload-outline"
             label="Uploading to server"
             sublabel={call.sync_status === STATUS.SYNCING ? "In progress…" : undefined}
@@ -369,7 +365,9 @@ export default function CallDetail() {
               call.sync_status === STATUS.SYNCED
                 ? "Call is on the dashboard"
                 : call.sync_status === STATUS.SYNC_FAILED
-                  ? `Failed · ${call.last_error || "unknown error"} · ${call.sync_attempts} attempt(s)`
+                  ? `Failed · ${call.last_error || "unknown error"}`
+                : call.sync_status === STATUS.SYNC_OFFLINE
+                  ? "No internet connection — will retry when online"
                   : undefined
             }
             status={syncStepStatus(call.sync_status, STATUS.SYNCED)}
@@ -381,16 +379,27 @@ export default function CallDetail() {
         <View style={[{ backgroundColor: theme.card, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: theme.border, marginBottom: 16 }, shadowSoft]}>
           <Text style={{ fontSize: 15, fontWeight: "700", color: theme.primary, marginBottom: 16 }}>Recording</Text>
           {call.recording_status === STATUS.RECORDING_NOT_AVAILABLE ? (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <Ionicons name="mic-off-outline" size={20} color={theme.dim} />
-              <Text style={{ fontSize: 13, color: theme.muted }}>Recording unavailable on this device</Text>
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+              <Ionicons name="mic-off-outline" size={20} color={theme.dim} style={{ marginTop: 1 }}/>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, color: theme.muted }}>Recording unavailable on this device or for this call.</Text>
+                {call.recording_error ? (
+                  <Text style={{ fontSize: 11.5, color: theme.dim, marginTop: 4 }}>{call.recording_error}</Text>
+                ) : null}
+              </View>
             </View>
           ) : (
             <>
               <TimelineStep
+                icon="search-outline"
+                label="Checking for recording"
+                sublabel={call.recording_status === STATUS.RECORDING_CHECK ? "Scanning OEM directories…" : undefined}
+                status={recStepStatus(call.recording_status, STATUS.RECORDING_CHECK)}
+              />
+              <TimelineStep
                 icon="mic-outline"
                 label="Recording discovered"
-                sublabel="Found on device storage"
+                sublabel={call.recording_status === STATUS.RECORDING_QUEUED ? "Found on device storage" : undefined}
                 status={recStepStatus(call.recording_status, STATUS.RECORDING_QUEUED)}
               />
               <TimelineStep
@@ -406,7 +415,7 @@ export default function CallDetail() {
                   call.recording_status === STATUS.RECORDING_UPLOADED
                     ? "Playable on web dashboard"
                     : call.recording_status === STATUS.RECORDING_FAILED
-                      ? "Upload failed — will retry"
+                      ? (call.recording_error || "Upload failed")
                       : undefined
                 }
                 status={recStepStatus(call.recording_status, STATUS.RECORDING_UPLOADED)}

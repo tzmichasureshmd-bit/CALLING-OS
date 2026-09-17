@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Building2, User, Palette, Bell, Shield, Sun, Moon, X, Copy, Check, Loader } from "lucide-react";
+import { Building2, User, Palette, Bell, Shield, Sun, Moon, X, Copy, Check, Loader, MessageSquare } from "lucide-react";
 import { PageContainer, Card, CardHeader, Button, Badge, LoadingState, ErrorState } from "../components/ui.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -279,6 +279,14 @@ export default function Settings() {
   const [show2FA, setShow2FA] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [totpEnabled, setTotpEnabled] = useState(!!user?.totp_enabled);
+  const [waNumber, setWaNumber] = useState(() => localStorage.getItem("callos_wa_number") || "");
+  const [waSaved, setWaSaved] = useState(false);
+
+  function saveWaNumber() {
+    localStorage.setItem("callos_wa_number", waNumber.trim());
+    setWaSaved(true);
+    setTimeout(() => setWaSaved(false), 1800);
+  }
 
   function handleProfileSaved(updated) {
     const merged = { ...user, name: updated.name || user?.name, email: updated.email || user?.email };
@@ -341,7 +349,33 @@ export default function Settings() {
         </Card>
 
         <Card>
-          <CardHeader icon={Shield} title="Security" subtitle="Account protection" />
+          <CardHeader icon={MessageSquare} title="WhatsApp" subtitle="Number used when sending WhatsApp from Call Intelligence" />
+          <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginBottom: 10, lineHeight: 1.6 }}>
+            Enter your WhatsApp Business number (with country code, e.g. <strong style={{ color: "var(--text-secondary)" }}>919876543210</strong>). This number will be used as the sender when you click WhatsApp on any call.
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", flex: 1, background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: 10, padding: "0 12px", gap: 8 }}>
+              <MessageSquare size={15} color="var(--text-dim)" />
+              <input
+                value={waNumber}
+                onChange={e => { setWaNumber(e.target.value.replace(/[^0-9]/g, "")); setWaSaved(false); }}
+                placeholder="919876543210"
+                maxLength={15}
+                style={{ flex: 1, border: "none", outline: "none", background: "transparent", color: "var(--text-primary)", fontSize: 14, padding: "10px 0", fontFamily: "Space Grotesk" }}
+              />
+            </div>
+            <Button onClick={saveWaNumber} disabled={!waNumber.trim()}>
+              {waSaved ? "Saved ✓" : "Save"}
+            </Button>
+          </div>
+          {waNumber && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-muted)" }}>
+              Preview: <a href={`https://wa.me/${waNumber}`} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>wa.me/{waNumber}</a>
+            </div>
+          )}
+        </Card>
+
+        <Card>
           <Row
             label="Two-factor authentication"
             value={<Badge tone={totpEnabled ? "success" : "warning"}>{totpEnabled ? "Enabled" : "Off"}</Badge>}

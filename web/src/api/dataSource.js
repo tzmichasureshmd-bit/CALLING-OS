@@ -18,24 +18,27 @@ function normalizeCall(c) {
     id: c.id,
     date: c.start_time,
     type: c.call_type,
-    phone: c.phone_number,
+    phone: c.phone_number === "unknown" ? "Private" : (c.phone_number || "—"),
     contact: c.contact_name || "Unknown",
     employee: c.employee_name || "—",
     durationSeconds: c.duration_seconds,
     source: c.source || "SIM 1",
     device: c.device_model || "—",
-    // recording — never expose raw URL, use signed URL endpoint
     hasRecording:    c.recording_available === true,
     recordingStatus: c.recording_status || "not_available",
-    // transcript
     transcriptStatus: c.transcript_status || null,
     transcriptText:   c.transcript_text   || null,
-    // summary
     summaryStatus: c.summary_status || null,
     summaryText:   c.summary_text   || null,
     summaryData:   c.summary_data
       ? (() => { try { return JSON.parse(c.summary_data); } catch { return null; } })()
       : null,
+    callStatus: c.call_status || null,
+    notes:      c.notes       || null,
+    updatedAt:        c.updated_at         || null,
+    syncConfirmedAt:  c.sync_confirmed_at   || null,
+    // sync_status from backend: "synced" | "failed" | "offline"
+    syncStatus: c.sync_status || "synced",
   };
 }
 

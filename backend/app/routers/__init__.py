@@ -11,3 +11,4 @@ from .billing import router as billing_router
 from .transcripts import router as transcripts_router
 from .superadmin import router as superadmin_router
 from .audit import router as audit_router
+from .call_notes import router as call_notes_router

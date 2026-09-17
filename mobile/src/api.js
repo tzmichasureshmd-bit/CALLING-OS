@@ -108,6 +108,7 @@ export const api = {
   getCall:        (callId) => request("GET", `/calls/${callId}`),
   syncCalls:      (deviceId, calls) => request("POST", "/calls/sync", { device_id: deviceId, calls }),
   getTranscript:  (callId) => request("GET", `/transcripts/${callId}`),
+  updateCallNote: (callId, status, notes) => request("PATCH", `/calls/${callId}/note`, { call_status: status, notes }),
 
   // Analytics
   getAnalytics: (range = "today") =>
@@ -133,8 +134,9 @@ export async function clearSession() {
     "callos_sync_fail_count",
     "callos_synced_ids",
     "callos_last_sync_ts",
-    "callos_install_date",
-    "callos_hw_device_id",
+    // callos_install_date is intentionally NOT removed here.
+    // It must survive logout/login cycles — only a real uninstall should reset it.
+    // callos_hw_device_id is also preserved for the same reason.
     "callos_upload_queue",
     "callos_selected_subscription_id",
     "callos_selected_sim_slot",

@@ -66,8 +66,7 @@ function applyMessage(msg, setDevices, setNewCallEvent) {
       next[idx] = updated;
       return next;
     });
-  } else if (msg.event === "calls_synced" || msg.event === "recording_uploaded" || msg.event === "transcript_updated") {
-    // Signal to consumers that call data has changed
+  } else if (msg.event === "calls_synced" || msg.event === "call_created" || msg.event === "call_updated" || msg.event === "recording_uploaded" || msg.event === "transcript_updated") {
     setNewCallEvent({ event: msg.event, ts: Date.now(), ...msg });
   }
 }

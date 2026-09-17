@@ -141,6 +141,7 @@ async def sync_calls(
         ).first()
         if exists:
             duplicates += 1
+            exists.sync_confirmed_at = now_utc
             results.append(CallSyncItemResult(
                 client_event_id=item.client_event_id,
                 call_id=exists.id,
@@ -206,6 +207,8 @@ async def sync_calls(
             recording_available=False,
             recording_status=RECORDING_STATUS_NOT_AVAILABLE,
             sync_status="synced",
+            sync_confirmed_at=now_utc,
+            updated_at=now_utc,
         )
         db.add(call)
         new_call_ids.append(call_id)
@@ -398,6 +401,9 @@ async def upload_recording(
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Recording file is empty")
 
+    logger.info("[RECORDING_UPLOAD_STARTED] call_id=%s size=%d ext=%s org=%s",
+                call_id, len(content), ext, user.organization_id)
+
     # ── Storage ───────────────────────────────────────────────────────────────
     if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
         raise HTTPException(status_code=503, detail="Storage not configured")
@@ -425,6 +431,7 @@ async def upload_recording(
         raise HTTPException(status_code=502, detail="Storage upload failed")
 
     # Store path only — NOT a public URL
+    already_uploaded = call.recording_available
     call.recording_url           = storage_path
     call.recording_available     = True
     call.recording_status        = RECORDING_STATUS_UPLOADED
@@ -443,10 +450,16 @@ async def upload_recording(
         actor=user,
         resource="call",
         resource_id=call_id,
-        metadata={"size_bytes": len(content), "ext": ext},
+        metadata={"size_bytes": len(content), "ext": ext, "duplicate": already_uploaded},
         request=request,
     )
     db.commit()
+    if already_uploaded:
+        logger.info("[RECORDING_UPLOAD_CONFIRMED] call_id=%s size=%d ext=%s (re-upload/upsert)",
+                    call_id, len(content), ext)
+    else:
+        logger.info("[RECORDING_UPLOAD_CONFIRMED] call_id=%s size=%d ext=%s",
+                    call_id, len(content), ext)
 
     # Auto-trigger transcription in background — no manual button needed
     from .transcripts import _run_whisper_sync
@@ -469,6 +482,84 @@ async def upload_recording(
         "recording_status": "uploaded",
         "transcript_status": call.transcript_status,
         "size_bytes": len(content),
+    }
+
+
+# ── note / progress update ───────────────────────────────────────────────────
+
+from pydantic import BaseModel as _BaseModel
+from fastapi import BackgroundTasks as _BG
+
+VALID_PROGRESS_STATUSES = {
+    "interested", "asked_details", "follow_up", "callback",
+    "proposal_sent", "converted", "not_interested",
+    # call-derived statuses (set by sync, not by user)
+    "connected", "missed", "rejected", "no_answer", "unknown",
+}
+MAX_NOTES_LENGTH = 2000
+
+
+class _NoteBody(_BaseModel):
+    call_status: str | None = None
+    notes: str | None = None
+
+
+@router.patch("/{call_id}/note")
+async def update_call_note(
+    call_id: str,
+    body: _NoteBody,
+    background_tasks: _BG,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Save salesperson progress (status + notes) on the call row."""
+    logger.info("[BACKEND_NOTE_UPDATE] call_id=%s org=%s", call_id, user.organization_id)
+
+    # Validate status
+    if body.call_status is not None and body.call_status not in VALID_PROGRESS_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Invalid status: {body.call_status}")
+
+    # Validate notes length
+    if body.notes is not None and len(body.notes) > MAX_NOTES_LENGTH:
+        raise HTTPException(status_code=422, detail=f"Notes must be {MAX_NOTES_LENGTH} characters or fewer")
+
+    call = db.query(Call).filter(
+        Call.id == call_id,
+        Call.organization_id == user.organization_id,
+    ).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    if body.call_status is not None:
+        call.call_status = body.call_status
+    if body.notes is not None:
+        call.notes = body.notes
+    now = datetime.now(timezone.utc)
+    call.updated_at = now
+
+    # Commit BEFORE broadcasting — WebSocket event only fires after DB success
+    db.commit()
+    logger.info("[BACKEND_NOTE_UPDATE_CONFIRMED] call_id=%s status=%s ts=%s",
+                call_id, call.call_status, now.isoformat())
+
+    org_id  = user.organization_id
+    payload = {
+        "event":       "call_updated",
+        "call_id":     call_id,
+        "call_status": call.call_status,
+        "notes":       call.notes,
+        "updated_at":  now.isoformat(),
+    }
+    background_tasks.add_task(manager.broadcast, org_id, payload)
+
+    return {
+        "status": "success",
+        "call": {
+            "id":          call_id,
+            "call_status": call.call_status,
+            "notes":       call.notes,
+            "updated_at":  now.isoformat(),
+        },
     }
 
 

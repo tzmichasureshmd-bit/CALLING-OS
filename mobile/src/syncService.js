@@ -1,16 +1,15 @@
 import { useEffect, useRef } from "react";
-import { AppState } from "react-native";
+import { AppState, NativeEventEmitter, NativeModules, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as TaskManager from "expo-task-manager";
 import * as BackgroundFetch from "expo-background-fetch";
 import { useAuth } from "./AuthContext";
 import {
+  getRealCallLog,
   getRecentCalls,
   getCallsLastDays,
-  markCallsSynced,
-  enqueueRecordings,
-  getUploadQueue,
-  saveUploadQueue,
+  applySimFilter,
+  findRecordingForCall,
   uploadRecording,
 } from "./callLogService";
 import {
@@ -23,47 +22,40 @@ import {
 import {
   setupNotificationChannels,
   requestNotificationPermission,
-  notifyCallSyncing,
-  notifyCallSynced,
   notifyCallCompleted,
   notifyRecordingUploading,
   notifyRecordingUploaded,
   notifyTranscriptionCompleted,
 } from "./notificationManager";
-import { checkPermissions } from "./nativeModules";
-import { api } from "./api";
+import { checkPermissions, startCallLogObserver, stopCallLogObserver } from "./nativeModules";
+import { api, BASE_URL } from "./api";
 
-const BG_TASK_NAME        = "CALLNEXA_BG_SYNC";
-const SYNCED_IDS_KEY      = "callos_synced_ids";
-const LAST_SYNC_TS_KEY    = "callos_last_sync_ts";
-const LAST_ANDROID_ID_KEY = "callos_last_android_id";
-const BATCH_SIZE          = 50;
-const BATCH_DELAY_MS      = 600;
-const INSTANT_POLL_MS     = 8_000;  // check for new call log entry every 8s
+const BG_TASK_NAME   = "CALLNEXA_BG_SYNC";
+const BATCH_SIZE     = 50;
+const BATCH_DELAY_MS = 600;
+const FALLBACK_POLL_MS = 15_000;
 
-let _lastKnownAndroidId = null;
+const INSTALL_DATE_KEY = "callos_install_date";
 
-async function _hasNewCallLogEntry() {
+// ── Install-time cutoff ───────────────────────────────────────────────────────
+// Returns the ms timestamp of app installation.
+// Written once on first launch (AuthContext.ensureInstallDate), never overwritten.
+// On reinstall AsyncStorage is cleared so a new timestamp is written.
+export async function getInstallCutoffMs() {
   try {
-    const { getLatestCallLogId } = require("./callLogService");
-    const latest = await getLatestCallLogId();
-    if (!latest) return false;
-    if (_lastKnownAndroidId === null) {
-      const stored = await AsyncStorage.getItem(LAST_ANDROID_ID_KEY).catch(() => null);
-      _lastKnownAndroidId = stored || latest;
-      await AsyncStorage.setItem(LAST_ANDROID_ID_KEY, latest);
-      return false;
-    }
-    if (latest !== _lastKnownAndroidId) {
-      _lastKnownAndroidId = latest;
-      await AsyncStorage.setItem(LAST_ANDROID_ID_KEY, latest);
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
+    const stored = await AsyncStorage.getItem(INSTALL_DATE_KEY);
+    if (stored) return new Date(stored).getTime();
+  } catch {}
+  // Fallback: write now so future calls have a value
+  const now = new Date().toISOString();
+  try { await AsyncStorage.setItem(INSTALL_DATE_KEY, now); } catch {}
+  return Date.now();
 }
+
+// ── Session-only dedup set ────────────────────────────────────────────────────
+// Tracks client_event_ids confirmed by the backend this session.
+// NOT persisted — backend is the source of truth across restarts.
+const _sessionConfirmed = new Set();
 
 // ── Battery ───────────────────────────────────────────────────────────────────
 async function getBatteryLevel() {
@@ -74,213 +66,225 @@ async function getBatteryLevel() {
   } catch { return null; }
 }
 
-// ── Filter unsynced calls ─────────────────────────────────────────────────────
-async function filterUnsynced(calls) {
-  const raw = await AsyncStorage.getItem(SYNCED_IDS_KEY).catch(() => null);
-  const synced = raw ? new Set(JSON.parse(raw)) : new Set();
-  return calls.filter(c => !synced.has(c.client_event_id));
-}
-
-// ── Batch POST to backend ─────────────────────────────────────────────────────
-async function batchPost(deviceId, calls) {
+// ── Direct API sync — no local queue, strict confirmation ────────────────────
+/**
+ * Syncs a batch of calls directly to the backend.
+ * A call is only marked confirmed when the backend response contains
+ * status === "accepted" (inserted) or status === "duplicate" (already persisted).
+ * Any other response is treated as a failure — no local save, no false sync mark.
+ */
+async function directSync(deviceId, calls) {
   if (!calls.length) return;
-  const confirmed = [];
+
   for (let i = 0; i < calls.length; i += BATCH_SIZE) {
     const batch = calls.slice(i, i + BATCH_SIZE);
-    // Mark SYNCING in status store before request
-    await Promise.all(batch.map(c =>
-      updateSyncStatus(c.client_event_id, STATUS.SYNCING, {
-        phone_number: c.phone_number,
-        contact_name: c.contact_name || null,
-        call_type: c.call_type,
-        duration_seconds: c.duration_seconds,
-        start_time: c.start_time,
-      }).catch(() => {})
-    ));
+
+    batch.forEach(c => updateSyncStatus(c.client_event_id, STATUS.SYNCING, {
+      phone_number:     c.phone_number,
+      contact_name:     c.contact_name || null,
+      call_type:        c.call_type,
+      duration_seconds: c.duration_seconds,
+      start_time:       c.start_time,
+    }));
+
+    const syncUrl = `${BASE_URL}/calls/sync`;
+    console.log(`[CALL_SYNC_REQUEST] method=POST url=${syncUrl} batch=${Math.floor(i / BATCH_SIZE) + 1} count=${batch.length} device=${deviceId} ts=${Date.now()}`);
+
+    let res;
     try {
-      const res = await api.syncCalls(deviceId, batch);
-      if ((res.accepted || 0) + (res.duplicates || 0) > 0) {
-        confirmed.push(...batch);
-        // Update per-call status with server-assigned call_id
-        if (res.results?.length) {
-          await Promise.all(res.results.map(r =>
-            updateSyncStatus(r.client_event_id, STATUS.SYNCED, { call_id: r.call_id }).catch(() => {})
-          ));
-        }
-        // Fire "CallNexa — New Call" notification for each confirmed call
-        await Promise.all(batch.map(c =>
-          notifyCallCompleted({ ...c, call_id: res.results?.find(r => r.client_event_id === c.client_event_id)?.call_id }).catch(() => {})
-        ));
+      res = await api.syncCalls(deviceId, batch);
+      console.log(`[CALL_SYNC_RESPONSE] url=${syncUrl} status=200 accepted=${res.accepted} dup=${res.duplicates} failed=${res.failed} ts=${Date.now()}`);
+    } catch (e) {
+      const msg = e?.message || "unknown error";
+      const isOffline = msg.includes("Network request failed") ||
+                        msg.includes("timed out") ||
+                        msg.includes("network") ||
+                        msg.includes("internet") ||
+                        e?.name === "AbortError";
+      const is404    = msg.includes("404") || msg.includes("Not Found");
+      const isAuth   = msg.includes("401") || msg.includes("403") || msg.includes("Unauthorized") || msg.includes("Forbidden");
+      const isServer = msg.includes("500") || msg.includes("502") || msg.includes("503");
+
+      if (is404) {
+        console.warn(`[CALL_SYNC_404] url=${syncUrl} error=${msg} ts=${Date.now()}`);
+      } else if (isAuth) {
+        console.warn(`[CALL_SYNC_AUTH_ERROR] url=${syncUrl} error=${msg} ts=${Date.now()}`);
+      } else if (isServer) {
+        console.warn(`[CALL_SYNC_SERVER_ERROR] url=${syncUrl} error=${msg} ts=${Date.now()}`);
+      } else if (isOffline) {
+        console.warn(`[SYNC_OFFLINE] url=${syncUrl} error=${msg} ts=${Date.now()}`);
       } else {
-        await Promise.all(batch.map(c =>
-          updateSyncStatus(c.client_event_id, STATUS.SYNC_FAILED).catch(() => {})
-        ));
+        console.warn(`[SYNC_FAILED] url=${syncUrl} error=${msg} ts=${Date.now()}`);
       }
-      console.log(`[SYNC] batch ${Math.floor(i / BATCH_SIZE) + 1}: +${res.accepted} dup=${res.duplicates} failed=${res.failed}`);
-    } catch (e) {
-      console.warn(`[SYNC] batch failed: ${e?.message}`);
-      await Promise.all(batch.map(c =>
-        updateSyncStatus(c.client_event_id, STATUS.SYNC_FAILED, { last_error: e?.message }).catch(() => {})
-      ));
-    }
-    if (i + BATCH_SIZE < calls.length)
-      await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
-  }
-  if (confirmed.length) {
-    await markCallsSynced(confirmed);
-    await AsyncStorage.setItem(LAST_SYNC_TS_KEY, String(Date.now()));
-  }
-}
 
-// ── Recording upload queue ────────────────────────────────────────────────────
-async function processUploadQueue(token) {
-  const queue = await getUploadQueue();
-  if (!queue.length) return;
-  const remaining = [];
-  const MAX_RETRIES = 5;
+      const errStatus = isOffline ? STATUS.SYNC_OFFLINE : STATUS.SYNC_FAILED;
+      const errMsg    = isOffline ? "No internet connection — will retry when online" : msg;
+      batch.forEach(c => updateSyncStatus(c.client_event_id, errStatus, { last_error: errMsg }));
 
-  for (const item of queue) {
-    if ((item.retryCount || 0) >= MAX_RETRIES) {
-      await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_FAILED, {
-        last_error: `Max retries (${MAX_RETRIES}) exceeded`,
-      }).catch(() => {});
+      if (i + BATCH_SIZE < calls.length) await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
       continue;
     }
 
-    // Exponential backoff: skip items that failed recently (fixes Bug 4)
-    if (item.last_attempt_at && item.retryCount > 0) {
-      const backoffMs = Math.min(Math.pow(2, item.retryCount) * 10000, 300000); // 10s, 20s, 40s … max 5min
-      const elapsed = Date.now() - new Date(item.last_attempt_at).getTime();
-      if (elapsed < backoffMs) {
-        remaining.push(item);
-        continue;
+    // Process per-call results — only accept "accepted" or "duplicate" as confirmed
+    const confirmed = [];
+    for (const r of (res.results || [])) {
+      if (r.status === "accepted") {
+        // Backend confirmed INSERT
+        console.log(`[BACKEND_INSERT_CONFIRMED] client_event_id=${r.client_event_id} call_id=${r.call_id} ts=${Date.now()}`);
+        _sessionConfirmed.add(r.client_event_id);
+        updateSyncStatus(r.client_event_id, STATUS.SYNCED, { call_id: r.call_id });
+        confirmed.push({ ...batch.find(c => c.client_event_id === r.client_event_id), call_id: r.call_id });
+      } else if (r.status === "duplicate") {
+        // Backend confirmed already persisted
+        console.log(`[BACKEND_DUPLICATE_CONFIRMED] client_event_id=${r.client_event_id} call_id=${r.call_id} ts=${Date.now()}`);
+        _sessionConfirmed.add(r.client_event_id);
+        updateSyncStatus(r.client_event_id, STATUS.SYNCED, { call_id: r.call_id });
+        confirmed.push({ ...batch.find(c => c.client_event_id === r.client_event_id), call_id: r.call_id });
+      } else {
+        // status === "failed" or unexpected — do NOT mark synced
+        console.warn(`[SYNC_FAILED] client_event_id=${r.client_event_id} status=${r.status} error=${r.error || "none"} ts=${Date.now()}`);
+        updateSyncStatus(r.client_event_id, STATUS.SYNC_FAILED, { last_error: r.error || "backend rejected" });
       }
     }
 
-    // Resolve server call_id: status store first, then backend lookup
-    let callId = item.call_id || null;
-    if (!callId) {
-      try {
-        const { getCallStatus } = require("./callStatusStore");
-        const st = await getCallStatus(item.client_event_id);
-        callId = st?.call_id || null;
-      } catch {}
-    }
-    if (!callId) {
-      try {
-        const calls = await api.getCalls({ q: item.client_event_id, page_size: 1 });
-        callId = calls?.items?.[0]?.id || null;
-      } catch {}
-    }
-    if (!callId) {
-      remaining.push({ ...item, retryCount: (item.retryCount || 0) + 1, last_attempt_at: new Date().toISOString() });
-      continue;
+    // Handle calls with no result entry (backend didn't return a result for them)
+    const resultIds = new Set((res.results || []).map(r => r.client_event_id));
+    batch.filter(c => !resultIds.has(c.client_event_id)).forEach(c => {
+      console.warn(`[SYNC_FAILED] no result for client_event_id=${c.client_event_id} ts=${Date.now()}`);
+      updateSyncStatus(c.client_event_id, STATUS.SYNC_FAILED, { last_error: "no result in backend response" });
+    });
+
+    // Notify and kick off recording check for confirmed calls
+    for (const c of confirmed) {
+      notifyCallCompleted(c).catch(() => {});
+      _checkAndUploadRecording(c).catch(() => {});
     }
 
-    // Mark UPLOADING in status store
-    await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_UPLOADING).catch(() => {});
-    await notifyRecordingUploading({ client_event_id: item.client_event_id, contact_name: null, phone_number: null }).catch(() => {});
-
-    try {
-      const result = await uploadRecording(callId, item.path, token);
-      // uploadRecording now throws on failure — reaching here means success
-      await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_UPLOADED, {
-        call_id: callId,
-        recording_path: item.path,
-      }).catch(() => {});
-      await notifyRecordingUploaded({ client_event_id: item.client_event_id, call_id: callId, contact_name: null, phone_number: null }).catch(() => {});
-
-      // Auto-trigger transcription immediately after confirmed upload
-      await updateTranscriptStatus(item.client_event_id, STATUS.TRANSCRIPTION_PENDING).catch(() => {});
-      _triggerTranscription(callId, item.client_event_id, token).catch(() => {});
-    } catch (e) {
-      await updateRecordingStatus(item.client_event_id, STATUS.RECORDING_FAILED, {
-        last_error: e?.message,
-      }).catch(() => {});
-      remaining.push({
-        ...item,
-        call_id: callId,
-        retryCount: (item.retryCount || 0) + 1,
-        last_attempt_at: new Date().toISOString(),
-        last_error: e?.message,
-      });
-    }
+    if (i + BATCH_SIZE < calls.length) await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
   }
-  await saveUploadQueue(remaining);
 }
 
-// ── Auto-trigger transcription after confirmed upload ─────────────────────────
+// ── Recording upload (no local queue) ────────────────────────────────────────
+/**
+ * Checks for a recording file and uploads it directly.
+ * No local queue — if upload fails, the error is logged and exposed in diagnostics.
+ * The backend recording_status column tracks the real state.
+ */
+async function _checkAndUploadRecording(call) {
+  if (!call.call_id) return;
+
+  // Step 1: detect
+  updateRecordingStatus(call.client_event_id, STATUS.RECORDING_CHECK);
+  const found = await findRecordingForCall(call); // logs DETECTION_STARTED, FOUND or NOT_AVAILABLE
+
+  if (!found) {
+    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_NOT_AVAILABLE, {
+      recording_error: "Recording unavailable on this device or for this call.",
+    });
+    return;
+  }
+
+  // Step 2: queued
+  updateRecordingStatus(call.client_event_id, STATUS.RECORDING_QUEUED, {
+    recording_path: found.path,
+  });
+
+  // Step 3: get token
+  let token = null;
+  try { token = await require("expo-secure-store").getItemAsync("callos_token"); } catch {}
+  if (!token) token = await AsyncStorage.getItem("callos_token").catch(() => null);
+  if (!token) {
+    console.warn(`[RECORDING_UPLOAD_FAILED] client_event_id=${call.client_event_id} reason=no_auth_token ts=${Date.now()}`);
+    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_FAILED, {
+      recording_error: "Authentication token not available.",
+    });
+    return;
+  }
+
+  // Step 4: upload
+  updateRecordingStatus(call.client_event_id, STATUS.RECORDING_UPLOADING);
+  notifyRecordingUploading({ client_event_id: call.client_event_id, contact_name: null, phone_number: null }).catch(() => {});
+  console.log(`[RECORDING_UPLOAD_STARTED] client_event_id=${call.client_event_id} call_id=${call.call_id} size=${found.fileSize} ts=${Date.now()}`);
+
+  let uploadResult;
+  try {
+    uploadResult = await uploadRecording(call.call_id, found.path, token);
+  } catch (e) {
+    const errMsg = e?.message || "unknown upload error";
+    console.warn(`[RECORDING_UPLOAD_FAILED] client_event_id=${call.client_event_id} call_id=${call.call_id} error=${errMsg} ts=${Date.now()}`);
+    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_FAILED, {
+      recording_error: errMsg,
+    });
+    // Do NOT trigger transcription on upload failure
+    return;
+  }
+
+  // Step 5: confirmed — only now mark uploaded and trigger transcription
+  console.log(`[RECORDING_UPLOAD_CONFIRMED] client_event_id=${call.client_event_id} call_id=${call.call_id} ts=${Date.now()}`);
+  updateRecordingStatus(call.client_event_id, STATUS.RECORDING_UPLOADED, {
+    call_id: call.call_id,
+    recording_path: found.path,
+    recording_uploaded_at: new Date().toISOString(),
+  });
+  notifyRecordingUploaded({
+    client_event_id: call.client_event_id,
+    call_id: call.call_id,
+    contact_name: null,
+    phone_number: null,
+  }).catch(() => {});
+
+  // Transcription only after confirmed upload
+  updateTranscriptStatus(call.client_event_id, STATUS.TRANSCRIPTION_PENDING);
+  _triggerTranscription(call.call_id, call.client_event_id, token).catch(() => {});
+}
+
+// ── Transcription ─────────────────────────────────────────────────────────────
 async function _triggerTranscription(callId, clientEventId, token) {
   if (!callId || !token) return;
   try {
-    const { BASE_URL } = require("./api");
     const resp = await fetch(`${BASE_URL}/transcripts/${callId}/transcribe`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     });
-    const data = await resp.json().catch(() => ({}));
     if (resp.ok) {
-      await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIBING).catch(() => {});
-      console.log(`[TRANSCRIPTION] triggered for call ${callId}: ${data.status}`);
+      updateTranscriptStatus(clientEventId, STATUS.TRANSCRIBING);
       _pollTranscriptionStatus(callId, clientEventId, token, 0).catch(() => {});
     } else {
-      await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
-      console.warn(`[TRANSCRIPTION] trigger failed for ${callId}: ${data.detail || resp.status}`);
+      updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED);
     }
-  } catch (e) {
-    await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
-    console.warn(`[TRANSCRIPTION] trigger error: ${e?.message}`);
+  } catch {
+    updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED);
   }
 }
 
-// Active poll set — prevents duplicate polling chains for same call
 const _activePolls = new Set();
 
-// Poll backend until transcription completes or fails.
-// Extended: up to 40 attempts × 10s = ~6.5 minutes (fixes Bug 6).
-// After initial window, marks TRANSCRIPTION_STILL_PROCESSING instead of FAILED.
 async function _pollTranscriptionStatus(callId, clientEventId, token, attempt) {
-  const MAX_ATTEMPTS      = 40;   // 40 × 10s = ~6.5 min
-  const STILL_PROC_AFTER  = 12;   // after 12 attempts (~2 min), show "still processing"
+  const MAX_ATTEMPTS = 40;
   const pollKey = `${callId}-${clientEventId}`;
-
   if (attempt === 0) {
     if (_activePolls.has(pollKey)) return;
     _activePolls.add(pollKey);
   }
-
   if (attempt >= MAX_ATTEMPTS) {
     _activePolls.delete(pollKey);
-    // Do NOT mark as failed — backend may still be processing a long recording
-    await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_STILL_PROCESSING).catch(() => {});
+    updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_STILL_PROCESSING);
     return;
   }
-
   await new Promise(r => setTimeout(r, 10000));
   try {
-    const { BASE_URL } = require("./api");
-    const resp = await fetch(`${BASE_URL}/transcripts/${callId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!resp.ok) {
-      _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {});
-      return;
-    }
+    const resp = await fetch(`${BASE_URL}/transcripts/${callId}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!resp.ok) { _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {}); return; }
     const data = await resp.json().catch(() => ({}));
-    const status = data.transcript_status;
-    if (status === 'completed') {
+    if (data.transcript_status === "completed") {
       _activePolls.delete(pollKey);
-      await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_COMPLETED).catch(() => {});
-      console.log(`[TRANSCRIPTION] completed for call ${callId}`);
-      await notifyTranscriptionCompleted({ client_event_id: clientEventId, call_id: callId, contact_name: null }).catch(() => {});
-    } else if (status === 'failed') {
+      updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_COMPLETED);
+      notifyTranscriptionCompleted({ client_event_id: clientEventId, call_id: callId, contact_name: null }).catch(() => {});
+    } else if (data.transcript_status === "failed") {
       _activePolls.delete(pollKey);
-      await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED).catch(() => {});
+      updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED);
     } else {
-      // Still processing — update status label after threshold
-      if (attempt >= STILL_PROC_AFTER) {
-        await updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_STILL_PROCESSING).catch(() => {});
-      }
+      if (attempt >= 12) updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_STILL_PROCESSING);
       _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {});
     }
   } catch {
@@ -288,10 +292,7 @@ async function _pollTranscriptionStatus(callId, clientEventId, token, attempt) {
   }
 }
 
-// ── Main sync cycle ─────────────────────────────────────────────────────────
-// instant    = new call log entry detected — sync immediately
-// foreground = last 2h fallback while app open
-// reconcile  = since last sync ts (app-start / resume / background)
+// ── Main sync cycle ───────────────────────────────────────────────────────────
 export async function runSyncCycle(deviceId, mode) {
   if (!deviceId) return;
   try {
@@ -299,43 +300,43 @@ export async function runSyncCycle(deviceId, mode) {
     if (mode === "instant" || mode === "foreground") {
       candidates = await getRecentCalls();
     } else {
-      const lastTs = await AsyncStorage.getItem(LAST_SYNC_TS_KEY).catch(() => null);
-      const msSince = lastTs ? Date.now() - parseInt(lastTs) : 24 * 60 * 60 * 1000;
-      const daysSince = Math.min(30, Math.max(2 / 24, msSince / 86400000 + 0.05));
-      candidates = await getCallsLastDays(daysSince);
+      candidates = await getCallsLastDays(7);
     }
 
-    // Apply selected-SIM filter before sync
-    let filtered = candidates;
-    try {
-      const { getSelectedSimIdentity } = require("./callLogService");
-      const { subscriptionId: selSubId, slot: selSlot } = await getSelectedSimIdentity();
-      if (selSubId !== null || selSlot !== null) {
-        filtered = candidates.filter((c) => {
-          if (selSubId && c.subscription_id) return c.subscription_id === selSubId;
-          if (selSlot !== null && c.sim_slot !== null) return c.sim_slot === selSlot + 1;
-          return true;
-        });
-      }
-    } catch { /* fallback: use all candidates */ }
+    // ── Install-time cutoff ───────────────────────────────────────────────────
+    // Never sync calls that existed before this app was installed.
+    // Prevents importing the device's full call history on first launch.
+    const cutoffMs = await getInstallCutoffMs();
+    const afterCutoff = candidates.filter(c => c._start_ms >= cutoffMs);
+    const filteredOut = candidates.length - afterCutoff.length;
+    if (filteredOut > 0) {
+      console.log(`[CALL_SYNC_CUTOFF] mode=${mode} cutoff=${new Date(cutoffMs).toISOString()} filtered_out=${filteredOut} eligible=${afterCutoff.length} ts=${Date.now()}`);
+    }
 
-    const newCalls = await filterUnsynced(filtered);
+    // Apply SIM filter
+    const simFiltered = await applySimFilter(afterCutoff);
+
+    // Filter out calls already confirmed this session
+    const newCalls = simFiltered.filter(c => !_sessionConfirmed.has(c.client_event_id));
+
     if (!newCalls.length) return;
 
-    console.log(`[SYNC] ${mode}: ${newCalls.length} new calls`);
-    await batchPost(deviceId, newCalls);
-    await enqueueRecordings(newCalls);
+    console.log(`[CALL_SYNC_ELIGIBLE] mode=${mode} new_calls=${newCalls.length} ts=${Date.now()}`);
+    newCalls.forEach(c => upsertCallStatus(c.client_event_id, {
+      sync_status:      STATUS.DETECTED,
+      phone_number:     c.phone_number,
+      call_type:        c.call_type,
+      duration_seconds: c.duration_seconds,
+      start_time:       c.start_time,
+    }));
 
-    let token = null;
-    try { token = await require("expo-secure-store").getItemAsync("callos_token"); } catch {}
-    if (!token) token = await AsyncStorage.getItem("callos_token").catch(() => null);
-    if (token) processUploadQueue(token).catch(() => {});
+    await directSync(deviceId, newCalls);
   } catch (e) {
-    console.warn(`[SYNC] runSyncCycle error: ${e?.message}`);
+    console.warn(`[SYNC_CYCLE_ERROR] mode=${mode} error=${e?.message} ts=${Date.now()}`);
   }
 }
 
-// ── Background task (WorkManager) ────────────────────────────────────────────
+// ── Background task ───────────────────────────────────────────────────────────
 TaskManager.defineTask(BG_TASK_NAME, async () => {
   try {
     const deviceId = await AsyncStorage.getItem("callos_device_id");
@@ -344,14 +345,8 @@ TaskManager.defineTask(BG_TASK_NAME, async () => {
       const perms = await checkPermissions().catch(() => ({}));
       const level = await getBatteryLevel();
       const res = await api.heartbeat(deviceId, {
-        is_online: true,
-        battery_level: level,
-        permissions_status: {
-          callLog: perms.callLog ?? false,
-          phoneState: perms.phoneState ?? false,
-          contacts: perms.contacts ?? false,
-          recording: perms.recording ?? false,
-        },
+        is_online: true, battery_level: level,
+        permissions_status: { callLog: perms.callLog ?? false, phoneState: perms.phoneState ?? false, contacts: perms.contacts ?? false, recording: perms.recording ?? false },
         background_sync_status: "active",
       });
       if (res?.sync_now) {
@@ -367,19 +362,11 @@ TaskManager.defineTask(BG_TASK_NAME, async () => {
   }
 });
 
-// ── Register background fetch ─────────────────────────────────────────────────
 export async function registerBackgroundSync() {
   try {
     const status = await BackgroundFetch.getStatusAsync();
-    if (
-      status === BackgroundFetch.BackgroundFetchStatus.Restricted ||
-      status === BackgroundFetch.BackgroundFetchStatus.Denied
-    ) return false;
-    await BackgroundFetch.registerTaskAsync(BG_TASK_NAME, {
-      minimumInterval: 15 * 60,
-      stopOnTerminate: false,
-      startOnBoot: true,
-    });
+    if (status === BackgroundFetch.BackgroundFetchStatus.Restricted || status === BackgroundFetch.BackgroundFetchStatus.Denied) return false;
+    await BackgroundFetch.registerTaskAsync(BG_TASK_NAME, { minimumInterval: 15 * 60, stopOnTerminate: false, startOnBoot: true });
     return true;
   } catch (e) {
     if (e.message?.includes("already")) return true;
@@ -390,17 +377,20 @@ export async function registerBackgroundSync() {
 // ── useAutoSync hook ──────────────────────────────────────────────────────────
 export function useAutoSync() {
   const { deviceId } = useAuth();
-  const appState     = useRef(AppState.currentState);
-  const heartbeatRef = useRef(null);
-  const pollRef      = useRef(null);
-  const syncingRef   = useRef(false);
-  const deviceIdRef  = useRef(deviceId);
+  const appState       = useRef(AppState.currentState);
+  const heartbeatRef   = useRef(null);
+  const fallbackRef    = useRef(null);
+  const syncingRef     = useRef(false);
+  const pendingSyncRef = useRef(false);
+  const deviceIdRef    = useRef(deviceId);
+  const observerSub    = useRef(null);
+  const mountedRef     = useRef(true);
 
-  // Keep ref in sync so AppState closure always has latest deviceId
   useEffect(() => { deviceIdRef.current = deviceId; }, [deviceId]);
 
   useEffect(() => {
     if (!deviceId) return;
+    mountedRef.current = true;
 
     setupNotificationChannels();
     requestNotificationPermission();
@@ -412,19 +402,11 @@ export function useAutoSync() {
       try {
         const [perms, battery] = await Promise.all([checkPermissions(), getBatteryLevel()]);
         const res = await api.heartbeat(dId, {
-          is_online: true,
-          battery_level: battery,
-          permissions_status: {
-            callLog:    perms.callLog    ?? false,
-            phoneState: perms.phoneState ?? false,
-            contacts:   perms.contacts   ?? false,
-            recording:  perms.recording  ?? false,
-          },
-          background_sync_status: "active",
-          app_version: "1.0.0",
+          is_online: true, battery_level: battery,
+          permissions_status: { callLog: perms.callLog ?? false, phoneState: perms.phoneState ?? false, contacts: perms.contacts ?? false, recording: perms.recording ?? false },
+          background_sync_status: "active", app_version: "1.0.0",
         });
         if (res?.sync_now) {
-          console.log("[SYNC] sync_now received from server — triggering full sync");
           const { doFirstFullSync } = require("./AuthContext");
           doFirstFullSync(dId).catch(() => {});
         }
@@ -432,30 +414,57 @@ export function useAutoSync() {
     }
 
     async function runSync(mode) {
-      if (syncingRef.current) return;
+      if (syncingRef.current) {
+        if (mode === "instant") {
+          pendingSyncRef.current = true;
+          console.log(`[DIRECT_API_SYNC_STARTED] queued pending sync (mode=instant) ts=${Date.now()}`);
+        }
+        return;
+      }
       syncingRef.current = true;
-      try { await runSyncCycle(deviceIdRef.current, mode); }
-      catch {} finally { syncingRef.current = false; }
+      pendingSyncRef.current = false;
+      try {
+        console.log(`[DIRECT_API_SYNC_STARTED] mode=${mode} ts=${Date.now()}`);
+        await runSyncCycle(deviceIdRef.current, mode);
+      } catch (e) {
+        console.warn(`[SYNC_CYCLE_ERROR] mode=${mode} error=${e?.message} ts=${Date.now()}`);
+      } finally {
+        syncingRef.current = false;
+        if (pendingSyncRef.current && mountedRef.current) {
+          pendingSyncRef.current = false;
+          console.log(`[DIRECT_API_SYNC_STARTED] running deferred instant sync ts=${Date.now()}`);
+          runSync("instant");
+        }
+      }
     }
 
     doHeartbeat();
     runSync("reconcile");
 
-    // Instant detection: poll call log ID every 8s.
-    // The moment Android writes a new call log entry (seconds after call ends)
-    // _hasNewCallLogEntry() returns true and we sync immediately.
-    pollRef.current = setInterval(async () => {
-      const hasNew = await _hasNewCallLogEntry();
-      if (hasNew) {
-        console.log("[SYNC] new call log entry — instant sync");
-        runSync("instant");
-      } else {
-        runSync("foreground");
-      }
-    }, INSTANT_POLL_MS);
+    // PRIMARY: ContentObserver native event
+    if (Platform.OS === "android" && NativeModules.CallLogModule) {
+      startCallLogObserver().then(started => {
+        if (!started) return;
+        if (!mountedRef.current) { stopCallLogObserver().catch(() => {}); return; }
+        const emitter = new NativeEventEmitter(NativeModules.CallLogModule);
+        const sub = emitter.addListener("callLogChanged", (latestId) => {
+          console.log(`[CALL_DETECTED] callLogChanged id=${latestId} ts=${Date.now()}`);
+          runSync("instant");
+        });
+        if (mountedRef.current) {
+          observerSub.current = sub;
+        } else {
+          sub.remove();
+          stopCallLogObserver().catch(() => {});
+        }
+      });
+    }
+
+    // FALLBACK: 15s poll
+    fallbackRef.current = setInterval(() => runSync("foreground"), FALLBACK_POLL_MS);
     heartbeatRef.current = setInterval(doHeartbeat, 60_000);
 
-    const sub = AppState.addEventListener("change", (next) => {
+    const appStateSub = AppState.addEventListener("change", (next) => {
       if (appState.current.match(/inactive|background/) && next === "active") {
         doHeartbeat();
         runSync("reconcile");
@@ -464,9 +473,13 @@ export function useAutoSync() {
     });
 
     return () => {
-      clearInterval(pollRef.current);
+      mountedRef.current = false;
+      clearInterval(fallbackRef.current);
       clearInterval(heartbeatRef.current);
-      sub.remove();
+      appStateSub.remove();
+      observerSub.current?.remove();
+      observerSub.current = null;
+      stopCallLogObserver().catch(() => {});
     };
   }, [deviceId]);
 }

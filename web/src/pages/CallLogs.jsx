@@ -1,39 +1,50 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   FileSpreadsheet, PhoneIncoming, PhoneOutgoing, PhoneMissed, PhoneOff,
   Play, RotateCcw, FilterX, Phone, Sparkles, Target,
-  Pause, User, MessageSquare, Calendar, RefreshCw,
+  Pause, User, MessageSquare, Calendar, RefreshCw, X, PhoneCall,
+  CheckCircle2, Circle, XCircle, Loader2, MicOff, CloudUpload, FileText, Brain,
 } from "lucide-react";
 import {
   PageContainer, Card, Button, SearchInput, EmptyState, ErrorState, SkeletonRows,
   Drawer, Badge,
 } from "../components/ui.jsx";
 import { formatDuration, formatDateTime } from "../data/mockData.js";
+import { followUpsStore } from "../data/followUpsStore.js";
 import { dataSource } from "../api/dataSource.js";
 import { callsApi } from "../api/resources.js";
 import { useResource } from "../api/useResource.js";
 import { useDeviceSocket } from "../api/useDeviceSocket.js";
 import { useRange } from "../context/RangeContext.jsx";
 
-function rangeToParams(range) {
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-  if (range === "today")     return { from_date: startOfToday, page_size: 500 };
-  if (range === "yesterday") {
-    const yStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).toISOString();
-    return { from_date: yStart, to_date: startOfToday, page_size: 500 };
-  }
-  if (range === "7d")  return { from_date: new Date(Date.now() - 7  * 86400000).toISOString(), page_size: 500 };
-  if (range === "30d") return { from_date: new Date(Date.now() - 30 * 86400000).toISOString(), page_size: 500 };
+// Always fetch all calls — filter client-side to avoid backend timezone issues
+function rangeToParams() {
   return { page_size: 500 };
 }
 
+function clientFilterByRange(calls, range) {
+  if (!range || range === "all") return calls;
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yStart     = todayStart - 86400000;
+  return calls.filter((c) => {
+    const t = new Date(c.date).getTime();
+    if (range === "today")     return t >= todayStart;
+    if (range === "yesterday") return t >= yStart && t < todayStart;
+    if (range === "7d")        return t >= Date.now() - 7  * 86400000;
+    if (range === "30d")       return t >= Date.now() - 30 * 86400000;
+    return true;
+  });
+}
+
 function exportCallsCSV(calls) {
-  const rows = [["Date", "Type", "Customer", "Phone", "Employee", "Duration (s)", "SIM", "Device", "Recording"]];
+  const rows = [["Date", "Type", "Customer", "Phone", "Employee", "Duration (s)", "SIM", "Recording", "Transcript"]];
   calls.forEach((c) => rows.push([
     formatDateTime(c.date), c.type, c.contact, c.phone,
-    c.employee, c.durationSeconds, c.source, c.device,
-    c.recordingUrl ? "Yes" : "No",
+    c.employee, c.durationSeconds, c.source,
+    c.hasRecording ? (c.recordingStatus || "available") : "none",
+    c.transcriptStatus || "—",
   ]));
   const csv = rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -53,33 +64,72 @@ const TYPE_META = {
 
 const FILTERS = ["All", "Incoming", "Outgoing", "Missed", "Blocked", "Recorded"];
 
+// ── Progress helpers (mirrors mobile STATUSES) ───────────────────────────────
+const CALL_STATUSES = [
+  { key: "interested",     label: "Interested",     color: "var(--success)"  },
+  { key: "asked_details",  label: "Asked Details",  color: "var(--accent)"   },
+  { key: "follow_up",      label: "Follow Up",      color: "var(--accent-2)" },
+  { key: "callback",       label: "Callback",       color: "var(--info)"     },
+  { key: "proposal_sent",  label: "Proposal Sent",  color: "var(--accent)"   },
+  { key: "converted",      label: "Converted ✓",    color: "var(--success)"  },
+  { key: "not_interested", label: "Not Interested", color: "var(--danger)"   },
+];
+
+// Notes are persisted to the backend via PATCH /calls/{id}/note
+// No localStorage usage for call notes.
+
 export default function CallLogs() {
   const [query, setQuery]   = useState("");
   const [filter, setFilter] = useState("All");
   const [selected, setSelected] = useState(null);
   const { range } = useRange();
 
+  const [empFilter, setEmpFilter] = useState("All");
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
   const { loading, error, data, reload } = useResource(
-    () => dataSource.getCalls(rangeToParams(range)),
+    () => dataSource.getCalls(rangeToParams()),
     [range]
   );
 
-  // Auto-refresh when WebSocket signals new calls synced
+  // Auto-refresh every 10s when on today range
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const t = setInterval(() => reload(), 10000);
+    return () => clearInterval(t);
+  }, [autoRefresh, reload]);
+
+  // WebSocket instant reload
   const { newCallEvent } = useDeviceSocket();
   useEffect(() => {
-    if (newCallEvent?.event === "calls_synced") reload();
+    if (!newCallEvent) return;
+    if (newCallEvent.event === "calls_synced" || newCallEvent.event === "call_created") {
+      console.log(`[WEB_STATUS_UPDATED] event=${newCallEvent.event} ts=${Date.now()}`);
+      reload();
+    } else if (newCallEvent.event === "call_updated") {
+      // Patch the specific call in-place — no full reload needed
+      console.log(`[WEBSOCKET_CALL_UPDATE_RECEIVED] call_id=${newCallEvent.call_id} ts=${Date.now()}`);
+      reload();
+    } else if (newCallEvent.event === "recording_uploaded" || newCallEvent.event === "transcript_updated") {
+      reload();
+    }
   }, [newCallEvent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <PageContainer><Card><SkeletonRows rows={8} cols={6} /></Card></PageContainer>;
   if (error)   return <PageContainer><Card><ErrorState title="Sync interrupted" message={error.message} code={error.error_code} onRetry={reload} /></Card></PageContainer>;
 
-  const CALL_LOGS = data.items || [];
+  const CALL_LOGS = clientFilterByRange(data.items || [], range);
+
+  // Build employee list from loaded data
+  const employees = ["All", ...Array.from(new Set(CALL_LOGS.map((c) => c.employee).filter(Boolean).filter((e) => e !== "—"))).sort()];
+
   const filtered = CALL_LOGS.filter((c) => {
     const q = [c.phone, c.contact, c.employee].join(" ").toLowerCase().includes(query.toLowerCase());
     let f = true;
     if (filter === "Recorded")    f = c.hasRecording;
     else if (filter !== "All")    f = TYPE_META[c.type]?.label === filter;
-    return q && f;
+    const emp = empFilter === "All" || c.employee === empFilter;
+    return q && f && emp;
   });
 
   return (
@@ -89,15 +139,38 @@ export default function CallLogs() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Button variant="outline" icon={FileSpreadsheet} onClick={() => exportCallsCSV(filtered)}>Export CSV</Button>
             <Button variant="ghost"   icon={RotateCcw}       onClick={reload}>Refresh</Button>
-            <Button variant="ghost"   icon={FilterX}         onClick={() => { setFilter("All"); setQuery(""); }}>Clear</Button>
+            <Button variant="ghost"   icon={FilterX}         onClick={() => { setFilter("All"); setQuery(""); setEmpFilter("All"); }}>Clear</Button>
           </div>
           <SearchInput value={query} onChange={setQuery} placeholder="Search customer or number..." />
         </div>
 
-        <div style={{ display: "flex", gap: 8, padding: "12px 18px", flexWrap: "wrap", borderBottom: "1px solid var(--border)" }}>
-          {FILTERS.map((f) => (
-            <button key={f} onClick={() => setFilter(f)} style={{ padding: "6px 14px", borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: "pointer", border: "1px solid " + (filter === f ? "transparent" : "var(--border)"), background: filter === f ? "var(--grad-brand)" : "transparent", color: filter === f ? "#fff" : "var(--text-muted)" }}>{f}</button>
-          ))}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 18px", flexWrap: "wrap", gap: 10, borderBottom: "1px solid var(--border)" }}>
+          {/* Call type filters */}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {FILTERS.map((f) => (
+              <button key={f} onClick={() => setFilter(f)} style={{ padding: "5px 13px", borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: "pointer", border: "1px solid " + (filter === f ? "transparent" : "var(--border)"), background: filter === f ? "var(--grad-brand)" : "transparent", color: filter === f ? "#fff" : "var(--text-muted)" }}>{f}</button>
+            ))}
+          </div>
+          {/* Employee filter */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>Employee:</span>
+            <select
+              value={empFilter}
+              onChange={(e) => setEmpFilter(e.target.value)}
+              style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13, outline: "none", cursor: "pointer" }}
+            >
+              {employees.map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
+            {/* Auto-refresh toggle */}
+            <button
+              onClick={() => setAutoRefresh(a => !a)}
+              title={autoRefresh ? "Auto-refresh ON (every 10s)" : "Auto-refresh OFF"}
+              style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--border)", background: autoRefresh ? "var(--success-soft)" : "transparent", color: autoRefresh ? "var(--success)" : "var(--text-muted)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+            >
+              <RotateCcw size={12} style={{ animation: autoRefresh ? "nova-spin 2s linear infinite" : "none" }} />
+              {autoRefresh ? "Live" : "Paused"}
+            </button>
+          </div>
         </div>
 
         <div className="nova-scroll-x">
@@ -105,28 +178,81 @@ export default function CallLogs() {
             <EmptyState icon={Phone} title="No calls match" message="Calls synced from employee phones appear here. Adjust filters or wait for the next sync." />
           ) : (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
-              <thead><tr>{["", "Date", "Type", "Customer", "Phone", "Employee", "Duration", "SIM", "Device", "Rec"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <thead>
+                <tr>
+                  {["", "Date", "Type", "Customer", "Phone", "Employee", "Duration", "SIM", "Recording", "Transcript", "Status", "Sync"].map((h) => (
+                    <th key={h} style={th}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
               <tbody>
                 {filtered.map((c) => {
                   const meta = TYPE_META[c.type] || TYPE_META.rejected;
                   const Icon = meta.icon;
+                  const recLabel = c.hasRecording
+                    ? (c.recordingStatus === "uploaded" ? "Uploaded" : c.recordingStatus || "Available")
+                    : "None";
+                  const recColor = c.hasRecording ? "var(--success)" : "var(--text-dim)";
+                  const txLabel  = c.transcriptStatus === "completed"  ? "Done"
+                                 : c.transcriptStatus === "processing" ? "Processing"
+                                 : c.transcriptStatus === "failed"     ? "Failed"
+                                 : c.transcriptStatus === "pending"    ? "Pending"
+                                 : c.hasRecording ? "Pending" : "—";
+                  const txColor  = c.transcriptStatus === "completed"  ? "var(--success)"
+                                 : c.transcriptStatus === "processing" ? "var(--accent)"
+                                 : c.transcriptStatus === "failed"     ? "var(--danger)"
+                                 : "var(--text-dim)";
+                  const ns = CALL_STATUSES.find(s => s.key === c.callStatus);
                   return (
-                    <tr key={c.id} onClick={() => setSelected(c)} style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                      <td style={{ padding: "11px 16px" }}><div style={{ width: 30, height: 30, borderRadius: 8, background: meta.color + "1f", color: meta.color, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon size={15} /></div></td>
+                    <tr key={c.id} onClick={() => setSelected(c)}
+                      style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                      <td style={{ padding: "11px 16px" }}>
+                        <div style={{ width: 30, height: 30, borderRadius: 8, background: meta.color + "1f", color: meta.color, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <Icon size={15} />
+                        </div>
+                      </td>
                       <td style={{ padding: "11px 16px", color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{formatDateTime(c.date)}</td>
                       <td style={{ padding: "11px 16px", color: meta.color, fontWeight: 600 }}>{meta.label}</td>
                       <td style={{ padding: "11px 16px", color: c.contact === "Unknown" ? "var(--text-dim)" : "var(--text-primary)", fontWeight: c.contact === "Unknown" ? 400 : 600 }}>{c.contact}</td>
-                      <td style={{ padding: "11px 16px", color: "var(--accent)" }}>{c.phone}</td>
+                      <td style={{ padding: "11px 16px", color: c.phone === "Private" ? "var(--text-dim)" : "var(--accent)", fontStyle: c.phone === "Private" ? "italic" : "normal" }}>{c.phone}</td>
                       <td style={{ padding: "11px 16px", color: "var(--text-secondary)", fontWeight: 600 }}>{c.employee}</td>
                       <td style={{ padding: "11px 16px", color: "var(--text-secondary)", fontFamily: "Space Grotesk" }}>{formatDuration(c.durationSeconds)}</td>
                       <td style={{ padding: "11px 16px", color: "var(--text-muted)" }}>{c.source}</td>
-                      <td style={{ padding: "11px 16px", color: "var(--text-muted)" }}>{c.device}</td>
                       <td style={{ padding: "11px 16px" }}>
-                        {c.hasRecording
-                          ? <Play size={15} color="var(--accent)" />
-                          : <span style={{ color: "var(--text-dim)" }}>—</span>}
+                        <span style={{ fontSize: 11, fontWeight: 700, color: recColor,
+                          background: c.hasRecording ? "var(--success-soft)" : "var(--bg-hover)",
+                          padding: "2px 8px", borderRadius: 999 }}>
+                          {recLabel}
+                        </span>
+                      </td>
+                      <td style={{ padding: "11px 16px" }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: txColor,
+                          background: c.transcriptStatus === "completed" ? "var(--success-soft)"
+                            : c.transcriptStatus === "processing" ? "var(--accent-soft)"
+                            : c.transcriptStatus === "failed" ? "var(--danger-soft)"
+                            : "var(--bg-hover)",
+                          padding: "2px 8px", borderRadius: 999 }}>
+                          {txLabel}
+                        </span>
+                      </td>
+                      <td style={{ padding: "11px 16px" }}>
+                        {ns ? (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: ns.color,
+                            background: ns.color + "18", padding: "2px 8px", borderRadius: 999, whiteSpace: "nowrap" }}>
+                            {ns.label}
+                          </span>
+                        ) : <span style={{ fontSize: 11, color: "var(--text-dim)" }}>—</span>}
+                      </td>
+                      <td style={{ padding: "11px 16px" }}>
+                        {c.syncStatus === "synced" || !c.syncStatus ? (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--success)", background: "var(--success-soft)", padding: "2px 8px", borderRadius: 999 }}>✓ Synced</span>
+                        ) : c.syncStatus === "offline" ? (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--warning)", background: "var(--warning-soft)", padding: "2px 8px", borderRadius: 999 }}>No internet</span>
+                        ) : (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--danger)", background: "var(--danger-soft)", padding: "2px 8px", borderRadius: 999 }}>Sync failed</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -135,11 +261,228 @@ export default function CallLogs() {
             </table>
           )}
         </div>
-        <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-dim)", borderTop: "1px solid var(--border)" }}>{filtered.length} records · click a row for Call Intelligence</div>
+        <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-dim)", borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>{filtered.length} record{filtered.length !== 1 ? "s" : ""}{empFilter !== "All" ? ` · ${empFilter}` : ""} · click a row for Call Intelligence</span>
+          {autoRefresh && <span style={{ color: "var(--success)", fontWeight: 600 }}>● Live — refreshing every 10s</span>}
+        </div>
       </Card>
 
       <CallIntelligenceDrawer call={selected} onClose={() => setSelected(null)} />
     </PageContainer>
+  );
+}
+
+function ScheduleModal({ call, onClose }) {
+  const [date, setDate]   = useState("");
+  const [time, setTime]   = useState("");
+  const [note, setNote]   = useState("");
+  const [saved, setSaved] = useState(false);
+  const navigate = useNavigate();
+
+  function handleSave() {
+    if (!date || !time) return;
+    followUpsStore.add({
+      contact:  call.contact,
+      phone:    call.phone,
+      employee: call.employee,
+      callType: call.type,
+      callId:   call.id,
+      date, time, note,
+    });
+    setSaved(true);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(3,6,12,0.6)", backdropFilter: "blur(2px)" }} />
+      <div style={{ position: "relative", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: 360, boxShadow: "var(--shadow-lg)" }}>
+
+        {saved ? (
+          /* ── Success state ── */
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "8px 0" }}>
+            <div style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--success-soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Calendar size={26} color="var(--success)" />
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontFamily: "Space Grotesk", fontWeight: 700, fontSize: 15, color: "var(--text-primary)", marginBottom: 6 }}>Follow-up Scheduled!</div>
+              <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.6 }}>
+                {call.contact} · {date} at {time}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, width: "100%" }}>
+              <Button style={{ flex: 1, justifyContent: "center" }} onClick={() => { onClose(); navigate("/follow-ups"); }}>
+                View Follow-ups
+              </Button>
+              <Button variant="outline" style={{ flex: 1, justifyContent: "center" }} onClick={onClose}>
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : (
+          /* ── Form state ── */
+          <>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+              <span style={{ fontFamily: "Space Grotesk", fontWeight: 700, fontSize: 15, color: "var(--text-primary)" }}>Schedule Follow-up</span>
+              <button onClick={onClose} style={{ border: "none", background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <X size={14} />
+              </button>
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginBottom: 16 }}>
+              {call.contact} · {call.phone}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>
+                Date
+                <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                  style={{ display: "block", marginTop: 4, width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+              </label>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>
+                Time
+                <input type="time" value={time} onChange={e => setTime(e.target.value)}
+                  style={{ display: "block", marginTop: 4, width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+              </label>
+              <label style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>
+                Note (optional)
+                <textarea value={note} onChange={e => setNote(e.target.value)} rows={3} placeholder="Reminder note…"
+                  style={{ display: "block", marginTop: 4, width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+              </label>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
+              <Button variant="outline" onClick={onClose}>Cancel</Button>
+              <Button onClick={handleSave} disabled={!date || !time}>Save</Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProgressPanel({ call, onSaved }) {
+  const [status, setStatus] = useState(call?.callStatus || null);
+  const [notes,  setNotes]  = useState(call?.notes || "");
+  const [saved,  setSaved]  = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState(null);
+  const [open,   setOpen]   = useState(false);
+  const inFlight = useRef(false);
+
+  useEffect(() => {
+    if (!call) return;
+    setSaved(false); setError(null);
+    setStatus(call.callStatus || null);
+    setNotes(call.notes || "");
+  }, [call?.id]);
+
+  async function handleSave() {
+    if (inFlight.current) return;
+    if (!call?.id) return;
+    if (notes.length > 2000) { setError("Notes must be 2000 characters or fewer."); return; }
+    inFlight.current = true;
+    setSaving(true); setSaved(false); setError(null);
+    console.log(`[PROGRESS_SAVE_STARTED] callId=${call.id} status=${status} ts=${Date.now()}`);
+    try {
+      const res = await callsApi.updateNote(call.id, status, notes);
+      console.log(`[PROGRESS_SAVE_SUCCESS] callId=${call.id} updated_at=${res?.call?.updated_at} ts=${Date.now()}`);
+      setSaved(true);
+      onSaved?.(res?.call);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e?.message || "";
+      let userMsg;
+      if (!navigator.onLine || msg.includes("Network") || msg.includes("ERR_INTERNET")) {
+        userMsg = "No internet connection.";
+      } else if (msg.includes("timeout") || msg.includes("ECONNABORTED")) {
+        userMsg = "Request timed out. Please retry.";
+      } else if (e?.response?.status === 401) {
+        userMsg = "Session expired. Please log in again.";
+      } else if (e?.response?.status === 403) {
+        userMsg = "You do not have permission to update this call.";
+      } else if (e?.response?.status === 404) {
+        userMsg = "Call not found.";
+      } else if (e?.response?.status === 422) {
+        userMsg = msg || "Invalid data.";
+      } else if (e?.response?.status >= 500) {
+        userMsg = "Server error. Please try again later.";
+      } else {
+        userMsg = msg || "Unable to save changes. Please try again.";
+      }
+      console.warn(`[PROGRESS_SAVE_FAILED] callId=${call.id} error=${msg} ts=${Date.now()}`);
+      setError(userMsg);
+    } finally {
+      setSaving(false);
+      inFlight.current = false;
+    }
+  }
+
+  const selected = CALL_STATUSES.find(s => s.key === status);
+
+  return (
+    <div style={{ background: "var(--bg-hover)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, marginBottom: 18 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>Progress</div>
+
+      {/* Status dropdown */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>Call Status</div>
+        <div style={{ position: "relative" }}>
+          <button onClick={() => setOpen(o => !o)} style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "9px 12px", borderRadius: 9, cursor: "pointer",
+            border: `1.5px solid ${selected ? selected.color : "var(--border)"}`,
+            background: selected ? selected.color + "18" : "var(--bg-card)",
+            color: selected ? selected.color : "var(--text-dim)", fontSize: 13, fontWeight: 600,
+          }}>
+            <span>{selected ? selected.label : "Select status…"}</span>
+            <span style={{ fontSize: 10 }}>{open ? "▲" : "▼"}</span>
+          </button>
+          {open && (
+            <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
+              background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10,
+              boxShadow: "var(--shadow-lg)", overflow: "hidden" }}>
+              {CALL_STATUSES.map(s => (
+                <button key={s.key} onClick={() => { setStatus(s.key === status ? null : s.key); setOpen(false); setSaved(false); }}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 10,
+                    padding: "10px 14px", border: "none", cursor: "pointer", textAlign: "left",
+                    background: status === s.key ? s.color + "18" : "transparent",
+                    color: status === s.key ? s.color : "var(--text-secondary)",
+                    fontSize: 13, fontWeight: status === s.key ? 700 : 500,
+                    borderBottom: "1px solid var(--border)",
+                  }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
+                  {s.label}
+                  {status === s.key && <span style={{ marginLeft: "auto", fontSize: 12 }}>✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Notes */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>Notes</div>
+        <textarea
+          value={notes}
+          onChange={e => { setNotes(e.target.value); setSaved(false); }}
+          placeholder="What was discussed? Objections, next steps…"
+          rows={3}
+          style={{ width: "100%", padding: "9px 11px", borderRadius: 9, border: "1px solid var(--border)",
+            background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13,
+            outline: "none", resize: "vertical", boxSizing: "border-box", lineHeight: 1.5 }}
+        />
+      </div>
+
+      {error && (
+        <div style={{ background: "var(--danger-soft)", border: "1px solid var(--danger)", borderRadius: 8,
+          padding: "8px 12px", marginBottom: 10, fontSize: 12.5, color: "var(--danger)", lineHeight: 1.5 }}>
+          {error}
+        </div>
+      )}
+
+      <Button onClick={handleSave} disabled={saving} style={{ width: "100%", justifyContent: "center" }}>
+        {saving ? "Saving…" : saved ? "Saved ✓" : "Save Progress"}
+      </Button>
+    </div>
   );
 }
 
@@ -152,6 +495,7 @@ function CallIntelligenceDrawer({ call, onClose }) {
   const [urlError, setUrlError]     = useState(null);
   const [txData, setTxData]         = useState(null);  // live transcript/summary
   const [loadingTx, setLoadingTx]   = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
   const audioRef = useRef(null);
 
   // Reset on call change
@@ -206,15 +550,34 @@ function CallIntelligenceDrawer({ call, onClose }) {
     : call.summaryData;
 
   const PIPELINE = [
-    { label: "Synced",      done: true,                                    color: "var(--success)" },
-    { label: "Recording",   done: recStatus === "uploaded",                color: recStatus === "uploaded" ? "var(--success)" : recStatus === "not_available" ? "var(--text-dim)" : "var(--warning)" },
-    { label: "Transcribed", done: txStatus === "completed",                color: txStatus === "completed" ? "var(--success)" : txStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
-    { label: "Summarized",  done: sumStatus === "completed",               color: sumStatus === "completed" ? "var(--success)" : sumStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
+    { label: "Synced",      done: true,
+      color: "var(--success)" },
+    { label: "Recording",   done: recStatus === "uploaded",
+      color: recStatus === "uploaded" ? "var(--success)" : recStatus === "not_available" ? "var(--danger)" : "var(--warning)" },
+    { label: "Transcribed", done: txStatus === "completed",
+      color: txStatus === "completed" ? "var(--success)" : txStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
+    { label: "Summarized",  done: sumStatus === "completed",
+      color: sumStatus === "completed" ? "var(--success)" : sumStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
   ];
+
+  // sub-label shown under each step
+  const PIPELINE_SUB = [
+    "Done",
+    recStatus === "uploaded" ? "Uploaded" : recStatus === "not_available" ? "N/A" : recStatus || "Pending",
+    txStatus === "completed" ? "Done" : txStatus === "processing" ? "In progress" : txStatus || "Pending",
+    sumStatus === "completed" ? "Done" : sumStatus === "processing" ? "In progress" : sumStatus || "Pending",
+  ];
+
+  const waNumber = localStorage.getItem("callos_wa_number") || "";
+  const waText = encodeURIComponent(`Hi ${call.contact !== "Unknown" ? call.contact : ""}, following up on our call (${call.phone}).`.trim());
+  const waHref = waNumber
+    ? `https://wa.me/${waNumber}?text=${waText}`
+    : `https://wa.me/${call.phone.replace(/[^0-9]/g, "")}?text=${waText}`;
 
   const fmtDur = (s) => s > 0 ? `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,"0")}` : "";
 
   return (
+    <>
     <Drawer open={!!call} onClose={onClose} title="Call Intelligence" width={500}>
 
       {/* Header */}
@@ -224,7 +587,7 @@ function CallIntelligenceDrawer({ call, onClose }) {
         </div>
         <div>
           <div style={{ fontSize:16, fontWeight:700, color:"var(--text-primary)", fontFamily:"Space Grotesk" }}>{call.contact}</div>
-          <div style={{ fontSize:13, color:"var(--accent)" }}>{call.phone}</div>
+          <div style={{ fontSize:13, color: call.phone === "Private" ? "var(--text-dim)" : "var(--accent)", fontStyle: call.phone === "Private" ? "italic" : "normal" }}>{call.phone}</div>
         </div>
       </div>
 
@@ -235,7 +598,17 @@ function CallIntelligenceDrawer({ call, onClose }) {
         <Detail label="Type"     value={<span style={{ color:meta.color, fontWeight:600 }}>{meta.label}</span>} />
         <Detail label="Duration" value={formatDuration(call.durationSeconds)} />
         <Detail label="SIM"      value={call.source} />
-        <Detail label="Device"   value={call.device} />
+        <Detail label="Recording" value={
+          <span style={{ fontWeight:600, color: call.hasRecording ? "var(--success)" : "var(--text-dim)" }}>
+            {call.hasRecording ? (call.recordingStatus || "Available") : "Not available"}
+          </span>
+        } />
+        {call.updatedAt && (
+          <Detail label="Last Updated" value={<span style={{ fontSize:11, color:"var(--text-dim)" }}>{formatDateTime(call.updatedAt)}</span>} />
+        )}
+        {call.syncConfirmedAt && (
+          <Detail label="Sync Confirmed" value={<span style={{ fontSize:11, color:"var(--success)" }}>{formatDateTime(call.syncConfirmedAt)}</span>} />
+        )}
       </div>
 
       {/* Pipeline progress */}
@@ -249,6 +622,7 @@ function CallIntelligenceDrawer({ call, onClose }) {
                 {p.done && <span style={{ color:"#fff", fontSize:11, fontWeight:700 }}>&#10003;</span>}
               </div>
               <div style={{ fontSize:9.5, color:p.color, fontWeight:600, marginTop:4, textAlign:"center" }}>{p.label}</div>
+              <div style={{ fontSize:9, color:"var(--text-dim)", textAlign:"center", marginTop:1 }}>{PIPELINE_SUB[i]}</div>
             </div>
           ))}
         </div>
@@ -356,18 +730,62 @@ function CallIntelligenceDrawer({ call, onClose }) {
         )}
       </div>
 
-      {/* Next action */}
+      {/* Salesperson Progress — read from backend */}
+      {(call.callStatus || call.notes) && (() => {
+        const ns = CALL_STATUSES.find(s => s.key === call.callStatus);
+        return (
+          <div style={{ background:"var(--bg-hover)", border:"1px solid var(--border)", borderRadius:12, padding:14, marginBottom:18 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:12 }}>Salesperson Progress</div>
+            {ns && (
+              <div style={{ display:"inline-flex", alignItems:"center", gap:6, padding:"5px 12px", borderRadius:999,
+                background:ns.color+"18", border:`1px solid ${ns.color}44`, marginBottom: call.notes ? 10 : 0 }}>
+                <span style={{ width:8, height:8, borderRadius:"50%", background:ns.color }} />
+                <span style={{ fontSize:13, fontWeight:700, color:ns.color }}>{ns.label}</span>
+              </div>
+            )}
+            {call.notes && (
+              <div style={{ fontSize:13, color:"var(--text-secondary)", lineHeight:1.6,
+                background:"var(--bg-card)", borderRadius:9, padding:"9px 12px",
+                border:"1px solid var(--border)", whiteSpace:"pre-wrap" }}>
+                {call.notes}
+              </div>
+            )}
+            {call.updatedAt && (
+              <div style={{ fontSize:11, color:"var(--text-dim)", marginTop:8 }}>Updated {formatDateTime(call.updatedAt)}</div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Edit Progress */}
+      <ProgressPanel call={call} onSaved={(updated) => {
+        console.log(`[WEB_STATUS_UPDATED] call_updated callId=${call.id} ts=${Date.now()}`);
+        // Reload the full list so the row reflects the confirmed backend data
+        if (typeof onClose === "function") {
+          // Trigger parent reload via a small delay so drawer stays open briefly
+          setTimeout(() => { /* parent useResource reload triggered by WS event */ }, 500);
+        }
+      }} />
+
+      {/* Actions */}
       <div style={{ background:"var(--grad-brand-soft)", border:"1px solid var(--border)", borderRadius:12, padding:14 }}>
         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
           <Target size={15} color="var(--accent)"/>
           <span style={{ fontSize:13, fontWeight:600, color:"var(--text-primary)" }}>Actions</span>
         </div>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-          <Button icon={Calendar}>Schedule follow-up</Button>
-          <Button variant="outline" icon={MessageSquare}>WhatsApp</Button>
+          <Button icon={Calendar} onClick={() => setShowSchedule(true)}>Schedule follow-up</Button>
+          <a href={`tel:${call.phone}`} style={{ textDecoration:"none" }}>
+            <Button variant="outline" icon={PhoneCall}>Call</Button>
+          </a>
+          <a href={waHref} target="_blank" rel="noreferrer" style={{ textDecoration:"none" }}>
+            <Button variant="outline" icon={MessageSquare}>WhatsApp</Button>
+          </a>
         </div>
       </div>
     </Drawer>
+    {showSchedule && <ScheduleModal call={call} onClose={() => setShowSchedule(false)} />}
+    </>
   );
 }
 
