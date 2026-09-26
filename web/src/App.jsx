@@ -25,9 +25,12 @@ const Subscription = lazy(() => import("./pages/Subscription.jsx"));
 const Invoices     = lazy(() => import("./pages/Invoices.jsx"));
 const SettingsPage = lazy(() => import("./pages/Settings.jsx"));
 const FollowUps    = lazy(() => import("./pages/FollowUps.jsx"));
+const LandingPage  = lazy(() => import("./pages/LandingPage.jsx"));
+const FeaturesPage = lazy(() => import("./pages/FeaturesPage.jsx"));
+const PricingPage  = lazy(() => import("./pages/PricingPage.jsx"));
 
 const ORG_TITLES = {
-  "/": "Dashboard", "/analytics": "Analytics", "/call-logs": "Calls",
+  "/dashboard": "Dashboard", "/analytics": "Analytics", "/call-logs": "Calls",
   "/manage/employees": "Employees", "/manage/excluded": "Excluded Numbers",
   "/leads": "Leads", "/opportunities": "Opportunities",
   "/device-health": "Device Health", "/transcribe": "Transcribe",
@@ -36,7 +39,6 @@ const ORG_TITLES = {
   "/follow-ups": "Follow-ups",
 };
 
-// ── Super Admin top bar ───────────────────────────────────────────────────────
 function SuperAdminTopbar() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -49,7 +51,7 @@ function SuperAdminTopbar() {
         </div>
         <div>
           <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>Super Admin</div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>CallNexa Platform</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>CALL OS Platform</div>
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -66,7 +68,6 @@ function SuperAdminTopbar() {
 
 const iconBtn = { width: 38, height: 38, borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-secondary)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" };
 
-// ── Super Admin shell (no sidebar) ───────────────────────────────────────────
 function SuperAdminShell() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
@@ -81,11 +82,10 @@ function SuperAdminShell() {
   );
 }
 
-// ── Org Manager shell (full dashboard) ───────────────────────────────────────
 function OrgShell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
-  const title = ORG_TITLES[location.pathname] || "CallNexa";
+  const title = ORG_TITLES[location.pathname] || "CALL OS";
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)" }}>
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
@@ -94,7 +94,8 @@ function OrgShell() {
         <main style={{ flex: 1 }}>
           <Suspense fallback={<RouteFallback />}>
             <Routes>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/manage/employees" element={<Employees />} />
               <Route path="/manage/excluded" element={<ExcludedNumbers />} />
@@ -109,13 +110,13 @@ function OrgShell() {
               <Route path="/subscription" element={<Subscription />} />
               <Route path="/invoices" element={<Invoices />} />
               <Route path="/settings" element={<SettingsPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </Suspense>
         </main>
       </div>
       <nav className="nova-bottom-nav">
-        <NavLink to="/" end className={({ isActive }) => isActive ? "active" : ""}><LayoutDashboard /><span>Dashboard</span></NavLink>
+        <NavLink to="/dashboard" end className={({ isActive }) => isActive ? "active" : ""}><LayoutDashboard /><span>Dashboard</span></NavLink>
         <NavLink to="/call-logs" className={({ isActive }) => isActive ? "active" : ""}><Phone /><span>Calls</span></NavLink>
         <NavLink to="/manage/employees" className={({ isActive }) => isActive ? "active" : ""}><Users /><span>Team</span></NavLink>
         <NavLink to="/analytics" className={({ isActive }) => isActive ? "active" : ""}><BarChart3 /><span>Analytics</span></NavLink>
@@ -125,26 +126,38 @@ function OrgShell() {
   );
 }
 
-// ── Root ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const { isAuthed, user } = useAuth();
+  const location = useLocation();
 
-  // Not logged in — show login pages only
-  if (!isAuthed) {
+  // Marketing pages remain public even when an organization session is active.
+  if (["/", "/features", "/pricing"].includes(location.pathname)) {
     return (
       <Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/admin" element={<AdminLogin />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/features" element={<FeaturesPage />} />
+          <Route path="/pricing" element={<PricingPage />} />
         </Routes>
       </Suspense>
     );
   }
 
-  // SUPER_ADMIN → superadmin shell only
-  if (user?.role === "SUPER_ADMIN") return <SuperAdminShell />;
+  if (!isAuthed) {
+    return (
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/features" element={<FeaturesPage />} />
+          <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/admin" element={<AdminLogin />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+    );
+  }
 
-  // ADMIN / EMPLOYEE → org manager shell
+  if (user?.role === "SUPER_ADMIN") return <SuperAdminShell />;
   return <OrgShell />;
 }
