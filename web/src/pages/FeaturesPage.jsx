@@ -52,7 +52,7 @@ function FeatureGrid() {
 export default function FeaturesPage() {
   return (
     <main className="co-site">
-      <PageHeader active="Features" kicker="ALL FEATURES" title={<>Everything your<br/><em>sales team needs.</>} sub="One platform to monitor, analyse, and improve every sales conversation." />
+      <PageHeader active="Features" kicker="ALL FEATURES" title={<>Everything your<br/><em>sales team needs.</em></>} sub="One platform to monitor, analyse, and improve every sales conversation." />
       <FeatureGrid />
       <HowItWorks />
       <Showcase />
