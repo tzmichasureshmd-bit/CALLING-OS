@@ -48,7 +48,10 @@ async function fetchWithRetry(url, options, retries = 2) {
   let lastErr;
   for (let i = 0; i < retries; i++) {
     const controller = new AbortController();
-    const timeout = 10000; // 10s flat — no escalation
+    // 30s for sync/upload endpoints (batch DB inserts over Supabase pooler are slow);
+    // 12s for everything else. Determined by path prefix.
+    const isSyncOrUpload = options?._isSyncOrUpload === true;
+    const timeout = isSyncOrUpload ? 30000 : 12000;
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
       const res = await fetch(url, { ...options, signal: controller.signal });
@@ -68,11 +71,15 @@ async function request(method, path, body = null) {
   const headers = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
+  // Mark sync and recording upload paths so fetchWithRetry uses the longer timeout
+  const isSyncOrUpload = path.startsWith("/calls/sync") || path.includes("/recording");
+
   try {
     const res = await fetchWithRetry(`${BASE_URL}${path}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      _isSyncOrUpload: isSyncOrUpload,
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
@@ -105,10 +112,12 @@ export const api = {
     const q = new URLSearchParams(params).toString();
     return request("GET", `/calls${q ? "?" + q : ""}`);
   },
-  getCall:        (callId) => request("GET", `/calls/${callId}`),
-  syncCalls:      (deviceId, calls) => request("POST", "/calls/sync", { device_id: deviceId, calls }),
-  getTranscript:  (callId) => request("GET", `/transcripts/${callId}`),
-  updateCallNote: (callId, status, notes) => request("PATCH", `/calls/${callId}/note`, { call_status: status, notes }),
+  getCall:            (callId) => request("GET", `/calls/${callId}`),
+  syncCalls:          (deviceId, calls) => request("POST", "/calls/sync", { device_id: deviceId, calls }),
+  getTranscript:      (callId) => request("GET", `/transcripts/${callId}`),
+  updateCallNote:     (callId, status, notes) => request("PATCH", `/calls/${callId}/note`, { call_status: status, notes }),
+  setCallPrivacy:     (callId, privacy) => request("PATCH", `/calls/${callId}/privacy`, { call_privacy: privacy }),
+  getExcludedNumbers: () => request("GET", "/excluded-phone-numbers"),
 
   // Analytics
   getAnalytics: (range = "today") =>

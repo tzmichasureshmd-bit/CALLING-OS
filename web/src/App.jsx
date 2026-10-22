@@ -96,6 +96,7 @@ function OrgShell() {
             <Routes>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/landing" element={<LandingPage />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/manage/employees" element={<Employees />} />
               <Route path="/manage/excluded" element={<ExcludedNumbers />} />
@@ -131,11 +132,11 @@ export default function App() {
   const location = useLocation();
 
   // Marketing pages remain public even when an organization session is active.
-  if (["/", "/features", "/pricing"].includes(location.pathname)) {
+  if (["/landing", "/features", "/pricing"].includes(location.pathname)) {
     return (
       <Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/landing" element={<LandingPage />} />
           <Route path="/features" element={<FeaturesPage />} />
           <Route path="/pricing" element={<PricingPage />} />
         </Routes>
@@ -147,12 +148,12 @@ export default function App() {
     return (
       <Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/landing" element={<LandingPage />} />
           <Route path="/features" element={<FeaturesPage />} />
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/login" element={<Login />} />
           <Route path="/admin" element={<AdminLogin />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>
     );

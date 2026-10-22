@@ -25,7 +25,6 @@ import {
   notifyCallCompleted,
   notifyRecordingUploading,
   notifyRecordingUploaded,
-  notifyTranscriptionCompleted,
 } from "./notificationManager";
 import { checkPermissions, startCallLogObserver, stopCallLogObserver } from "./nativeModules";
 import { api, BASE_URL } from "./api";
@@ -35,7 +34,58 @@ const BATCH_SIZE     = 50;
 const BATCH_DELAY_MS = 600;
 const FALLBACK_POLL_MS = 15_000;
 
-const INSTALL_DATE_KEY = "callos_install_date";
+const INSTALL_DATE_KEY   = "callos_install_date";
+const RECORDING_PREF_KEY = "callos_recording_enabled";
+
+// ── Recording enabled check ───────────────────────────────────────────────────
+// Returns true only when the user has explicitly enabled recording in Settings.
+async function isRecordingEnabled() {
+  try {
+    const val = await AsyncStorage.getItem(RECORDING_PREF_KEY);
+    return val === "true";
+  } catch {
+    return false;
+  }
+}
+
+// ── Excluded-number check (local cache, refreshed per sync cycle) ─────────────
+const EXCLUDED_CACHE_KEY = "callos_excluded_numbers_cache";
+const EXCLUDED_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getExcludedNumbers() {
+  try {
+    const raw = await AsyncStorage.getItem(EXCLUDED_CACHE_KEY);
+    if (raw) {
+      const { numbers, ts } = JSON.parse(raw);
+      if (Date.now() - ts < EXCLUDED_CACHE_TTL) return numbers;
+    }
+  } catch {}
+  // Fetch from backend
+  try {
+    const res = await api.getExcludedNumbers();
+    const numbers = (res?.items || []).map((n) => n.number);
+    await AsyncStorage.setItem(EXCLUDED_CACHE_KEY, JSON.stringify({ numbers, ts: Date.now() }));
+    return numbers;
+  } catch {
+    return [];
+  }
+}
+
+function _normalizePhone(phone) {
+  if (!phone || phone === "unknown") return phone;
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
+  if (digits.length === 11 && digits.startsWith("0")) return `+91${digits.slice(1)}`;
+  return phone.startsWith("+") ? phone : `+${digits}`;
+}
+
+async function isExcludedNumber(phoneNumber) {
+  if (!phoneNumber || phoneNumber === "unknown") return false;
+  const excluded = await getExcludedNumbers();
+  const normalized = _normalizePhone(phoneNumber);
+  return excluded.some((n) => n === phoneNumber || n === normalized);
+}
 
 // ── Install-time cutoff ───────────────────────────────────────────────────────
 // Returns the ms timestamp of app installation.
@@ -164,18 +214,41 @@ async function directSync(deviceId, calls) {
   }
 }
 
-// ── Recording upload (no local queue) ────────────────────────────────────────
+// ── Recording upload (with one auto-retry) ───────────────────────────────────
 /**
- * Checks for a recording file and uploads it directly.
- * No local queue — if upload fails, the error is logged and exposed in diagnostics.
- * The backend recording_status column tracks the real state.
+ * PRIVACY RULES enforced before any file is touched:
+ *   1. Recording must be explicitly enabled by the user (callos_recording_enabled=true).
+ *   2. The call's phone number must not be on the excluded list.
+ *   3. The backend also enforces: call must be classified 'business' (HTTP 403 otherwise).
+ *
+ * Call-log sync is NEVER blocked by these checks — only recording upload is.
  */
-async function _checkAndUploadRecording(call) {
+async function _checkAndUploadRecording(call, isRetry = false) {
   if (!call.call_id) return;
+
+  // Step 0a: recording must be enabled by the user
+  const recEnabled = await isRecordingEnabled();
+  if (!recEnabled) {
+    console.log(`[RECORDING_SKIPPED] client_event_id=${call.client_event_id} reason=recording_disabled ts=${Date.now()}`);
+    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_NOT_AVAILABLE, {
+      recording_error: "Recording is disabled in Settings. Enable it to upload recordings.",
+    });
+    return;
+  }
+
+  // Step 0b: excluded-number check
+  const excluded = await isExcludedNumber(call.phone_number || call._raw_number);
+  if (excluded) {
+    console.log(`[RECORDING_SKIPPED] client_event_id=${call.client_event_id} reason=excluded_number ts=${Date.now()}`);
+    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_NOT_AVAILABLE, {
+      recording_error: "This number is on the excluded list — recording not uploaded.",
+    });
+    return;
+  }
 
   // Step 1: detect
   updateRecordingStatus(call.client_event_id, STATUS.RECORDING_CHECK);
-  const found = await findRecordingForCall(call); // logs DETECTION_STARTED, FOUND or NOT_AVAILABLE
+  const found = await findRecordingForCall(call);
 
   if (!found) {
     updateRecordingStatus(call.client_event_id, STATUS.RECORDING_NOT_AVAILABLE, {
@@ -184,9 +257,10 @@ async function _checkAndUploadRecording(call) {
     return;
   }
 
-  // Step 2: queued
+  // Step 2: queued — store fingerprint for dedup
   updateRecordingStatus(call.client_event_id, STATUS.RECORDING_QUEUED, {
-    recording_path: found.path,
+    recording_path:        found.path,
+    recording_fingerprint: found.fingerprint || null,
   });
 
   // Step 3: get token
@@ -211,19 +285,29 @@ async function _checkAndUploadRecording(call) {
     uploadResult = await uploadRecording(call.call_id, found.path, token);
   } catch (e) {
     const errMsg = e?.message || "unknown upload error";
-    console.warn(`[RECORDING_UPLOAD_FAILED] client_event_id=${call.client_event_id} call_id=${call.call_id} error=${errMsg} ts=${Date.now()}`);
-    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_FAILED, {
-      recording_error: errMsg,
-    });
-    // Do NOT trigger transcription on upload failure
+    // HTTP 403 = privacy/excluded block from backend — do not retry
+    const isPrivacyBlock = errMsg.includes("403") || errMsg.includes("personal") ||
+                           errMsg.includes("unclassified") || errMsg.includes("excluded");
+    console.warn(`[RECORDING_UPLOAD_FAILED] client_event_id=${call.client_event_id} call_id=${call.call_id} error=${errMsg} retry=${isRetry} privacy_block=${isPrivacyBlock} ts=${Date.now()}`);
+    if (!isRetry && !isPrivacyBlock) {
+      console.log(`[RECORDING_UPLOAD_RETRY_SCHEDULED] client_event_id=${call.client_event_id} delay=60s ts=${Date.now()}`);
+      setTimeout(() => _checkAndUploadRecording(call, true).catch(() => {}), 60_000);
+    } else {
+      updateRecordingStatus(call.client_event_id, STATUS.RECORDING_FAILED, {
+        recording_error: isPrivacyBlock
+          ? "Upload blocked by privacy policy. Classify this call as Business on the dashboard first."
+          : errMsg,
+      });
+    }
     return;
   }
 
-  // Step 5: confirmed — only now mark uploaded and trigger transcription
+  // Step 5: confirmed
   console.log(`[RECORDING_UPLOAD_CONFIRMED] client_event_id=${call.client_event_id} call_id=${call.call_id} ts=${Date.now()}`);
   updateRecordingStatus(call.client_event_id, STATUS.RECORDING_UPLOADED, {
-    call_id: call.call_id,
-    recording_path: found.path,
+    call_id:               call.call_id,
+    recording_path:        found.path,
+    recording_fingerprint: found.fingerprint || null,
     recording_uploaded_at: new Date().toISOString(),
   });
   notifyRecordingUploaded({
@@ -233,63 +317,7 @@ async function _checkAndUploadRecording(call) {
     phone_number: null,
   }).catch(() => {});
 
-  // Transcription only after confirmed upload
   updateTranscriptStatus(call.client_event_id, STATUS.TRANSCRIPTION_PENDING);
-  _triggerTranscription(call.call_id, call.client_event_id, token).catch(() => {});
-}
-
-// ── Transcription ─────────────────────────────────────────────────────────────
-async function _triggerTranscription(callId, clientEventId, token) {
-  if (!callId || !token) return;
-  try {
-    const resp = await fetch(`${BASE_URL}/transcripts/${callId}/transcribe`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    });
-    if (resp.ok) {
-      updateTranscriptStatus(clientEventId, STATUS.TRANSCRIBING);
-      _pollTranscriptionStatus(callId, clientEventId, token, 0).catch(() => {});
-    } else {
-      updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED);
-    }
-  } catch {
-    updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED);
-  }
-}
-
-const _activePolls = new Set();
-
-async function _pollTranscriptionStatus(callId, clientEventId, token, attempt) {
-  const MAX_ATTEMPTS = 40;
-  const pollKey = `${callId}-${clientEventId}`;
-  if (attempt === 0) {
-    if (_activePolls.has(pollKey)) return;
-    _activePolls.add(pollKey);
-  }
-  if (attempt >= MAX_ATTEMPTS) {
-    _activePolls.delete(pollKey);
-    updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_STILL_PROCESSING);
-    return;
-  }
-  await new Promise(r => setTimeout(r, 10000));
-  try {
-    const resp = await fetch(`${BASE_URL}/transcripts/${callId}`, { headers: { Authorization: `Bearer ${token}` } });
-    if (!resp.ok) { _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {}); return; }
-    const data = await resp.json().catch(() => ({}));
-    if (data.transcript_status === "completed") {
-      _activePolls.delete(pollKey);
-      updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_COMPLETED);
-      notifyTranscriptionCompleted({ client_event_id: clientEventId, call_id: callId, contact_name: null }).catch(() => {});
-    } else if (data.transcript_status === "failed") {
-      _activePolls.delete(pollKey);
-      updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_FAILED);
-    } else {
-      if (attempt >= 12) updateTranscriptStatus(clientEventId, STATUS.TRANSCRIPTION_STILL_PROCESSING);
-      _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {});
-    }
-  } catch {
-    _pollTranscriptionStatus(callId, clientEventId, token, attempt + 1).catch(() => {});
-  }
 }
 
 // ── Main sync cycle ───────────────────────────────────────────────────────────

@@ -16,7 +16,6 @@ class CallSyncItem(BaseModel):
     subscription_id: Optional[str] = None   # Android subscription ID
     source: Optional[str] = None            # "SIM 1" | "SIM 2" | "UNKNOWN"
     recording_available: bool = False
-    recording_path: Optional[str] = None    # local device path, used by mobile upload queue
 
 
 class CallSyncRequest(BaseModel):
@@ -62,7 +61,6 @@ class CallOut(BaseModel):
     source: Optional[str] = None
     recording_available: bool
     recording_status: str = "not_available"
-    recording_url: Optional[str] = None
     recording_size_bytes: Optional[int] = None
     recording_mime_type: Optional[str] = None
     transcript_status: Optional[str] = None
@@ -76,6 +74,7 @@ class CallOut(BaseModel):
     sync_status: str = "synced"
     sync_confirmed_at: Optional[datetime] = None
     notes: Optional[str] = None
+    call_privacy: str = "unclassified"  # unclassified | business | personal
     created_at: datetime
     updated_at: Optional[datetime] = None
     # Joined fields

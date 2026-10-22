@@ -5,7 +5,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { palette, useTheme } from "../src/theme";
+import { LinearGradient } from "expo-linear-gradient";
+import { palette, gradientBrand, useTheme, TYPE, SPACE, RADIUS } from "../src/theme";
 import { api } from "../src/api";
 import { getCallStatus, STATUS, STATUS_LABEL } from "../src/callStatusStore";
 
@@ -307,209 +308,180 @@ export default function CallDetail() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }} edges={["top"]}>
       {/* Header */}
-      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.border }}>
-        <Pressable onPress={() => router.back()} style={{ marginRight: 12 }}>
-          <Ionicons name="arrow-back" size={22} color={theme.primary} />
+      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: SPACE.lg, paddingVertical: SPACE.md, borderBottomWidth: 1, borderBottomColor: theme.border, backgroundColor: theme.surface }}>
+        <Pressable onPress={() => router.back()} style={{ marginRight: SPACE.md, width: 36, height: 36, borderRadius: RADIUS.md, backgroundColor: theme.surface2, alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="arrow-back" size={20} color={theme.primary} />
         </Pressable>
-        <Text style={{ fontSize: 17, fontWeight: "700", color: theme.primary, flex: 1 }}>Call Details</Text>
-        <Pressable onPress={load}>
-          <Ionicons name="refresh-outline" size={20} color={theme.muted} />
+        <Text style={{ ...TYPE.h3, color: theme.primary, flex: 1 }}>Call Details</Text>
+        <Pressable onPress={load} style={{ width: 36, height: 36, borderRadius: RADIUS.md, backgroundColor: theme.surface2, alignItems: "center", justifyContent: "center" }}>
+          <Ionicons name="refresh-outline" size={18} color={theme.muted} />
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+      {/* Scrollable content — paddingBottom leaves room for sticky bar */}
+      <ScrollView contentContainerStyle={{ padding: SPACE.lg, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
 
         {/* ── Call info card ── */}
-        <View style={[{ backgroundColor: theme.card, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: theme.border, marginBottom: 16 }, shadowSoft]}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 16 }}>
-            <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: typeColor + "1f", alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name={TYPE_ICON[call.call_type] || "call"} size={24} color={typeColor} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 18, fontWeight: "800", color: theme.primary }}>{call.contact_name}</Text>
-              <Text style={{ fontSize: 14, color: palette.teal, marginTop: 2 }}>{call.phone_number}</Text>
-            </View>
-          </View>
-          {[
-            { label: "Type",     value: call.call_type.charAt(0).toUpperCase() + call.call_type.slice(1), color: typeColor },
-            { label: "Duration", value: fmtDur(call.duration_seconds) },
-            { label: "Time",     value: fmtTime(call.start_time) },
-            { label: "SIM",      value: call.sim },
-          ].map((r) => (
-            <View key={r.label} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 6, borderTopWidth: 1, borderTopColor: theme.border }}>
-              <Text style={{ fontSize: 13, color: theme.muted }}>{r.label}</Text>
-              <Text style={{ fontSize: 13, fontWeight: "600", color: r.color || theme.primary }}>{r.value}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* ── Sync status timeline ── */}
-        <View style={[{ backgroundColor: theme.card, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: theme.border, marginBottom: 16 }, shadowSoft]}>
-          <Text style={{ fontSize: 15, fontWeight: "700", color: theme.primary, marginBottom: 16 }}>Synchronization</Text>
-          <TimelineStep
-            icon="radio-button-on"
-            label="Call detected"
-            sublabel="Found in Android call log"
-            status={syncStepStatus(call.sync_status, STATUS.DETECTED)}
-          />
-          <TimelineStep
-            icon="cloud-upload-outline"
-            label="Uploading to server"
-            sublabel={call.sync_status === STATUS.SYNCING ? "In progress…" : undefined}
-            status={syncStepStatus(call.sync_status, STATUS.SYNCING)}
-          />
-          <TimelineStep
-            icon="checkmark-done-outline"
-            label="Server confirmed"
-            sublabel={
-              call.sync_status === STATUS.SYNCED
-                ? "Call is on the dashboard"
-                : call.sync_status === STATUS.SYNC_FAILED
-                  ? `Failed · ${call.last_error || "unknown error"}`
-                : call.sync_status === STATUS.SYNC_OFFLINE
-                  ? "No internet connection — will retry when online"
-                  : undefined
-            }
-            status={syncStepStatus(call.sync_status, STATUS.SYNCED)}
-            isLast
-          />
-        </View>
-
-        {/* ── Recording status ── */}
-        <View style={[{ backgroundColor: theme.card, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: theme.border, marginBottom: 16 }, shadowSoft]}>
-          <Text style={{ fontSize: 15, fontWeight: "700", color: theme.primary, marginBottom: 16 }}>Recording</Text>
-          {call.recording_status === STATUS.RECORDING_NOT_AVAILABLE ? (
-            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-              <Ionicons name="mic-off-outline" size={20} color={theme.dim} style={{ marginTop: 1 }}/>
+        <View style={[{ backgroundColor: theme.card, borderRadius: RADIUS.xxl, borderWidth: 1, borderColor: theme.border, marginBottom: SPACE.md, overflow: "hidden" }, shadowSoft]}>
+          {/* Gradient accent strip */}
+          <LinearGradient colors={[typeColor + "18", "transparent"]} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 60 }} />
+          <View style={{ padding: SPACE.lg }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: SPACE.md, marginBottom: SPACE.lg }}>
+              <View style={{ width: 52, height: 52, borderRadius: RADIUS.xl, backgroundColor: typeColor + "22", alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: typeColor + "44" }}>
+                <Ionicons name={TYPE_ICON[call.call_type] || "call"} size={24} color={typeColor} />
+              </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13, color: theme.muted }}>Recording unavailable on this device or for this call.</Text>
-                {call.recording_error ? (
-                  <Text style={{ fontSize: 11.5, color: theme.dim, marginTop: 4 }}>{call.recording_error}</Text>
-                ) : null}
+                <Text style={{ ...TYPE.h2, color: theme.primary }}>{call.contact_name}</Text>
+                <Text style={{ ...TYPE.caption, color: palette.teal, marginTop: 2 }}>{call.phone_number}</Text>
               </View>
             </View>
-          ) : (
-            <>
-              <TimelineStep
-                icon="search-outline"
-                label="Checking for recording"
-                sublabel={call.recording_status === STATUS.RECORDING_CHECK ? "Scanning OEM directories…" : undefined}
-                status={recStepStatus(call.recording_status, STATUS.RECORDING_CHECK)}
-              />
-              <TimelineStep
-                icon="mic-outline"
-                label="Recording discovered"
-                sublabel={call.recording_status === STATUS.RECORDING_QUEUED ? "Found on device storage" : undefined}
-                status={recStepStatus(call.recording_status, STATUS.RECORDING_QUEUED)}
-              />
-              <TimelineStep
-                icon="cloud-upload-outline"
-                label="Uploading recording"
-                sublabel={call.recording_status === STATUS.RECORDING_UPLOADING ? "In progress…" : undefined}
-                status={recStepStatus(call.recording_status, STATUS.RECORDING_UPLOADING)}
-              />
-              <TimelineStep
-                icon="checkmark-circle-outline"
-                label="Recording available"
-                sublabel={
-                  call.recording_status === STATUS.RECORDING_UPLOADED
-                    ? "Playable on web dashboard"
-                    : call.recording_status === STATUS.RECORDING_FAILED
-                      ? (call.recording_error || "Upload failed")
-                      : undefined
-                }
-                status={recStepStatus(call.recording_status, STATUS.RECORDING_UPLOADED)}
-                isLast
-              />
-            </>
+            {/* 2x2 metadata grid */}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: SPACE.sm }}>
+              {[
+                { label: "Type",     value: call.call_type.charAt(0).toUpperCase() + call.call_type.slice(1), color: typeColor },
+                { label: "Duration", value: fmtDur(call.duration_seconds) },
+                { label: "Time",     value: fmtTime(call.start_time) },
+                { label: "SIM",      value: call.sim },
+              ].map((r) => (
+                <View key={r.label} style={{ flex: 1, minWidth: "45%", backgroundColor: theme.surface2, borderRadius: RADIUS.md, padding: SPACE.md, borderWidth: 1, borderColor: theme.border }}>
+                  <Text style={{ ...TYPE.micro, color: theme.muted, marginBottom: 3 }}>{r.label}</Text>
+                  <Text style={{ ...TYPE.bodyBold, color: r.color || theme.primary }}>{r.value}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </View>
+
+        {/* ── Status pills card — replaces 3 separate timeline cards ── */}
+        <View style={[{ backgroundColor: theme.card, borderRadius: RADIUS.xxl, borderWidth: 1, borderColor: theme.border, padding: SPACE.lg, marginBottom: SPACE.md }, shadowSoft]}>
+          <Text style={{ ...TYPE.label, color: theme.muted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: SPACE.md }}>Pipeline Status</Text>
+          <View style={{ flexDirection: "row", gap: SPACE.sm }}>
+            {/* Sync pill */}
+            {(() => {
+              const synced  = call.sync_status === STATUS.SYNCED;
+              const failed  = call.sync_status === STATUS.SYNC_FAILED || call.sync_status === STATUS.SYNC_OFFLINE;
+              const active  = call.sync_status === STATUS.SYNCING;
+              const color   = synced ? palette.emerald : failed ? palette.red : active ? palette.teal : theme.dim;
+              const icon    = synced ? "checkmark-circle" : failed ? "close-circle" : active ? "sync-circle" : "ellipse-outline";
+              const label   = synced ? "Synced" : failed ? "Sync Failed" : active ? "Syncing…" : "Pending";
+              return (
+                <View style={{ flex: 1, backgroundColor: color + "14", borderRadius: RADIUS.lg, padding: SPACE.md, borderWidth: 1, borderColor: color + "33", alignItems: "center", gap: SPACE.xs }}>
+                  <Ionicons name={icon} size={20} color={color} />
+                  <Text style={{ ...TYPE.label, color }}>{label}</Text>
+                  <Text style={{ ...TYPE.micro, color: theme.muted }}>Sync</Text>
+                </View>
+              );
+            })()}
+            {/* Recording pill */}
+            {(() => {
+              const uploaded  = call.recording_status === STATUS.RECORDING_UPLOADED;
+              const uploading = call.recording_status === STATUS.RECORDING_UPLOADING;
+              const failed    = call.recording_status === STATUS.RECORDING_FAILED;
+              const na        = call.recording_status === STATUS.RECORDING_NOT_AVAILABLE;
+              const color     = uploaded ? palette.emerald : uploading ? palette.violet : failed ? palette.red : theme.dim;
+              const icon      = uploaded ? "checkmark-circle" : uploading ? "cloud-upload-outline" : failed ? "close-circle" : "mic-off-outline";
+              const label     = uploaded ? "Uploaded" : uploading ? "Uploading…" : failed ? "Failed" : na ? "N/A" : "Pending";
+              return (
+                <View style={{ flex: 1, backgroundColor: color + "14", borderRadius: RADIUS.lg, padding: SPACE.md, borderWidth: 1, borderColor: color + "33", alignItems: "center", gap: SPACE.xs }}>
+                  <Ionicons name={icon} size={20} color={color} />
+                  <Text style={{ ...TYPE.label, color }}>{label}</Text>
+                  <Text style={{ ...TYPE.micro, color: theme.muted }}>Recording</Text>
+                </View>
+              );
+            })()}
+            {/* Transcript pill */}
+            {(() => {
+              const done    = call.transcript_status === STATUS.TRANSCRIPTION_COMPLETED;
+              const active  = call.transcript_status === STATUS.TRANSCRIBING;
+              const failed  = call.transcript_status === STATUS.TRANSCRIPTION_FAILED;
+              const color   = done ? palette.emerald : active ? palette.cyan : failed ? palette.red : theme.dim;
+              const icon    = done ? "checkmark-circle" : active ? "sparkles-outline" : failed ? "close-circle" : "sparkles-outline";
+              const label   = done ? "Done" : active ? "Processing" : failed ? "Failed" : "Waiting";
+              return (
+                <View style={{ flex: 1, backgroundColor: color + "14", borderRadius: RADIUS.lg, padding: SPACE.md, borderWidth: 1, borderColor: color + "33", alignItems: "center", gap: SPACE.xs }}>
+                  <Ionicons name={icon} size={20} color={color} />
+                  <Text style={{ ...TYPE.label, color }}>{label}</Text>
+                  <Text style={{ ...TYPE.micro, color: theme.muted }}>Transcript</Text>
+                </View>
+              );
+            })()}
+          </View>
+          {/* Sync error detail */}
+          {(call.sync_status === STATUS.SYNC_FAILED || call.sync_status === STATUS.SYNC_OFFLINE) && call.last_error && (
+            <View style={{ marginTop: SPACE.md, backgroundColor: palette.red + "12", borderRadius: RADIUS.md, padding: SPACE.md, borderWidth: 1, borderColor: palette.red + "33" }}>
+              <Text style={{ ...TYPE.caption, color: palette.red }}>{call.last_error}</Text>
+            </View>
           )}
         </View>
 
-        {/* ── Transcription status ── */}
+        {/* ── AI Transcript — promoted above fold ── */}
         {call.sync_status === STATUS.SYNCED && (
-          <View style={[{ backgroundColor: theme.card, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: theme.border, marginBottom: 16 }, shadowSoft]}>
-            <Text style={{ fontSize: 15, fontWeight: "700", color: theme.primary, marginBottom: 16 }}>AI Transcription</Text>
-            {!call.transcript_status ? (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <Ionicons name="sparkles-outline" size={20} color={theme.dim} />
-                <Text style={{ fontSize: 13, color: theme.muted }}>
-                  {call.recording_status === STATUS.RECORDING_UPLOADED
-                    ? "Transcription not yet requested"
-                    : "Requires a recording to transcribe"}
-                </Text>
-              </View>
-            ) : (
-              <>
-                <TimelineStep
-                  icon="time-outline"
-                  label="Transcription pending"
-                  status={transStepStatus(call.transcript_status, STATUS.TRANSCRIPTION_PENDING)}
-                />
-                <TimelineStep
-                  icon="sparkles-outline"
-                  label="Transcribing…"
-                  status={transStepStatus(call.transcript_status, STATUS.TRANSCRIBING)}
-                />
-                <TimelineStep
-                  icon="document-text-outline"
-                  label="Transcription complete"
-                  sublabel={
-                    call.transcript_status === STATUS.TRANSCRIPTION_COMPLETED
-                      ? "View transcript below"
-                      : call.transcript_status === STATUS.TRANSCRIPTION_FAILED
-                        ? "Failed — retry from web dashboard"
-                        : undefined
-                  }
-                  status={transStepStatus(call.transcript_status, STATUS.TRANSCRIPTION_COMPLETED)}
-                  isLast={!(call.transcript_status === STATUS.TRANSCRIPTION_COMPLETED && transcript?.transcript_text)}
-                />
-                {call.transcript_status === STATUS.TRANSCRIPTION_COMPLETED && transcript?.transcript_text && (
-                  <View style={{ marginTop: 16, backgroundColor: theme.surface, borderRadius: 14, borderWidth: 1, borderColor: theme.border, overflow: "hidden" }}>
-                    {/* Header */}
-                    <View style={{
-                      flexDirection: "row", alignItems: "center", gap: 8,
-                      paddingHorizontal: 14, paddingVertical: 10,
-                      borderBottomWidth: 1, borderBottomColor: theme.border,
-                      backgroundColor: theme.card,
-                    }}>
-                      <Ionicons name="chatbubbles-outline" size={15} color={palette.teal} />
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: palette.teal, textTransform: "uppercase", letterSpacing: 0.5, flex: 1 }}>Conversation</Text>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: palette.teal }} />
-                          <Text style={{ fontSize: 10, color: theme.muted }}>Me</Text>
-                        </View>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: palette.violet }} />
-                          <Text style={{ fontSize: 10, color: theme.muted }}>Other</Text>
-                        </View>
-                      </View>
-                    </View>
-                    {/* Chat bubbles */}
-                    <View style={{ padding: 12 }}>
-                      {parseTranscript(transcript.transcript_text).map((turn, i) => (
-                        <ChatBubble key={i} speaker={turn.speaker} text={turn.text} theme={theme} />
-                      ))}
-                    </View>
+          <View style={[{ backgroundColor: theme.card, borderRadius: RADIUS.xxl, borderWidth: 1, borderColor: theme.border, marginBottom: SPACE.md, overflow: "hidden" }, shadowSoft]}>
+            <View style={{ padding: SPACE.lg, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: SPACE.sm }}>
+                <Ionicons name="sparkles-outline" size={16} color={palette.teal} />
+                <Text style={{ ...TYPE.title, color: theme.primary }}>AI Transcript</Text>
+                {call.transcript_status === STATUS.TRANSCRIPTION_COMPLETED && (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: SPACE.xs, marginLeft: "auto" }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: palette.emerald }} />
+                    <Text style={{ ...TYPE.micro, color: palette.emerald }}>Me</Text>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: palette.violet, marginLeft: SPACE.sm }} />
+                    <Text style={{ ...TYPE.micro, color: palette.violet }}>Other</Text>
                   </View>
                 )}
-              </>
+              </View>
+            </View>
+            {!call.transcript_status ? (
+              <View style={{ padding: SPACE.lg, flexDirection: "row", alignItems: "center", gap: SPACE.md }}>
+                <Ionicons name="sparkles-outline" size={20} color={theme.dim} />
+                <Text style={{ ...TYPE.caption, color: theme.muted }}>
+                  {call.recording_status === STATUS.RECORDING_UPLOADED ? "Transcription not yet requested" : "Requires a recording to transcribe"}
+                </Text>
+              </View>
+            ) : call.transcript_status !== STATUS.TRANSCRIPTION_COMPLETED ? (
+              <View style={{ padding: SPACE.lg, flexDirection: "row", alignItems: "center", gap: SPACE.md }}>
+                <ActivityIndicator color={palette.teal} size="small" />
+                <Text style={{ ...TYPE.caption, color: theme.muted }}>{STATUS_LABEL[call.transcript_status] || "Processing…"}</Text>
+              </View>
+            ) : transcript?.transcript_text ? (
+              <View style={{ padding: SPACE.md }}>
+                {parseTranscript(transcript.transcript_text).map((turn, i) => (
+                  <ChatBubble key={i} speaker={turn.speaker} text={turn.text} theme={theme} />
+                ))}
+              </View>
+            ) : (
+              <View style={{ padding: SPACE.lg }}>
+                <Text style={{ ...TYPE.caption, color: theme.muted }}>Transcript unavailable.</Text>
+              </View>
             )}
           </View>
         )}
 
-        {/* ── Actions ── */}
-        <View style={{ gap: 10 }}>
-          <Pressable
-            onPress={() => Linking.openURL(`tel:${call.phone_number.replace(/\s/g, "")}`)}
-            style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: palette.teal + "1a", borderRadius: 14, padding: 14, borderWidth: 1, borderColor: palette.teal + "44" }}
-          >
-            <Ionicons name="call-outline" size={18} color={palette.teal} />
-            <Text style={{ fontSize: 14, fontWeight: "700", color: palette.teal }}>Call Back</Text>
-          </Pressable>
-        </View>
-
       </ScrollView>
+
+      {/* ── Sticky Call Back bar ── */}
+      <View style={{
+        position: "absolute", bottom: 0, left: 0, right: 0,
+        backgroundColor: theme.surface,
+        borderTopWidth: 1, borderTopColor: theme.border,
+        paddingHorizontal: SPACE.lg, paddingVertical: SPACE.md,
+        paddingBottom: SPACE.lg,
+      }}>
+        <Pressable
+          onPress={() => Linking.openURL(`tel:${call.phone_number.replace(/\s/g, "")}`)}
+          style={{ overflow: "hidden", borderRadius: RADIUS.lg }}
+        >
+          <LinearGradient
+            colors={["#22c55e", "#16a34a"]}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACE.sm, height: 52,
+              shadowColor: "#22c55e", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14, elevation: 8 }}
+          >
+            <Ionicons name="call" size={20} color="#fff" />
+            <Text style={{ ...TYPE.bodyBold, color: "#fff" }}>Call Back</Text>
+          </LinearGradient>
+        </Pressable>
+      </View>
     </SafeAreaView>
   );
 }

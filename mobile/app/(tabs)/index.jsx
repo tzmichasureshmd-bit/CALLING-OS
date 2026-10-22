@@ -1,30 +1,31 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   View, Text, ScrollView, Pressable, useWindowDimensions,
-  RefreshControl, ActivityIndicator, Modal, FlatList,
+  RefreshControl, ActivityIndicator, Modal, FlatList, Animated, Easing,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { palette, useTheme } from "../../src/theme";
-import { AppHeader } from "../../src/components";
-import { RadialRing, Sparkline, MiniBars } from "../../src/charts";
+import { LinearGradient } from "expo-linear-gradient";
+import { palette, gradientBrand, gradientBrandSoft, useTheme, TYPE, SPACE, RADIUS } from "../../src/theme";
+import { AppHeader, Badge, Card, CardHeader, EmptyState, CountUp, LiveDot } from "../../src/components";
+import { RadialRing, AnimatedBars, ProgressBar } from "../../src/charts";
 import { getRealCallLog } from "../../src/callLogService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const RANGES = [
-  { key: "today",     label: "Today" },
+  { key: "today",     label: "Today"     },
   { key: "yesterday", label: "Yesterday" },
-  { key: "7d",        label: "7 Days" },
-  { key: "30d",       label: "30 Days" },
+  { key: "7d",        label: "7 Days"    },
+  { key: "30d",       label: "30 Days"   },
 ];
 
 const TYPE_META = {
-  incoming: { icon: "call-received",  color: palette.teal,    label: "Incoming" },
-  outgoing: { icon: "call-made",      color: palette.violet,  label: "Outgoing" },
-  missed:   { icon: "call-missed",    color: palette.red,     label: "Missed"   },
-  rejected: { icon: "call-missed",    color: palette.amber,   label: "Rejected" },
+  incoming: { icon: "call-received", color: palette.teal,   label: "Incoming" },
+  outgoing: { icon: "call-made",     color: palette.violet, label: "Outgoing" },
+  missed:   { icon: "call-missed",   color: palette.red,    label: "Missed"   },
+  rejected: { icon: "call-missed",   color: palette.amber,  label: "Rejected" },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -90,37 +91,63 @@ function computeStats(calls) {
   return { total, incoming, outgoing, missed, connected, totalSecs, connPct, avgSecs };
 }
 
-// ── Call List Bottom Sheet ────────────────────────────────────────────────────
+// ── Animated card entrance ────────────────────────────────────────────────────
+function FadeCard({ children, delay = 0, style }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(16)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity,     { toValue: 1, duration: 380, delay, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
+      Animated.timing(translateY,  { toValue: 0, duration: 380, delay, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
+    ]).start();
+  }, []);
+  return (
+    <Animated.View style={[{ opacity, transform: [{ translateY }] }, style]}>
+      {children}
+    </Animated.View>
+  );
+}
+
+// ── Call Sheet ────────────────────────────────────────────────────────────────
 function CallSheet({ visible, onClose, title, calls, color }) {
   const { theme } = useTheme();
   const router = useRouter();
+  const slideY = useRef(new Animated.Value(600)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.spring(slideY, { toValue: 0, useNativeDriver: true, tension: 65, friction: 11 }).start();
+    } else {
+      Animated.timing(slideY, { toValue: 600, duration: 220, useNativeDriver: true, easing: Easing.in(Easing.ease) }).start();
+    }
+  }, [visible]);
+
   const renderItem = useCallback(({ item: c }) => {
     const meta = TYPE_META[c.call_type] || TYPE_META.incoming;
     return (
       <Pressable
-        onPress={() => {
-          onClose();
-          router.push({ pathname: "/call-detail", params: { clientEventId: c.client_event_id || "", callId: "" } });
-        }}
-        style={{
-          flexDirection: "row", alignItems: "center", gap: 12,
-          paddingVertical: 13, paddingHorizontal: 16,
+        onPress={() => { onClose(); router.push({ pathname: "/call-detail", params: { clientEventId: c.client_event_id || "", callId: "" } }); }}
+        style={({ pressed }) => ({
+          flexDirection: "row", alignItems: "center", gap: SPACE.md,
+          paddingVertical: 13, paddingHorizontal: SPACE.lg,
           borderBottomWidth: 1, borderBottomColor: theme.border,
-        }}>
-        <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: meta.color + "18", alignItems: "center", justifyContent: "center" }}>
+          backgroundColor: pressed ? theme.surface2 : "transparent",
+        })}
+      >
+        <View style={{ width: 40, height: 40, borderRadius: RADIUS.md, backgroundColor: meta.color + "18", alignItems: "center", justifyContent: "center" }}>
           <MaterialCommunityIcons name={meta.icon} size={19} color={meta.color} />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ fontSize: 14, fontWeight: "600", color: theme.primary }} numberOfLines={1}>
+          <Text style={{ ...TYPE.bodyBold, color: theme.primary }} numberOfLines={1}>
             {c.contact_name && c.contact_name !== "Unknown" ? c.contact_name : c.phone_number}
           </Text>
-          <Text style={{ fontSize: 12, color: theme.muted, marginTop: 2 }} numberOfLines={1}>
+          <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 2 }} numberOfLines={1}>
             {c.phone_number} · {relTime(c.start_time)}
           </Text>
         </View>
         <View style={{ alignItems: "flex-end", flexShrink: 0 }}>
-          <Text style={{ fontSize: 12, fontWeight: "700", color: meta.color }}>{meta.label}</Text>
-          <Text style={{ fontSize: 11, color: theme.dim, marginTop: 2 }}>{fmtDur(c.duration_seconds)}</Text>
+          <Text style={{ ...TYPE.label, color: meta.color }}>{meta.label}</Text>
+          <Text style={{ ...TYPE.micro, color: theme.dim, marginTop: 2 }}>{fmtDur(c.duration_seconds)}</Text>
         </View>
         <Ionicons name="chevron-forward" size={14} color={theme.dim} />
       </Pressable>
@@ -128,31 +155,30 @@ function CallSheet({ visible, onClose, title, calls, color }) {
   }, [theme, router, onClose]);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)" }} onPress={onClose} />
-      <View style={{
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, backgroundColor: "rgba(3,6,12,0.55)" }} onPress={onClose} />
+      <Animated.View style={{
         position: "absolute", bottom: 0, left: 0, right: 0,
-        backgroundColor: theme.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+        backgroundColor: theme.surface,
+        borderTopLeftRadius: RADIUS.xxl, borderTopRightRadius: RADIUS.xxl,
+        borderWidth: 1, borderColor: theme.border,
         maxHeight: "78%",
+        transform: [{ translateY: slideY }],
+        shadowColor: "#000", shadowOffset: { width: 0, height: -8 }, shadowOpacity: 0.3, shadowRadius: 24, elevation: 20,
       }}>
-        <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: theme.border, alignSelf: "center", marginTop: 10, marginBottom: 2 }} />
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.border }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: theme.borderStrong, alignSelf: "center", marginTop: SPACE.md, marginBottom: 2 }} />
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: SPACE.lg, paddingVertical: SPACE.md, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: SPACE.sm }}>
             <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
-            <Text style={{ fontSize: 16, fontWeight: "800", color: theme.primary }}>{title}</Text>
-            <View style={{ backgroundColor: color + "22", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 }}>
-              <Text style={{ fontSize: 12, fontWeight: "700", color }}>{calls.length}</Text>
-            </View>
+            <Text style={{ ...TYPE.h3, color: theme.primary }}>{title}</Text>
+            <Badge tone="teal">{calls.length}</Badge>
           </View>
-          <Pressable onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-            <Ionicons name="close" size={22} color={theme.muted} />
+          <Pressable onPress={onClose} hitSlop={12} style={{ width: 30, height: 30, borderRadius: RADIUS.sm, backgroundColor: theme.surface2, alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="close" size={16} color={theme.muted} />
           </Pressable>
         </View>
         {calls.length === 0 ? (
-          <View style={{ alignItems: "center", paddingVertical: 48 }}>
-            <Ionicons name="call-outline" size={36} color={theme.dim} />
-            <Text style={{ fontSize: 14, color: theme.muted, marginTop: 12 }}>No calls in this period</Text>
-          </View>
+          <EmptyState icon="call-outline" title="No calls in this period" />
         ) : (
           <FlatList
             data={calls}
@@ -163,30 +189,39 @@ function CallSheet({ visible, onClose, title, calls, color }) {
             removeClippedSubviews
           />
         )}
-      </View>
+      </Animated.View>
     </Modal>
   );
 }
 
-// ── Stat Pill — tappable ──────────────────────────────────────────────────────
-function StatPill({ label, value, color, icon, onPress }) {
+// ── KPI Pill (Incoming / Outgoing / Missed) ───────────────────────────────────
+function KpiPill({ label, value, color, icon, onPress }) {
   const { theme, shadowSoft } = useTheme();
+  const scale = useRef(new Animated.Value(1)).current;
+  function onPressIn() { Animated.spring(scale, { toValue: 0.95, useNativeDriver: true, speed: 60 }).start(); }
+  function onPressOut() { Animated.spring(scale, { toValue: 1,    useNativeDriver: true, speed: 60, bounciness: 10 }).start(); }
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        {
-          flex: 1, backgroundColor: pressed ? color + "18" : theme.card,
-          borderRadius: 14, padding: 14, borderWidth: 1,
-          borderColor: pressed ? color : theme.border,
-          alignItems: "center", minHeight: 80, justifyContent: "center",
-        },
-        shadowSoft,
-      ]}
-    >
-      <MaterialCommunityIcons name={icon} size={18} color={color} />
-      <Text style={{ fontSize: 24, fontWeight: "800", color: theme.primary, marginTop: 6 }}>{value}</Text>
-      <Text style={{ fontSize: 10.5, color: theme.muted, marginTop: 3, textAlign: "center" }}>{label}</Text>
+    <Pressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut} style={{ flex: 1 }}>
+      <Animated.View style={[{
+        backgroundColor: theme.card,
+        borderRadius: RADIUS.xl,
+        padding: SPACE.lg,
+        borderWidth: 2,
+        borderColor: color,
+        alignItems: "center",
+        minHeight: 88,
+        justifyContent: "center",
+        gap: SPACE.xs,
+        transform: [{ scale }],
+      }, shadowSoft]}>
+        <View style={{ width: 34, height: 34, borderRadius: RADIUS.md, backgroundColor: color + "22", alignItems: "center", justifyContent: "center" }}>
+          <MaterialCommunityIcons name={icon} size={17} color={color} />
+        </View>
+        <Text style={{ fontSize: 26, fontWeight: "800", color: theme.primary, lineHeight: 32 }}>
+          <CountUp value={value} />
+        </Text>
+        <Text style={{ ...TYPE.micro, color: theme.muted, textAlign: "center" }}>{label}</Text>
+      </Animated.View>
     </Pressable>
   );
 }
@@ -194,64 +229,37 @@ function StatPill({ label, value, color, icon, onPress }) {
 // ── Recent Call Row ───────────────────────────────────────────────────────────
 function RecentCallRow({ c, theme, onPress }) {
   const meta = TYPE_META[c.call_type] || TYPE_META.incoming;
+  const scale = useRef(new Animated.Value(1)).current;
+  function onPressIn() { Animated.spring(scale, { toValue: 0.98, useNativeDriver: true, speed: 80 }).start(); }
+  function onPressOut() { Animated.spring(scale, { toValue: 1,    useNativeDriver: true, speed: 60 }).start(); }
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flexDirection: "row", alignItems: "center", gap: 12,
+    <Pressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
+      <Animated.View style={{
+        flexDirection: "row", alignItems: "center", gap: SPACE.md,
         paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: theme.border,
-        opacity: pressed ? 0.7 : 1,
-      })}>
-      <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: meta.color + "18", alignItems: "center", justifyContent: "center" }}>
-        <MaterialCommunityIcons name={meta.icon} size={17} color={meta.color} />
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={{ fontSize: 13.5, fontWeight: "600", color: theme.primary }} numberOfLines={1}>
-          {c.contact_name && c.contact_name !== "Unknown" ? c.contact_name : c.phone_number}
-        </Text>
-        <Text style={{ fontSize: 11.5, color: theme.muted, marginTop: 1 }} numberOfLines={1}>
-          {c.phone_number}
-          {c.source && c.source !== "UNKNOWN" ? ` · ${c.source}` : ""}
-        </Text>
-      </View>
-      <View style={{ alignItems: "flex-end", flexShrink: 0 }}>
-        <Text style={{ fontSize: 11.5, fontWeight: "600", color: meta.color }}>{meta.label}</Text>
-        <Text style={{ fontSize: 11, color: theme.dim, marginTop: 2 }}>{relTime(c.start_time)}</Text>
-        {c.duration_seconds > 0 && (
-          <Text style={{ fontSize: 10.5, color: theme.dim }}>{fmtDur(c.duration_seconds)}</Text>
-        )}
-      </View>
-      <Ionicons name="chevron-forward" size={14} color={theme.dim} />
+        transform: [{ scale }],
+      }}>
+        <View style={{ width: 38, height: 38, borderRadius: RADIUS.md, backgroundColor: meta.color + "18", alignItems: "center", justifyContent: "center" }}>
+          <MaterialCommunityIcons name={meta.icon} size={17} color={meta.color} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ ...TYPE.bodyBold, color: theme.primary }} numberOfLines={1}>
+            {c.contact_name && c.contact_name !== "Unknown" ? c.contact_name : c.phone_number}
+          </Text>
+          <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }} numberOfLines={1}>
+            {c.phone_number}{c.source && c.source !== "UNKNOWN" ? ` · ${c.source}` : ""}
+          </Text>
+        </View>
+        <View style={{ alignItems: "flex-end", flexShrink: 0 }}>
+          <Text style={{ ...TYPE.label, color: meta.color }}>{meta.label}</Text>
+          <Text style={{ ...TYPE.micro, color: theme.dim, marginTop: 2 }}>{relTime(c.start_time)}</Text>
+          {c.duration_seconds > 0 && (
+            <Text style={{ ...TYPE.micro, color: theme.dim }}>{fmtDur(c.duration_seconds)}</Text>
+          )}
+        </View>
+        <Ionicons name="chevron-forward" size={14} color={theme.dim} />
+      </Animated.View>
     </Pressable>
-  );
-}
-
-// ── Sync Status Row ───────────────────────────────────────────────────────────
-function SyncStatusRow({ theme }) {
-  const [lastSync, setLastSync] = useState(null);
-  const loadedRef = useRef(false);
-
-  useEffect(() => {
-    if (loadedRef.current) return;
-    loadedRef.current = true;
-    AsyncStorage.getItem("callos_last_sync_ts").then(ts => {
-      if (ts) setLastSync(parseInt(ts, 10));
-    }).catch(() => {});
-  }, []);
-
-  const syncLabel = lastSync
-    ? `Last sync ${relTime(new Date(lastSync).toISOString())}`
-    : "Not synced yet";
-
-  return (
-    <View style={{
-      flexDirection: "row", alignItems: "center", gap: 8,
-      paddingHorizontal: 16, paddingVertical: 8,
-      backgroundColor: theme.surface, borderBottomWidth: 1, borderBottomColor: theme.border,
-    }}>
-      <Ionicons name="sync-outline" size={13} color={theme.dim} />
-      <Text style={{ fontSize: 11.5, color: theme.dim }}>{syncLabel}</Text>
-    </View>
   );
 }
 
@@ -262,14 +270,18 @@ export default function Home() {
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sheet, setSheet]           = useState(null);
+  const [lastSync, setLastSync]     = useState(null);
   const mountedRef                  = useRef(true);
   const router                      = useRouter();
-  const { theme, shadowSoft }       = useTheme();
+  const { theme, shadowCard }       = useTheme();
   const { width }                   = useWindowDimensions();
   const contentW                    = width - 32;
 
   useEffect(() => {
     mountedRef.current = true;
+    AsyncStorage.getItem("callos_last_sync_ts").then(ts => {
+      if (ts && mountedRef.current) setLastSync(parseInt(ts, 10));
+    }).catch(() => {});
     return () => { mountedRef.current = false; };
   }, []);
 
@@ -291,37 +303,30 @@ export default function Home() {
   const recentCalls   = useMemo(() => [...rangeFiltered].sort((a, b) => new Date(b.start_time) - new Date(a.start_time)).slice(0, 8), [rangeFiltered]);
 
   function openSheet(title, filter, color) {
-    const calls = filter === "all"
-      ? rangeFiltered
-      : rangeFiltered.filter(c => c.call_type === filter);
+    const calls = filter === "all" ? rangeFiltered : rangeFiltered.filter(c => c.call_type === filter);
     setSheet({ title, calls, color });
   }
 
-  const statPills = [
-    { label: "Incoming", value: stats.incoming, color: palette.teal,   icon: "call-received", filter: "incoming" },
-    { label: "Outgoing", value: stats.outgoing, color: palette.violet, icon: "call-made",     filter: "outgoing" },
-    { label: "Missed",   value: stats.missed,   color: palette.red,    icon: "call-missed",   filter: "missed"   },
-  ];
+  const syncLabel = lastSync ? `Synced ${relTime(new Date(lastSync).toISOString())}` : "Not synced yet";
 
   // ── Empty state ──────────────────────────────────────────────────────────
   if (!loading && allCalls.length === 0) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }} edges={["top"]}>
         <AppHeader />
-        <SyncStatusRow theme={theme} />
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 32 }}>
-          <Ionicons name="call-outline" size={52} color={theme.dim} />
-          <Text style={{ fontSize: 18, fontWeight: "700", color: theme.primary, marginTop: 16, textAlign: "center" }}>No calls recorded</Text>
-          <Text style={{ fontSize: 13.5, color: theme.muted, marginTop: 8, textAlign: "center", lineHeight: 20 }}>
-            CallNexa reads your Android call log.{"\n"}Make a call and pull down to refresh.
-          </Text>
-          <Pressable
-            onPress={() => load(true)}
-            style={{ marginTop: 24, backgroundColor: palette.teal + "22", borderRadius: 12, paddingHorizontal: 24, paddingVertical: 12, borderWidth: 1, borderColor: palette.teal + "44" }}
-          >
-            <Text style={{ fontSize: 14, fontWeight: "700", color: palette.teal }}>Refresh</Text>
-          </Pressable>
-        </View>
+        <EmptyState
+          icon="call-outline"
+          title="No calls recorded"
+          message={"CallNexa reads your Android call log.\nMake a call and pull down to refresh."}
+          action={
+            <Pressable onPress={() => load(true)} style={{ marginTop: SPACE.md }}>
+              <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ paddingHorizontal: SPACE.xxl, paddingVertical: SPACE.md, borderRadius: RADIUS.lg, flexDirection: "row", alignItems: "center", gap: SPACE.sm }}>
+                <Ionicons name="refresh-outline" size={16} color="#fff" />
+                <Text style={{ ...TYPE.bodyBold, color: "#fff" }}>Refresh</Text>
+              </LinearGradient>
+            </Pressable>
+          }
+        />
       </SafeAreaView>
     );
   }
@@ -329,7 +334,6 @@ export default function Home() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.bg }} edges={["top"]}>
       <AppHeader />
-      <SyncStatusRow theme={theme} />
 
       <ScrollView
         contentContainerStyle={{ paddingBottom: 110 }}
@@ -337,7 +341,7 @@ export default function Home() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={palette.teal} />}
       >
         {/* ── Range selector ── */}
-        <View style={{ flexDirection: "row", paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, gap: 8 }}>
+        <View style={{ flexDirection: "row", paddingHorizontal: SPACE.lg, paddingTop: SPACE.md, paddingBottom: SPACE.sm, gap: SPACE.sm }}>
           {RANGES.map(r => {
             const active = r.key === range;
             return (
@@ -345,12 +349,12 @@ export default function Home() {
                 key={r.key}
                 onPress={() => setRange(r.key)}
                 style={{
-                  flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: "center",
+                  flex: 1, paddingVertical: SPACE.sm, borderRadius: RADIUS.md, alignItems: "center",
                   backgroundColor: active ? palette.teal : theme.surface,
                   borderWidth: 1, borderColor: active ? palette.teal : theme.border,
                 }}
               >
-                <Text style={{ fontSize: 12, fontWeight: "700", color: active ? "#04211d" : theme.muted }}>{r.label}</Text>
+                <Text style={{ ...TYPE.label, color: active ? "#04211d" : theme.muted }}>{r.label}</Text>
               </Pressable>
             );
           })}
@@ -359,129 +363,119 @@ export default function Home() {
         {loading ? (
           <View style={{ alignItems: "center", paddingVertical: 60 }}>
             <ActivityIndicator color={palette.teal} size="large" />
-            <Text style={{ color: theme.muted, marginTop: 12, fontSize: 13 }}>Reading call log…</Text>
+            <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: SPACE.md }}>Reading call log…</Text>
           </View>
         ) : (
-          <View style={{ paddingHorizontal: 16 }}>
+          <View style={{ paddingHorizontal: SPACE.lg, gap: SPACE.md }}>
 
-            {/* ── PRIMARY SUMMARY CARD ── */}
-            <View style={[{ backgroundColor: theme.card, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: theme.border, marginBottom: 12 }, shadowSoft]}>
-              {/* Top row: total + ring */}
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-                <View>
-                  <Text style={{ fontSize: 12, color: theme.muted, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                    {RANGES.find(r => r.key === range)?.label} Calls
-                  </Text>
-                  <Pressable onPress={() => openSheet("All Calls", "all", palette.teal)}>
-                    <Text style={{ fontSize: 48, fontWeight: "800", color: theme.primary, lineHeight: 56 }}>{stats.total}</Text>
-                    <Text style={{ fontSize: 12, color: palette.teal, fontWeight: "600" }}>Tap to view all →</Text>
-                  </Pressable>
+            {/* ── HERO CARD — KPIs + RadialRing ── */}
+            <FadeCard delay={0}>
+              <View style={[{
+                backgroundColor: theme.card,
+                borderRadius: RADIUS.xxl,
+                borderWidth: 1, borderColor: theme.border,
+                overflow: "hidden",
+              }, shadowCard]}>
+                {/* Gradient accent top strip */}
+                <LinearGradient colors={["rgba(20,184,166,0.08)", "transparent"]} style={{ position: "absolute", top: 0, left: 0, right: 0, height: 80 }} />
+
+                <View style={{ padding: SPACE.lg }}>
+                  {/* Header row */}
+                  <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: SPACE.lg }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...TYPE.micro, color: theme.muted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: SPACE.xs }}>
+                        {RANGES.find(r => r.key === range)?.label} Calls
+                      </Text>
+                      <Pressable onPress={() => openSheet("All Calls", "all", palette.teal)}>
+                        <Text style={{ fontSize: 52, fontWeight: "800", color: theme.primary, lineHeight: 60 }}>
+                          <CountUp value={stats.total} />
+                        </Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: SPACE.xs, marginTop: 2 }}>
+                          <Text style={{ ...TYPE.label, color: palette.teal }}>View all calls</Text>
+                          <Ionicons name="arrow-forward" size={12} color={palette.teal} />
+                        </View>
+                      </Pressable>
+                    </View>
+                    <RadialRing percent={stats.connPct} size={110} stroke={11} label="Connected" />
+                  </View>
+
+                  {/* Divider */}
+                  <View style={{ height: 1, backgroundColor: theme.border, marginBottom: SPACE.md }} />
+
+                  {/* Stats row */}
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    {[
+                      { label: "Talk Time", value: fmtSecs(stats.totalSecs), color: palette.teal,    onPress: () => openSheet("All Calls", "all", palette.teal) },
+                      { label: "Avg Call",  value: fmtDur(stats.avgSecs),    color: palette.violet,  onPress: null },
+                      { label: "Connected", value: stats.connected,          color: palette.emerald, onPress: () => openSheet("Connected", "all", palette.emerald) },
+                    ].map(s => (
+                      <Pressable key={s.label} onPress={s.onPress || undefined} style={{ alignItems: "center", flex: 1 }}>
+                        <Text style={{ fontSize: 18, fontWeight: "800", color: s.color }}>{s.value}</Text>
+                        <Text style={{ ...TYPE.micro, color: theme.muted, marginTop: 3 }}>{s.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  {/* Sync status */}
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: SPACE.sm, marginTop: SPACE.md, paddingTop: SPACE.md, borderTopWidth: 1, borderTopColor: theme.border }}>
+                    <LiveDot color={palette.emerald} />
+                    <Text style={{ ...TYPE.micro, color: theme.dim }}>{syncLabel}</Text>
+                  </View>
                 </View>
-                <RadialRing percent={stats.connPct} size={110} stroke={11} label="Connected" />
               </View>
+            </FadeCard>
 
-              {/* Divider */}
-              <View style={{ height: 1, backgroundColor: theme.border, marginBottom: 14 }} />
-
-              {/* Stats row */}
-              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                {[
-                  { label: "Talk Time", value: fmtSecs(stats.totalSecs), color: palette.teal,    onPress: () => openSheet("All Calls", "all", palette.teal) },
-                  { label: "Avg Call",  value: fmtDur(stats.avgSecs),    color: palette.violet,  onPress: null },
-                  { label: "Connected", value: stats.connected,          color: palette.emerald, onPress: () => openSheet("Connected Calls", "all", palette.emerald) },
-                ].map(s => (
-                  <Pressable key={s.label} onPress={s.onPress || undefined} style={{ alignItems: "center", flex: 1 }}>
-                    <Text style={{ fontSize: 16, fontWeight: "800", color: s.color }}>{s.value}</Text>
-                    <Text style={{ fontSize: 10.5, color: theme.muted, marginTop: 3 }}>{s.label}</Text>
-                    {s.onPress && <Text style={{ fontSize: 9, color: s.color, marginTop: 1 }}>tap →</Text>}
-                  </Pressable>
-                ))}
+            {/* ── KPI PILLS: Incoming / Outgoing / Missed ── */}
+            <FadeCard delay={80}>
+              <View style={{ flexDirection: "row", gap: SPACE.sm }}>
+                <KpiPill label="Incoming" value={stats.incoming} color={palette.teal}   icon="call-received" onPress={() => openSheet("Incoming Calls", "incoming", palette.teal)} />
+                <KpiPill label="Outgoing" value={stats.outgoing} color={palette.violet} icon="call-made"     onPress={() => openSheet("Outgoing Calls", "outgoing", palette.violet)} />
+                <KpiPill label="Missed"   value={stats.missed}   color={palette.red}    icon="call-missed"   onPress={() => openSheet("Missed Calls",   "missed",   palette.red)} />
               </View>
-            </View>
-
-            {/* ── STAT PILLS: Incoming / Outgoing / Missed ── */}
-            <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-              {statPills.map(s => (
-                <StatPill
-                  key={s.label}
-                  label={s.label}
-                  value={s.value}
-                  color={s.color}
-                  icon={s.icon}
-                  onPress={() => openSheet(s.label + " Calls", s.filter, s.color)}
-                />
-              ))}
-            </View>
+            </FadeCard>
 
             {/* ── 7-DAY ACTIVITY ── */}
             {daily7.some(d => d.total > 0) && (
-              <View style={[{ backgroundColor: theme.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border, marginBottom: 12 }, shadowSoft]}>
-                <Text style={{ fontSize: 13, fontWeight: "700", color: theme.muted, marginBottom: 12, textTransform: "uppercase", letterSpacing: 0.4 }}>7-Day Activity</Text>
-                <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 6, height: 56 }}>
-                  {daily7.map((d, i) => {
-                    const maxTotal = Math.max(...daily7.map(x => x.total), 1);
-                    const h = Math.max((d.total / maxTotal) * 48, d.total > 0 ? 4 : 2);
-                    const isToday = i === 6;
-                    return (
-                      <View key={i} style={{ flex: 1, alignItems: "center", gap: 4 }}>
-                        <View style={{ width: "100%", height: h, borderRadius: 4, backgroundColor: isToday ? palette.teal : palette.teal + "44" }} />
-                        <Text style={{ fontSize: 9.5, color: isToday ? palette.teal : theme.dim, fontWeight: isToday ? "700" : "400" }}>{d.label}</Text>
+              <FadeCard delay={160}>
+                <View style={[{ backgroundColor: theme.card, borderRadius: RADIUS.xl, padding: SPACE.lg, borderWidth: 1, borderColor: theme.border }, shadowCard]}>
+                  <CardHeader icon="stats-chart-outline" title="7-Day Activity" subtitle="Daily call volume" />
+                  <AnimatedBars data={daily7} width={contentW - SPACE.xxxl} height={64} />
+                  {/* Count row */}
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: SPACE.sm }}>
+                    {daily7.map((d, i) => (
+                      <View key={i} style={{ flex: 1, alignItems: "center" }}>
+                        <Text style={{ ...TYPE.micro, fontWeight: "700", color: d.total > 0 ? theme.secondary : theme.dim }}>{d.total || ""}</Text>
                       </View>
-                    );
-                  })}
+                    ))}
+                  </View>
                 </View>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 10 }}>
-                  {daily7.map((d, i) => (
-                    <View key={i} style={{ flex: 1, alignItems: "center" }}>
-                      <Text style={{ fontSize: 10, fontWeight: "700", color: d.total > 0 ? theme.secondary : theme.dim }}>{d.total || ""}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
+              </FadeCard>
             )}
 
             {/* ── RECENT CALLS ── */}
             {recentCalls.length > 0 && (
-              <View style={[{ backgroundColor: theme.card, borderRadius: 16, borderWidth: 1, borderColor: theme.border, marginBottom: 12, overflow: "hidden" }, shadowSoft]}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 }}>
-                  <Text style={{ fontSize: 13, fontWeight: "700", color: theme.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Recent Calls</Text>
-                  <Pressable onPress={() => router.push("/(tabs)/logs")} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <Text style={{ fontSize: 12.5, fontWeight: "700", color: palette.teal }}>See all →</Text>
-                  </Pressable>
+              <FadeCard delay={240}>
+                <View style={[{ backgroundColor: theme.card, borderRadius: RADIUS.xl, borderWidth: 1, borderColor: theme.border, overflow: "hidden" }, shadowCard]}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: SPACE.lg, paddingTop: SPACE.lg, paddingBottom: SPACE.md }}>
+                    <CardHeader icon="time-outline" title="Recent Calls" />
+                    <Pressable onPress={() => router.push("/(tabs)/logs")} hitSlop={8}>
+                      <Text style={{ ...TYPE.label, color: palette.teal }}>See all →</Text>
+                    </Pressable>
+                  </View>
+                  <View style={{ paddingHorizontal: SPACE.lg }}>
+                    {recentCalls.map((c, i) => (
+                      <RecentCallRow
+                        key={c.client_event_id || i}
+                        c={c}
+                        theme={theme}
+                        onPress={() => router.push({ pathname: "/call-detail", params: { clientEventId: c.client_event_id || "", callId: "" } })}
+                      />
+                    ))}
+                  </View>
+                  <View style={{ height: SPACE.sm }} />
                 </View>
-                <View style={{ paddingHorizontal: 16 }}>
-                  {recentCalls.map((c, i) => (
-                    <RecentCallRow
-                      key={c.client_event_id || i}
-                      c={c}
-                      theme={theme}
-                      onPress={() => router.push({ pathname: "/call-detail", params: { clientEventId: c.client_event_id || "", callId: "" } })}
-                    />
-                  ))}
-                </View>
-                <View style={{ height: 8 }} />
-              </View>
+              </FadeCard>
             )}
-
-            {/* ── PERFORMANCE METRICS ── */}
-            <View style={[{ backgroundColor: theme.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border, marginBottom: 12 }, shadowSoft]}>
-              <Text style={{ fontSize: 13, fontWeight: "700", color: theme.muted, marginBottom: 14, textTransform: "uppercase", letterSpacing: 0.4 }}>Performance</Text>
-              {[
-                { label: "Connected Rate", value: `${stats.connPct}%`,          bar: stats.connPct,                          color: palette.teal   },
-                { label: "Avg Duration",   value: fmtDur(stats.avgSecs),         bar: Math.min(stats.avgSecs / 300 * 100, 100), color: palette.violet },
-                { label: "Talk Time",      value: fmtSecs(stats.totalSecs),      bar: Math.min(stats.totalSecs / 3600 * 100, 100), color: palette.cyan },
-              ].map(m => (
-                <View key={m.label} style={{ marginBottom: 12 }}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
-                    <Text style={{ fontSize: 13, color: theme.secondary }}>{m.label}</Text>
-                    <Text style={{ fontSize: 13, fontWeight: "700", color: m.color }}>{m.value}</Text>
-                  </View>
-                  <View style={{ height: 5, backgroundColor: theme.border, borderRadius: 3, overflow: "hidden" }}>
-                    <View style={{ width: `${m.bar}%`, height: "100%", backgroundColor: m.color, borderRadius: 3 }} />
-                  </View>
-                </View>
-              ))}
-            </View>
 
           </View>
         )}

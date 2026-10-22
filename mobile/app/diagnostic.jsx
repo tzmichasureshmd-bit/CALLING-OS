@@ -8,7 +8,7 @@ import { View, Text, ScrollView, Pressable, ActivityIndicator } from "react-nati
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { palette, useTheme } from "../src/theme";
-import { readSimInfo, checkSimPermission, getSimCount, getDeviceInfo, checkPermissions } from "../src/nativeModules";
+import { readSimInfo, checkSimPermission, getSimCount, getDeviceInfo, checkPermissions, checkRecordingPermission, getRecentRecordings } from "../src/nativeModules";
 import { getSimSelection } from "../src/simSelectionService";
 import { getRealCallLog } from "../src/callLogService";
 import { getAllCallStatuses, STATUS } from "../src/callStatusStore";
@@ -52,16 +52,24 @@ export default function DiagnosticScreen() {
   async function runDiagnostic() {
     setLoading(true);
     try {
-      const [simPerm, simCount, sims, selection, perms, statuses] = await Promise.all([
+      const [simPerm, simCount, sims, selection, perms, statuses, recPerm] = await Promise.all([
         checkSimPermission(),
         getSimCount(),
         readSimInfo(),
         getSimSelection(),
         checkPermissions(),
         getAllCallStatuses(),
+        checkRecordingPermission(),
       ]);
 
       const deviceInfo = getDeviceInfo();
+
+      // Recent recordings from native module (last 24h, max 10)
+      let recentRecordings = [];
+      try {
+        const recResult = await getRecentRecordings(Date.now() - 24 * 60 * 60 * 1000, 10);
+        recentRecordings = recResult.recordings || [];
+      } catch {}
 
       // Call log stats
       let callStats = { total: 0, eligible: 0, unknownSim: 0, incoming: 0, outgoing: 0, missed: 0, rejected: 0 };
@@ -118,9 +126,10 @@ export default function DiagnosticScreen() {
         failed:     statuses.filter(s => s.transcript_status === STATUS.TRANSCRIPTION_FAILED).length,
       };
 
-      const source = NativeModules.CallLogModule ? "Native Kotlin (CallLogModule + SimModule)" : "Fallback library (react-native-call-log)";
+      const source = NativeModules.CallLogModule ? "Native Kotlin (CallLogModule + SimModule + RecordingModule)" : "Fallback library (react-native-call-log)";
+      const recordingModuleAvailable = !!NativeModules.RecordingModule;
 
-      setData({ deviceInfo, simPerm, simCount, sims, selection, perms, callStats, syncStats, recStats, txStats, source });
+      setData({ deviceInfo, simPerm, simCount, sims, selection, perms, callStats, syncStats, recStats, txStats, source, recPerm, recentRecordings, recordingModuleAvailable });
     } catch (e) {
       setData({ error: e?.message });
     }
@@ -255,6 +264,32 @@ export default function DiagnosticScreen() {
               <Row label="Processing" value={data.txStats.processing} valueColor={palette.violet} />
               <Row label="Completed" value={data.txStats.completed} valueColor={palette.emerald} />
               <Row label="Failed" value={data.txStats.failed} valueColor={data.txStats.failed > 0 ? palette.red : theme.muted} />
+            </Section>
+
+            {/* Recording Module */}
+            <Section title="Recording Module">
+              <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 4, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <Text style={{ fontSize: 12, color: theme.muted }}>RecordingModule (native)</Text>
+                <Badge label={data.recordingModuleAvailable ? "AVAILABLE" : "NOT IN BUILD"} ok={data.recordingModuleAvailable} />
+              </View>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 4, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <Text style={{ fontSize: 12, color: theme.muted }}>Audio storage permission</Text>
+                <Badge label={data.recPerm?.granted ? "GRANTED" : "DENIED"} ok={data.recPerm?.granted} />
+              </View>
+              <Row label="Required permission" value={data.recPerm?.required_permission ?? "—"} />
+              <Row label="Recordings found (24h)" value={data.recentRecordings?.length ?? 0}
+                valueColor={data.recentRecordings?.length > 0 ? palette.emerald : theme.muted} />
+              {data.recentRecordings?.length > 0 && data.recentRecordings.slice(0, 3).map((r, i) => (
+                <View key={i} style={{ backgroundColor: theme.surface, borderRadius: 8, padding: 8, marginTop: 6, borderWidth: 1, borderColor: theme.border }}>
+                  <Text style={{ fontSize: 11, fontWeight: "700", color: palette.teal }} numberOfLines={1}>{r.display_name || "unknown"}</Text>
+                  <Text style={{ fontSize: 10, color: theme.muted }}>size: {r.size_bytes ? Math.round(r.size_bytes / 1024) + " KB" : "—"} · dur: {r.duration_sec ? Math.round(r.duration_sec) + "s" : "—"} · src: {r.source}</Text>
+                </View>
+              ))}
+              {!data.recordingModuleAvailable && (
+                <Text style={{ fontSize: 11, color: palette.amber, marginTop: 8, lineHeight: 16 }}>
+                  RecordingModule requires a native build (EAS build). It is not available in Expo Go.
+                </Text>
+              )}
             </Section>
 
             {/* Source */}

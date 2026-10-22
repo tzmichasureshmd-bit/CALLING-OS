@@ -31,11 +31,18 @@ class CallMonitorService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        val restart = Intent(applicationContext, CallMonitorService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(restart)
-        } else {
-            startService(restart)
+        // Only attempt restart when the app process is still in the foreground.
+        // Calling startForegroundService() from a background state on API 26+
+        // throws IllegalStateException and crashes the process silently.
+        try {
+            val restart = Intent(applicationContext, CallMonitorService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(restart)
+            } else {
+                startService(restart)
+            }
+        } catch (_: Exception) {
+            // App is in background or being force-stopped — restart is not safe.
         }
     }
 

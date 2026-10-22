@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { View, Text, ScrollView, useWindowDimensions, RefreshControl, Pressable, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { palette, useTheme } from "../../src/theme";
-import { AppHeader, Card } from "../../src/components";
+import { palette, useTheme, TYPE, SPACE, RADIUS } from "../../src/theme";
+import { AppHeader, Card, CardHeader, Badge, EmptyState } from "../../src/components";
 import { LineChart, StackedBars, Donut, ProgressBar } from "../../src/charts";
 import { getRealCallLog } from "../../src/callLogService";
 
@@ -113,45 +113,56 @@ export default function Insights() {
     };
   }, [allCalls, range]);
 
-  const title = { fontSize: 15, fontWeight: "700", color: theme.muted, marginBottom: 8 };
-
   const Legend = ({ items }) => (
-    <View style={{ flexDirection:"row", gap:14, marginBottom:8 }}>
+    <View style={{ flexDirection:"row", gap:14, marginBottom:SPACE.sm }}>
       {items.map(it => (
         <View key={it.label} style={{ flexDirection:"row", alignItems:"center", gap:5 }}>
           <View style={{ width:9, height:9, borderRadius:3, backgroundColor:it.color }}/>
-          <Text style={{ fontSize:11.5, color:theme.muted }}>{it.label}</Text>
+          <Text style={{ ...TYPE.label, color:theme.muted }}>{it.label}</Text>
         </View>
       ))}
     </View>
   );
 
   const XLabels = ({ labels }) => {
-    // Show max 7 labels to avoid overlap
     const step = Math.ceil(labels.length / 7);
     return (
-      <View style={{ flexDirection:"row", justifyContent:"space-between", marginTop:6 }}>
+      <View style={{ flexDirection:"row", justifyContent:"space-between", marginTop:SPACE.sm }}>
         {labels.filter((_,i) => i % step === 0).map(l => (
-          <Text key={l} style={{ fontSize:10, color:theme.dim }}>{l}</Text>
+          <Text key={l} style={{ ...TYPE.micro, color:theme.dim }}>{l}</Text>
         ))}
       </View>
     );
   };
 
+  // KPI summary computed from filtered calls
+  const kpis = useMemo(() => {
+    if (!data) return null;
+    const filtered = filterByRange(allCalls, range);
+    const total = filtered.length;
+    const connected = filtered.filter(c => c.duration_seconds > 0).length;
+    const totalSecs = filtered.reduce((s,c) => s + (c.duration_seconds||0), 0);
+    const connPct = total ? Math.round(connected/total*100) : 0;
+    const avgSecs = connected ? Math.round(totalSecs/connected) : 0;
+    const m = Math.floor(avgSecs/60), s = avgSecs%60;
+    return { total, connPct, avg: `${m}:${String(s).padStart(2,'0')}` };
+  }, [data, allCalls, range]);
+
   return (
     <SafeAreaView style={{ flex:1, backgroundColor:theme.bg }} edges={["top"]}>
-      <AppHeader title="Insights" showStatus={false} right={
-        <View style={{ flexDirection:"row", gap:6 }}>
-          {RANGES.map(r => (
-            <Pressable key={r} onPress={() => setRange(r)}
-              style={{ paddingHorizontal:11, paddingVertical:6, borderRadius:10, borderWidth:1,
-                borderColor: r===range ? palette.teal : theme.border,
-                backgroundColor: r===range ? palette.teal+"22" : "transparent" }}>
-              <Text style={{ fontSize:12, fontWeight:"700", color: r===range ? palette.teal : theme.muted }}>{r}</Text>
-            </Pressable>
-          ))}
-        </View>
-      }/>
+      <AppHeader title="Insights" showStatus={false} />
+      {/* Range strip — full width below header */}
+      <View style={{ flexDirection:"row", paddingHorizontal:SPACE.lg, paddingVertical:SPACE.sm, gap:SPACE.sm, borderBottomWidth:1, borderBottomColor:theme.border }}>
+        {RANGES.map(r => (
+          <Pressable key={r} onPress={() => setRange(r)}
+            style={{ flex:1, paddingVertical:SPACE.sm, borderRadius:RADIUS.md, alignItems:"center",
+              borderWidth:1,
+              borderColor: r===range ? palette.teal : theme.border,
+              backgroundColor: r===range ? palette.teal : theme.surface }}>
+            <Text style={{ ...TYPE.label, color: r===range ? "#04211d" : theme.muted }}>{r}</Text>
+          </Pressable>
+        ))}
+      </View>
 
       {loading ? (
         <View style={{ flex:1, alignItems:"center", justifyContent:"center" }}>
@@ -160,25 +171,38 @@ export default function Insights() {
         </View>
       ) : !data ? (
         <ScrollView
-          contentContainerStyle={{ flex:1, alignItems:"center", justifyContent:"center", padding:32 }}
+          contentContainerStyle={{ flex:1 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={palette.teal}/>}
         >
-          <Text style={{ fontSize:40, marginBottom:16 }}>📊</Text>
-          <Text style={{ fontSize:16, fontWeight:"700", color:theme.primary, textAlign:"center" }}>No calls for {range}</Text>
-          <Text style={{ fontSize:13, color:theme.muted, textAlign:"center", marginTop:8 }}>
-            Make some calls and pull down to refresh.
-          </Text>
+          <EmptyState icon="stats-chart-outline" title={`No calls for ${range}`} message="Make some calls and pull down to refresh." />
         </ScrollView>
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingHorizontal:16, paddingBottom:110, paddingTop:8 }}
+          contentContainerStyle={{ paddingHorizontal:SPACE.lg, paddingBottom:110, paddingTop:SPACE.sm, gap:SPACE.md }}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={palette.teal}/>}
         >
+          {/* KPI summary row */}
+          {kpis && (
+            <View style={{ flexDirection:"row", gap:SPACE.sm, marginBottom:SPACE.xs }}>
+              {[
+                { label:"Total Calls",    value:kpis.total,   color:palette.teal,   icon:"call-outline" },
+                { label:"Connected Rate", value:`${kpis.connPct}%`, color:palette.violet, icon:"checkmark-circle-outline" },
+                { label:"Avg Duration",   value:kpis.avg,     color:palette.cyan,   icon:"time-outline" },
+              ].map(k => (
+                <View key={k.label} style={{ flex:1, backgroundColor:theme.card, borderRadius:RADIUS.lg, padding:SPACE.md, borderWidth:2, borderColor:k.color, alignItems:"center", gap:4 }}>
+                  <Ionicons name={k.icon} size={16} color={k.color} />
+                  <Text style={{ fontSize:18, fontWeight:"800", color:theme.primary }}>{k.value}</Text>
+                  <Text style={{ ...TYPE.micro, color:theme.muted, textAlign:"center" }}>{k.label}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
           {/* Total vs Connected */}
           {data.daily.some(d => d.total > 0) && (
-            <Card style={{ marginBottom:14 }}>
-              <Text style={title}>Total vs Connected Calls</Text>
+            <Card style={{ marginBottom:0 }}>
+              <CardHeader icon="stats-chart-outline" title="Total vs Connected" />
               <Legend items={[{label:"Total",color:palette.violet},{label:"Connected",color:palette.teal}]}/>
               <LineChart width={w} height={160} series={[
                 { data: data.daily.map(d=>d.total),     color: palette.violet },
@@ -190,8 +214,8 @@ export default function Insights() {
 
           {/* Call Outcomes */}
           {data.daily.some(d => d.connected+d.missed > 0) && (
-            <Card style={{ marginBottom:14 }}>
-              <Text style={title}>Call Outcomes</Text>
+            <Card style={{ marginBottom:0 }}>
+              <CardHeader icon="bar-chart-outline" title="Call Outcomes" />
               <Legend items={[{label:"Connected",color:palette.teal},{label:"Missed",color:palette.red},{label:"Rejected",color:palette.amber}]}/>
               <StackedBars width={w} height={160}
                 data={data.daily.map(d=>({ connected:d.connected, missed:d.missed, rejected:d.rejected }))}
@@ -203,8 +227,8 @@ export default function Insights() {
 
           {/* Duration Distribution */}
           {data.duration.length > 0 && (
-            <Card style={{ marginBottom:14 }}>
-              <Text style={title}>Call Duration Distribution</Text>
+            <Card style={{ marginBottom:0 }}>
+              <CardHeader icon="pie-chart-outline" title="Duration Distribution" />
               <View style={{ flexDirection:"row", alignItems:"center", gap:18, marginTop:4 }}>
                 <Donut segments={data.duration} size={120} stroke={22}/>
                 <View style={{ flex:1, gap:10 }}>
@@ -212,9 +236,9 @@ export default function Insights() {
                     <View key={s.label} style={{ flexDirection:"row", alignItems:"center", justifyContent:"space-between" }}>
                       <View style={{ flexDirection:"row", alignItems:"center", gap:7 }}>
                         <View style={{ width:10, height:10, borderRadius:3, backgroundColor:s.color }}/>
-                        <Text style={{ fontSize:12.5, color:theme.secondary }}>{s.label}</Text>
+                        <Text style={{ ...TYPE.caption, color:theme.secondary }}>{s.label}</Text>
                       </View>
-                      <Text style={{ fontSize:13, fontWeight:"700", color:theme.primary }}>{s.value}%</Text>
+                      <Text style={{ ...TYPE.bodyBold, color:theme.primary }}>{s.value}%</Text>
                     </View>
                   ))}
                 </View>
@@ -224,20 +248,20 @@ export default function Insights() {
 
           {/* Top Contacts */}
           {data.topContacts.length > 0 && (
-            <Card style={{ marginBottom:14 }}>
-              <Text style={{ ...title, marginBottom:12 }}>Most Called Contacts</Text>
+            <Card style={{ marginBottom:0 }}>
+              <CardHeader icon="people-outline" title="Most Called Contacts" />
               {data.topContacts.map((c, i) => (
                 <View key={c.name} style={{ flexDirection:"row", alignItems:"center", gap:12, marginBottom: i===data.topContacts.length-1 ? 0 : 14 }}>
-                  <Text style={{ fontSize:13, fontWeight:"700", color:theme.dim, width:18 }}>{i+1}</Text>
+                  <Text style={{ ...TYPE.bodyBold, color:theme.dim, width:18 }}>{i+1}</Text>
                   <View style={{ width:36, height:36, borderRadius:18, backgroundColor:palette.teal+"22", alignItems:"center", justifyContent:"center" }}>
-                    <Text style={{ fontSize:13, fontWeight:"700", color:palette.teal }}>
+                    <Text style={{ ...TYPE.bodyBold, color:palette.teal }}>
                       {c.name.split(" ").map(x=>x[0]).slice(0,2).join("").toUpperCase()}
                     </Text>
                   </View>
                   <View style={{ flex:1 }}>
                     <View style={{ flexDirection:"row", justifyContent:"space-between", marginBottom:5 }}>
-                      <Text style={{ fontSize:13.5, fontWeight:"600", color:theme.primary }} numberOfLines={1}>{c.name}</Text>
-                      <Text style={{ fontSize:12.5, fontWeight:"700", color:theme.secondary }}>{c.calls} calls</Text>
+                      <Text style={{ ...TYPE.bodyBold, color:theme.primary }} numberOfLines={1}>{c.name}</Text>
+                      <Text style={{ ...TYPE.caption, fontWeight:"700", color:theme.secondary }}>{c.calls} calls</Text>
                     </View>
                     <ProgressBar percent={c.pct} color={i===0 ? palette.teal : palette.violet} width={w-64} height={6}/>
                   </View>

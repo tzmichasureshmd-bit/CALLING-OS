@@ -18,9 +18,9 @@ import { useResource } from "../api/useResource.js";
 import { useDeviceSocket } from "../api/useDeviceSocket.js";
 import { useRange } from "../context/RangeContext.jsx";
 
-// Always fetch all calls — filter client-side to avoid backend timezone issues
+// Fetch last 200 calls — enough for all practical ranges without hammering the DB
 function rangeToParams() {
-  return { page_size: 500 };
+  return { page_size: 200 };
 }
 
 function clientFilterByRange(calls, range) {
@@ -62,7 +62,7 @@ const TYPE_META = {
   rejected: { label: "Rejected", color: "var(--text-muted)", icon: PhoneOff      },
 };
 
-const FILTERS = ["All", "Incoming", "Outgoing", "Missed", "Blocked", "Recorded"];
+const FILTERS = ["All", "Incoming", "Outgoing", "Missed", "Rejected", "Recorded"];
 
 // ── Progress helpers (mirrors mobile STATUSES) ───────────────────────────────
 const CALL_STATUSES = [
@@ -92,10 +92,10 @@ export default function CallLogs() {
     [range]
   );
 
-  // Auto-refresh every 10s when on today range
+  // Auto-refresh every 30s (reduced from 10s — WS handles instant updates)
   useEffect(() => {
     if (!autoRefresh) return;
-    const t = setInterval(() => reload(), 10000);
+    const t = setInterval(() => reload(), 30000);
     return () => clearInterval(t);
   }, [autoRefresh, reload]);
 
@@ -263,7 +263,7 @@ export default function CallLogs() {
         </div>
         <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-dim)", borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span>{filtered.length} record{filtered.length !== 1 ? "s" : ""}{empFilter !== "All" ? ` · ${empFilter}` : ""} · click a row for Call Intelligence</span>
-          {autoRefresh && <span style={{ color: "var(--success)", fontWeight: 600 }}>● Live — refreshing every 10s</span>}
+          {autoRefresh && <span style={{ color: "var(--success)", fontWeight: 600 }}>● Live — refreshing every 30s</span>}
         </div>
       </Card>
 
@@ -358,7 +358,7 @@ function ScheduleModal({ call, onClose }) {
   );
 }
 
-function ProgressPanel({ call, onSaved }) {
+function ProgressPanel({ call, onSaved, reload }) {
   const [status, setStatus] = useState(call?.callStatus || null);
   const [notes,  setNotes]  = useState(call?.notes || "");
   const [saved,  setSaved]  = useState(false);
@@ -386,6 +386,8 @@ function ProgressPanel({ call, onSaved }) {
       console.log(`[PROGRESS_SAVE_SUCCESS] callId=${call.id} updated_at=${res?.call?.updated_at} ts=${Date.now()}`);
       setSaved(true);
       onSaved?.(res?.call);
+      // Always reload after save — don't rely solely on WS event
+      setTimeout(() => reload?.(), 300);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
       const msg = e?.response?.data?.detail || e?.message || "";
@@ -496,12 +498,15 @@ function CallIntelligenceDrawer({ call, onClose }) {
   const [txData, setTxData]         = useState(null);  // live transcript/summary
   const [loadingTx, setLoadingTx]   = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [privacy, setPrivacy]       = useState(call?.callPrivacy || "unclassified");
+  const [privacySaving, setPrivacySaving] = useState(false);
   const audioRef = useRef(null);
 
   // Reset on call change
   useEffect(() => {
     setPlaying(false); setProgress(0); setAudioDur(0);
     setSignedUrl(null); setUrlError(null); setTxData(null);
+    setPrivacy(call?.callPrivacy || "unclassified");
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     if (call?.id) loadTxData(call.id);
   }, [call?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -513,6 +518,30 @@ function CallIntelligenceDrawer({ call, onClose }) {
       setTxData(res.data);
     } catch { /* silent — call may not have transcript yet */ }
     finally { setLoadingTx(false); }
+  }
+
+  async function handleSetPrivacy(val) {
+    if (val === privacy || !call?.id) return;
+    setPrivacySaving(true);
+    try {
+      await callsApi.setPrivacy(call.id, val);
+      setPrivacy(val);
+    } catch (e) {
+      alert(e?.response?.data?.detail || e?.message || "Could not update privacy");
+    } finally {
+      setPrivacySaving(false);
+    }
+  }
+
+  async function handleDeleteRecording() {
+    if (!call?.id) return;
+    if (!window.confirm("Delete this recording and its transcript permanently? This cannot be undone.")) return;
+    try {
+      await callsApi.deleteRecording(call.id);
+      onClose();
+    } catch (e) {
+      alert(e?.response?.data?.detail || e?.message || "Delete failed");
+    }
   }
 
   async function handlePlay() {
@@ -549,23 +578,34 @@ function CallIntelligenceDrawer({ call, onClose }) {
     ? (() => { try { return JSON.parse(txData.summary_data); } catch { return null; } })()
     : call.summaryData;
 
+  const isPersonal      = privacy === "personal";
+  const isUnclassified  = privacy === "unclassified";
+  const isBusiness      = privacy === "business";
+
+  const PRIVACY_OPTIONS = [
+    { value: "business",      label: "Business",      color: "var(--success)" },
+    { value: "personal",      label: "Personal",      color: "var(--danger)" },
+    { value: "unclassified",  label: "Unclassified",  color: "var(--text-muted)" },
+  ];
+  const privacyMeta = PRIVACY_OPTIONS.find(p => p.value === privacy) || PRIVACY_OPTIONS[2];
+
   const PIPELINE = [
     { label: "Synced",      done: true,
       color: "var(--success)" },
-    { label: "Recording",   done: recStatus === "uploaded",
-      color: recStatus === "uploaded" ? "var(--success)" : recStatus === "not_available" ? "var(--danger)" : "var(--warning)" },
-    { label: "Transcribed", done: txStatus === "completed",
-      color: txStatus === "completed" ? "var(--success)" : txStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
-    { label: "Summarized",  done: sumStatus === "completed",
-      color: sumStatus === "completed" ? "var(--success)" : sumStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
+    { label: "Recording",   done: recStatus === "uploaded" && !isPersonal,
+      color: isPersonal ? "var(--danger)" : recStatus === "uploaded" ? "var(--success)" : recStatus === "not_available" ? "var(--text-dim)" : "var(--warning)" },
+    { label: "Transcribed", done: txStatus === "completed" && !isPersonal,
+      color: isPersonal ? "var(--text-dim)" : txStatus === "completed" ? "var(--success)" : txStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
+    { label: "Summarized",  done: sumStatus === "completed" && !isPersonal,
+      color: isPersonal ? "var(--text-dim)" : sumStatus === "completed" ? "var(--success)" : sumStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
   ];
 
   // sub-label shown under each step
   const PIPELINE_SUB = [
     "Done",
-    recStatus === "uploaded" ? "Uploaded" : recStatus === "not_available" ? "N/A" : recStatus || "Pending",
-    txStatus === "completed" ? "Done" : txStatus === "processing" ? "In progress" : txStatus || "Pending",
-    sumStatus === "completed" ? "Done" : sumStatus === "processing" ? "In progress" : sumStatus || "Pending",
+    isPersonal ? "Excluded" : recStatus === "uploaded" ? "Uploaded" : recStatus === "not_available" ? "N/A" : recStatus || "Pending",
+    isPersonal ? "Excluded" : txStatus === "completed" ? "Done" : txStatus === "processing" ? "In progress" : txStatus || "Pending",
+    isPersonal ? "Excluded" : sumStatus === "completed" ? "Done" : sumStatus === "processing" ? "In progress" : sumStatus || "Pending",
   ];
 
   const waNumber = localStorage.getItem("callos_wa_number") || "";
@@ -611,6 +651,43 @@ function CallIntelligenceDrawer({ call, onClose }) {
         )}
       </div>
 
+      {/* Privacy classifier */}
+      <div style={{ marginBottom:18, background:"var(--bg-hover)", borderRadius:12, padding:14, border:`1px solid ${privacyMeta.color}44` }}>
+        <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:10 }}>Call Privacy</div>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          {PRIVACY_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => handleSetPrivacy(opt.value)}
+              disabled={privacySaving}
+              style={{
+                padding:"6px 14px", borderRadius:999, fontSize:12, fontWeight:700, cursor:"pointer",
+                border:`1.5px solid ${opt.color}`,
+                background: privacy === opt.value ? opt.color : "transparent",
+                color: privacy === opt.value ? "#fff" : opt.color,
+                opacity: privacySaving ? 0.6 : 1,
+              }}
+            >{opt.label}</button>
+          ))}
+        </div>
+        {isPersonal && (
+          <div style={{ marginTop:10, fontSize:12, color:"var(--danger)", lineHeight:1.5 }}>
+            ⛔ Personal call — recording, upload, transcription and AI analysis are blocked.
+            {call.hasRecording && (
+              <button
+                onClick={handleDeleteRecording}
+                style={{ marginLeft:10, fontSize:11, color:"var(--danger)", background:"none", border:"1px solid var(--danger)", borderRadius:6, padding:"2px 8px", cursor:"pointer" }}
+              >Delete recording</button>
+            )}
+          </div>
+        )}
+        {isUnclassified && (
+          <div style={{ marginTop:10, fontSize:12, color:"var(--text-muted)", lineHeight:1.5 }}>
+            ⚠️ Unclassified — classify as <strong>Business</strong> to enable recording upload and transcription.
+          </div>
+        )}
+      </div>
+
       {/* Pipeline progress */}
       <div style={{ marginBottom:18 }}>
         <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:10 }}>Processing Pipeline</div>
@@ -629,6 +706,7 @@ function CallIntelligenceDrawer({ call, onClose }) {
       </div>
 
       {/* Recording player */}
+      {!isPersonal && (
       <div style={{ background:"var(--bg-hover)", borderRadius:12, padding:14, marginBottom:18 }}>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <button onClick={handlePlay} disabled={!call.hasRecording || loadingUrl}
@@ -655,9 +733,10 @@ function CallIntelligenceDrawer({ call, onClose }) {
           </div>
         </div>
       </div>
+      )}
 
       {/* Transcript */}
-      {(txStatus || loadingTx) && (
+      {!isPersonal && (txStatus || loadingTx) && (
         <div style={{ marginBottom:18 }}>
           <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:10, display:"flex", alignItems:"center", gap:8 }}>
             <Sparkles size={13} color="var(--accent-2)"/> Transcript
@@ -678,6 +757,7 @@ function CallIntelligenceDrawer({ call, onClose }) {
       )}
 
       {/* AI Summary */}
+      {!isPersonal && (
       <div style={{ marginBottom:18 }}>
         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
           <Sparkles size={15} color="var(--accent-2)"/>
@@ -729,6 +809,7 @@ function CallIntelligenceDrawer({ call, onClose }) {
           </p>
         )}
       </div>
+      )}
 
       {/* Salesperson Progress — read from backend */}
       {(call.callStatus || call.notes) && (() => {
@@ -758,7 +839,7 @@ function CallIntelligenceDrawer({ call, onClose }) {
       })()}
 
       {/* Edit Progress */}
-      <ProgressPanel call={call} onSaved={(updated) => {
+      <ProgressPanel call={call} reload={reload} onSaved={(updated) => {
         console.log(`[WEB_STATUS_UPDATED] call_updated callId=${call.id} ts=${Date.now()}`);
         // Reload the full list so the row reflects the confirmed backend data
         if (typeof onClose === "function") {

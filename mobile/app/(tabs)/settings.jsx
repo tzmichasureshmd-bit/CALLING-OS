@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { palette, gradientBrand, useTheme } from "../../src/theme";
+import { palette, gradientBrand, useTheme, TYPE, SPACE, RADIUS } from "../../src/theme";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useAuth } from "../../src/AuthContext";
@@ -117,7 +117,7 @@ export default function Profile() {
     }
     setSyncing(true); setSyncResult(null);
     try {
-      const { getRealCallLog, markCallsSynced, getSelectedSimIdentity } = require('../../src/callLogService');
+      const { getRealCallLog, getSelectedSimIdentity } = require('../../src/callLogService');
       const { api: _api } = require('../../src/api');
       const BATCH = 50;
       let allCalls = await getRealCallLog(7);
@@ -148,14 +148,23 @@ export default function Profile() {
         } catch (e) { lastError = e.message; }
         if (i + BATCH < allCalls.length) await new Promise(r => setTimeout(r, 500));
       }
-      if (confirmed.length) await markCallsSynced(confirmed);
       const result = { accepted: totalAccepted, duplicates: totalDup, failed: totalFailed, total: allCalls.length };
       setSyncResult(result);
       const now = Date.now();
       await AsyncStorage.setItem(LAST_SYNC_KEY, String(now));
       setLastSync(new Date(now).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' }));
       if (lastError && totalAccepted === 0 && totalDup === 0) {
-        Alert.alert('Sync Failed', 'Err:' + lastError + '\nDev:' + deviceId + '\nCalls:' + allCalls.length);
+        // Classify the error so the user sees a meaningful message
+        const isTimeout  = lastError.includes('timed out') || lastError.includes('AbortError');
+        const isAuth     = lastError.includes('401') || lastError.includes('403') || lastError.includes('Unauthorized');
+        const isOffline  = lastError.includes('Network request failed') || lastError.includes('network');
+        const isDevice   = lastError.includes('Device not found');
+        let category = 'Sync failed';
+        if (isTimeout)  category = 'Sync timed out — server took too long';
+        else if (isAuth)     category = 'Authentication error — please sign out and back in';
+        else if (isOffline)  category = 'No internet connection';
+        else if (isDevice)   category = 'Device not registered — sign out and back in';
+        Alert.alert('Sync Failed', category + '\n\nDetail: ' + lastError);
       } else {
         Alert.alert('Sync Done', totalAccepted + ' new, ' + totalDup + ' dup, ' + allCalls.length + ' total\nDev:' + deviceId + (lastError ? '\nErr:' + lastError : ''));
       }
@@ -216,8 +225,10 @@ export default function Profile() {
     companyName: user?.organization_name || user?.company_name || "",
   };
 
-  const card    = { backgroundColor: theme.card, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: theme.border };
-  const iconBox = (bg) => ({ width: 38, height: 38, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: bg });
+  const card    = { backgroundColor: theme.card, borderRadius: RADIUS.xl, padding: SPACE.lg, borderWidth: 1, borderColor: theme.border };
+  const iconBox = (bg) => ({ width: 38, height: 38, borderRadius: RADIUS.md, alignItems: "center", justifyContent: "center", backgroundColor: bg });
+  // Section header label
+  const sectionLabel = { ...TYPE.micro, color: theme.muted, textTransform: "uppercase", letterSpacing: 0.8, paddingHorizontal: 4, paddingBottom: SPACE.sm, paddingTop: SPACE.xl };
 
   const PERM_LIST = [
     { key: "callLog",    icon: "call-outline",           label: "Call Log",    desc: "Read call history",          required: true },
@@ -238,27 +249,27 @@ export default function Profile() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadAll(true)} tintColor={palette.teal} />}
       >
         {/* ── Profile header ── */}
-        <View style={{ paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 }}>
-          <View style={{ backgroundColor: theme.card, borderRadius: 18, padding: 18, borderWidth: 1, borderColor: theme.border }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-              <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: palette.teal + "18", alignItems: "center", justifyContent: "center" }}>
+        <View style={{ paddingHorizontal: SPACE.lg, paddingTop: SPACE.xl, paddingBottom: SPACE.sm }}>
+          <View style={{ backgroundColor: theme.card, borderRadius: RADIUS.xxl, padding: SPACE.lg, borderWidth: 1, borderColor: theme.border }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: SPACE.md }}>
+              <View style={{ width: 56, height: 56, borderRadius: RADIUS.xl, backgroundColor: palette.teal + "18", alignItems: "center", justifyContent: "center" }}>
                 <Text style={{ fontSize: 20, fontWeight: "700", color: palette.teal }}>
-                  {e.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
+                  {e.name.split(" ").map((w) => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase()}
                 </Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 18, fontWeight: "700", color: theme.primary, letterSpacing: -0.3 }}>{e.name}</Text>
-                <Text style={{ fontSize: 13, color: theme.muted, marginTop: 2 }}>{e.email}</Text>
+                <Text style={{ ...TYPE.h3, color: theme.primary }}>{e.name}</Text>
+                <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 2 }}>{e.email}</Text>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 6 }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: palette.emerald }} />
-                  <Text style={{ fontSize: 12, color: theme.muted }}>{e.companyCode}</Text>
+                  <Text style={{ ...TYPE.label, color: theme.muted }}>{e.companyCode}</Text>
                 </View>
               </View>
-              <Pressable onPress={() => setEditOpen(true)} style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: theme.surface2 || theme.surface, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: theme.border }}>
+              <Pressable onPress={() => setEditOpen(true)} style={{ width: 36, height: 36, borderRadius: RADIUS.md, backgroundColor: theme.surface2, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: theme.border }}>
                 <Ionicons name="pencil" size={15} color={theme.muted} />
               </Pressable>
             </View>
-            <View style={{ flexDirection: "row", marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: theme.border }}>
+            <View style={{ flexDirection: "row", marginTop: SPACE.lg, paddingTop: SPACE.md, borderTopWidth: 1, borderTopColor: theme.border }}>
               {[
                 { label: "Today's Calls", value: stats.totalCalls },
                 { label: "Connected",     value: stats.connectedPct },
@@ -266,259 +277,162 @@ export default function Profile() {
               ].map((s, i) => (
                 <View key={s.label} style={{ flex: 1, alignItems: "center", borderLeftWidth: i === 0 ? 0 : 1, borderLeftColor: theme.border }}>
                   <Text style={{ fontSize: 18, fontWeight: "700", color: theme.primary }}>{s.value}</Text>
-                  <Text style={{ fontSize: 11, color: theme.muted, marginTop: 2 }}>{s.label}</Text>
+                  <Text style={{ ...TYPE.micro, color: theme.muted, marginTop: 2 }}>{s.label}</Text>
                 </View>
               ))}
             </View>
           </View>
         </View>
 
-        <View style={{ paddingHorizontal: 16, gap: 12 }}>
+        <View style={{ paddingHorizontal: SPACE.lg, gap: SPACE.sm }}>
 
-          {/* ── SIM Configuration ── */}
-          <Pressable onPress={() => setSimOpen(true)} style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16 }]}>
-            <View style={iconBox(palette.teal + "1a")}><Ionicons name="phone-portrait-outline" size={18} color={theme.accent} /></View>
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>SIM Configuration</Text>
-              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>
-                {sims.length
-                  ? selectedSim !== null
-                    ? `Tracking SIM ${selectedSim?.display_slot ?? (selectedSim?.slot != null ? selectedSim.slot + 1 : 1)}${selectedSim?.carrierName ? ' — ' + selectedSim.carrierName : ''} · ${sims.length} SIM${sims.length > 1 ? 's' : ''} detected`
-                    : `All SIMs  ${sims.length} SIM${sims.length > 1 ? "s" : ""} detected`
-                  : "Tap to view SIM details"}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={theme.dim} />
-          </Pressable>
+          {/* ── SECTION: APP SETTINGS ── */}
+          <Text style={sectionLabel}>App Settings</Text>
 
-          {/* ── Device Info ── */}
-          <View style={[card, shadowSoft]}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
-              <View style={iconBox(palette.violet + "1f")}><Ionicons name="hardware-chip-outline" size={18} color={palette.violet} /></View>
-              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Device</Text>
-            </View>
-            {[
-              { label: "Model",        value: deviceInfo.model || "—" },
-              { label: "Manufacturer", value: deviceInfo.manufacturer || "—" },
-              { label: "Android",      value: deviceInfo.androidVersion || "—" },
-            ].map((r) => (
-              <View key={r.label} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 }}>
-                <Text style={{ fontSize: 13, color: theme.muted }}>{r.label}</Text>
-                <Text style={{ fontSize: 13, fontWeight: "600", color: theme.primary }}>{r.value}</Text>
+          {/* Grouped card: SIM + Recording + Theme */}
+          <View style={[card, shadowSoft, { padding: 0, overflow: "hidden" }]}>
+
+            {/* SIM Configuration */}
+            <Pressable onPress={() => setSimOpen(true)} style={{ flexDirection: "row", alignItems: "center", padding: SPACE.lg, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+              <View style={iconBox(palette.teal + "1a")}><Ionicons name="phone-portrait-outline" size={18} color={theme.accent} /></View>
+              <View style={{ flex: 1, marginLeft: SPACE.md }}>
+                <Text style={{ ...TYPE.title, color: theme.primary }}>SIM Configuration</Text>
+                <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>
+                  {sims.length
+                    ? selectedSim !== null
+                      ? `SIM ${selectedSim?.display_slot ?? (selectedSim?.slot != null ? selectedSim.slot + 1 : 1)}${selectedSim?.carrierName ? ' — ' + selectedSim.carrierName : ''}`
+                      : `All SIMs · ${sims.length} detected`
+                    : "Tap to configure"}
+                </Text>
               </View>
-            ))}
+              <Ionicons name="chevron-forward" size={18} color={theme.dim} />
+            </Pressable>
+
+            {/* Call Recording */}
+            <View style={{ flexDirection: "row", alignItems: "center", padding: SPACE.lg, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+              <View style={iconBox(palette.violet + "1f")}><Ionicons name="mic-outline" size={18} color={palette.violet} /></View>
+              <View style={{ flex: 1, marginLeft: SPACE.md }}>
+                <Text style={{ ...TYPE.title, color: theme.primary }}>Call Recording</Text>
+                <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>
+                  {recordingEnabled ? "Enabled · saves to dashboard" : "Off · calls not recorded"}
+                </Text>
+              </View>
+              <Switch value={recordingEnabled} onValueChange={toggleRecording} trackColor={{ false: theme.border, true: palette.violet + "88" }} thumbColor={recordingEnabled ? palette.violet : theme.muted} />
+            </View>
+
+            {/* Theme */}
+            <View style={{ flexDirection: "row", alignItems: "center", padding: SPACE.lg }}>
+              <View style={iconBox(palette.violet + "1f")}><Ionicons name={dark ? "moon" : "sunny"} size={18} color={palette.violet} /></View>
+              <View style={{ flex: 1, marginLeft: SPACE.md }}>
+                <Text style={{ ...TYPE.title, color: theme.primary }}>Theme</Text>
+                <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>{dark ? "Dark Mode" : "Light Mode"}</Text>
+              </View>
+              <Pressable onPress={toggle} style={{ width: 46, height: 26, borderRadius: 13, backgroundColor: dark ? palette.teal : theme.borderStrong, justifyContent: "center", paddingHorizontal: 2 }}>
+                <View style={{ position: "absolute", left: dark ? 22 : 2, width: 22, height: 22, borderRadius: 11, backgroundColor: "#fff" }} />
+              </Pressable>
+            </View>
           </View>
 
-          {/* ── Permission Health ── */}
-          <View style={[card, shadowSoft]}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          {/* ── SECTION: PERMISSIONS & SYNC ── */}
+          <Text style={sectionLabel}>Permissions &amp; Sync</Text>
+
+          {/* Grouped card: Permissions + Battery + Notifications + Sync */}
+          <View style={[card, shadowSoft, { padding: 0, overflow: "hidden" }]}>
+
+            {/* Permission Health */}
+            <Pressable onPress={() => !requiredGranted && requestAllPermissions().then(setPermissions)}
+              style={{ flexDirection: "row", alignItems: "center", padding: SPACE.lg, borderBottomWidth: 1, borderBottomColor: theme.border }}>
               <View style={iconBox(requiredGranted ? palette.emerald + "1f" : palette.red + "1f")}>
                 <Ionicons name="shield-checkmark-outline" size={18} color={requiredGranted ? palette.emerald : palette.red} />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Permission Health</Text>
-                <Text style={{ fontSize: 12.5, color: requiredGranted ? theme.success : theme.danger, marginTop: 1 }}>
-                  {requiredGranted ? "Required permissions granted ✓" : "Required permissions missing — tap to fix"}
+              <View style={{ flex: 1, marginLeft: SPACE.md }}>
+                <Text style={{ ...TYPE.title, color: theme.primary }}>Permissions</Text>
+                <Text style={{ ...TYPE.caption, color: requiredGranted ? theme.success : theme.danger, marginTop: 1 }}>
+                  {requiredGranted ? "All required permissions granted ✓" : "Missing required permissions — tap to fix"}
                 </Text>
               </View>
-            </View>
-            {PERM_LIST.map((p) => (
-              <Pressable key={p.key} onPress={() => !permissions[p.key] && handleRequestPermission(p.key)}
-                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderTopWidth: 1, borderTopColor: theme.border }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 9 }}>
-                  <Ionicons name={p.icon} size={16} color={theme.muted} />
-                  <View>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                      <Text style={{ fontSize: 13.5, color: theme.secondary }}>{p.label}</Text>
-                      {p.required && (
-                        <View style={{ backgroundColor: palette.red + "22", borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 }}>
-                          <Text style={{ fontSize: 9, fontWeight: "700", color: palette.red }}>REQUIRED</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={{ fontSize: 11, color: theme.dim }}>{p.desc}</Text>
-                  </View>
-                </View>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                  {permissions[p.key] !== undefined ? (
-                    <>
-                      <Text style={{ fontSize: 12, color: permissions[p.key] ? theme.success : theme.danger, fontWeight: "600" }}>
-                        {permissions[p.key] ? "Allowed" : "Denied"}
-                      </Text>
-                      <Ionicons name={permissions[p.key] ? "checkmark-circle" : "alert-circle"} size={16} color={permissions[p.key] ? theme.success : theme.danger} />
-                    </>
-                  ) : <ActivityIndicator size="small" color={theme.muted} />}
-                </View>
-              </Pressable>
-            ))}
-            {!requiredGranted && (
-              <Pressable onPress={() => requestAllPermissions().then(setPermissions)}
-                style={{ marginTop: 10, backgroundColor: palette.teal + "1a", borderRadius: 10, padding: 10, alignItems: "center" }}>
-                <Text style={{ fontSize: 13, fontWeight: "700", color: palette.teal }}>Grant Required Permissions</Text>
-              </Pressable>
-            )}
-          </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.dim} />
+            </Pressable>
 
-          {/* ── Battery Optimization Warning ── */}
-          <Pressable
-            onPress={() => Linking.openSettings()}
-            style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16, borderColor: palette.amber + "55" }]}>
-            <View style={iconBox(palette.amber + "1f")}>
-              <Ionicons name="battery-charging-outline" size={18} color={palette.amber} />
-            </View>
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Battery Optimization</Text>
-              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>
-                Disable battery optimization for reliable background sync. Tap → Apps → CallNexa → Battery → Unrestricted
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={palette.amber} />
-          </Pressable>
+            {/* Battery */}
+            <Pressable onPress={() => Linking.openSettings()}
+              style={{ flexDirection: "row", alignItems: "center", padding: SPACE.lg, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+              <View style={iconBox(palette.amber + "1f")}><Ionicons name="battery-charging-outline" size={18} color={palette.amber} /></View>
+              <View style={{ flex: 1, marginLeft: SPACE.md }}>
+                <Text style={{ ...TYPE.title, color: theme.primary }}>Battery Optimization</Text>
+                <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>Set to Unrestricted for reliable sync</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={palette.amber} />
+            </Pressable>
 
-          {/* ── Call Recording Toggle ── */}
-          <View style={[card, shadowSoft]}>
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                <View style={iconBox(palette.violet + "1f")}><Ionicons name="mic-outline" size={18} color={palette.violet} /></View>
-                <View>
-                  <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Call Recording</Text>
-                  <Text style={{ fontSize: 12, color: theme.muted, marginTop: 1 }}>
-                    {recordingEnabled ? "Recording enabled · saves to dashboard" : "Off · calls not recorded"}
+            {/* Notifications */}
+            <View style={{ padding: SPACE.lg, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: SPACE.md }}>
+                <View style={iconBox(palette.amber + "1f")}><Ionicons name="notifications-outline" size={18} color={palette.amber} /></View>
+                <View style={{ flex: 1, marginLeft: SPACE.md }}>
+                  <Text style={{ ...TYPE.title, color: theme.primary }}>Notifications</Text>
+                  <Text style={{ ...TYPE.caption, color: notifPerms === "granted" ? theme.success : theme.danger, marginTop: 1 }}>
+                    {notifPerms === "granted" ? "Allowed ✓" : notifPerms === "denied" ? "Blocked — open Settings" : "Not yet requested"}
                   </Text>
                 </View>
-              </View>
-              <Switch
-                value={recordingEnabled}
-                onValueChange={toggleRecording}
-                trackColor={{ false: theme.border, true: palette.violet + "88" }}
-                thumbColor={recordingEnabled ? palette.violet : theme.muted}
-              />
-            </View>
-            {recordingEnabled && (
-              <View style={{ marginTop: 10, backgroundColor: palette.violet + "12", borderRadius: 10, padding: 10 }}>
-                <Text style={{ fontSize: 12, color: palette.violet, lineHeight: 18 }}>
-                  ✓ Recorded calls will be saved and available for AI transcription on the web dashboard.{"\n"}Only calls with recordings will be transcribed — saves storage & DB space.
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* ── Sync Health ── */}
-          {syncHealth && (
-            <View style={[card, shadowSoft]}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <View style={iconBox(palette.teal + "1a")}><Ionicons name="pulse-outline" size={18} color={palette.teal} /></View>
-                <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Sync Health</Text>
+                {notifPerms !== "granted" && (
+                  <Pressable onPress={() => Linking.openSettings()} style={{ backgroundColor: palette.amber + "22", borderRadius: RADIUS.sm, paddingHorizontal: SPACE.sm, paddingVertical: 5 }}>
+                    <Text style={{ ...TYPE.label, color: palette.amber }}>Fix</Text>
+                  </Pressable>
+                )}
               </View>
               {[
-                { label: "Total tracked",       value: syncHealth.total,             color: theme.primary },
-                { label: "Synced",              value: syncHealth.synced,            color: palette.emerald },
-                { label: "Pending",             value: syncHealth.pending,           color: palette.amber },
-                { label: "Failed",              value: syncHealth.failed,            color: syncHealth.failed > 0 ? palette.red : theme.muted },
-                { label: "Recordings uploaded", value: syncHealth.recordingUploaded, color: palette.violet },
-                { label: "Recordings pending",  value: syncHealth.recordingPending,  color: palette.amber },
-                { label: "Transcribed",         value: syncHealth.transcribed,       color: palette.cyan },
-              ].map((r) => (
-                <View key={r.label} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 5, borderTopWidth: 1, borderTopColor: theme.border }}>
-                  <Text style={{ fontSize: 13, color: theme.muted }}>{r.label}</Text>
-                  <Text style={{ fontSize: 13, fontWeight: "700", color: r.color }}>{r.value}</Text>
+                { key: "calls",         label: "Call detected / synced",  icon: "call-outline" },
+                { key: "sync",          label: "Sync progress",           icon: "sync-outline" },
+                { key: "recording",     label: "Recording upload",        icon: "mic-outline" },
+                { key: "transcription", label: "Transcription complete",  icon: "sparkles-outline" },
+              ].map((p) => (
+                <View key={p.key} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: SPACE.sm, borderTopWidth: 1, borderTopColor: theme.border }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: SPACE.sm }}>
+                    <Ionicons name={p.icon} size={15} color={theme.muted} />
+                    <Text style={{ ...TYPE.body, color: theme.secondary }}>{p.label}</Text>
+                  </View>
+                  <Switch value={notifPrefs[p.key]} onValueChange={async (val) => { await setNotificationPreference(p.key, val); setNotifPrefs((prev) => ({ ...prev, [p.key]: val })); }} trackColor={{ false: theme.border, true: palette.teal + "88" }} thumbColor={notifPrefs[p.key] ? palette.teal : theme.muted} />
                 </View>
               ))}
-              <Text style={{ fontSize: 11, color: theme.dim, marginTop: 8 }}>Last sync: {lastSync || "Never"}</Text>
             </View>
-          )}
 
-          {/* ── Notification Preferences ── */}
-          <View style={[card, shadowSoft]}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
-              <View style={iconBox(palette.amber + "1f")}><Ionicons name="notifications-outline" size={18} color={palette.amber} /></View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Notifications</Text>
-                <Text style={{ fontSize: 12, color: notifPerms === "granted" ? theme.success : theme.danger, marginTop: 1 }}>
-                  {notifPerms === "granted" ? "Allowed ✓" : notifPerms === "denied" ? "Blocked — open Settings" : "Not yet requested"}
+            {/* Sync Now */}
+            <Pressable onPress={handleSync} disabled={syncing}
+              style={{ flexDirection: "row", alignItems: "center", padding: SPACE.lg }}>
+              <View style={iconBox(palette.teal + "1a")}>
+                {syncing ? <ActivityIndicator size="small" color={palette.teal} /> : <Ionicons name="cloud-upload-outline" size={18} color={palette.teal} />}
+              </View>
+              <View style={{ flex: 1, marginLeft: SPACE.md }}>
+                <Text style={{ ...TYPE.title, color: theme.primary }}>Sync Calls Now</Text>
+                <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>
+                  {syncing ? "Syncing…" : syncResult ? `✓ ${syncResult.accepted} new · ${syncResult.duplicates} duplicates` : lastSync ? `Last synced: ${lastSync}` : "Auto-syncs every 5 min"}
                 </Text>
               </View>
-              {notifPerms !== "granted" && (
-                <Pressable onPress={() => Linking.openSettings()} style={{ backgroundColor: palette.amber + "22", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
-                  <Text style={{ fontSize: 12, fontWeight: "700", color: palette.amber }}>Fix</Text>
-                </Pressable>
-              )}
-            </View>
-            {[
-              { key: "calls",         label: "Call detected / synced",   icon: "call-outline" },
-              { key: "sync",          label: "Sync progress",            icon: "sync-outline" },
-              { key: "recording",     label: "Recording upload",         icon: "mic-outline" },
-              { key: "transcription", label: "Transcription complete",   icon: "sparkles-outline" },
-            ].map((p) => (
-              <View key={p.key} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8, borderTopWidth: 1, borderTopColor: theme.border }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 9 }}>
-                  <Ionicons name={p.icon} size={15} color={theme.muted} />
-                  <Text style={{ fontSize: 13.5, color: theme.secondary }}>{p.label}</Text>
-                </View>
-                <Switch
-                  value={notifPrefs[p.key]}
-                  onValueChange={async (val) => {
-                    await setNotificationPreference(p.key, val);
-                    setNotifPrefs((prev) => ({ ...prev, [p.key]: val }));
-                  }}
-                  trackColor={{ false: theme.border, true: palette.teal + "88" }}
-                  thumbColor={notifPrefs[p.key] ? palette.teal : theme.muted}
-                />
-              </View>
-            ))}
-          </View>
-
-          {/* ── Sync Now ── */}
-          <Pressable onPress={handleSync} disabled={syncing}
-            style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16, borderColor: syncing ? theme.border : palette.teal + "55" }]}>
-            <View style={iconBox(palette.teal + "1a")}>
-              {syncing ? <ActivityIndicator size="small" color={palette.teal} /> : <Ionicons name="cloud-upload-outline" size={18} color={palette.teal} />}
-            </View>
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Sync Calls Now</Text>
-              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>
-                {syncing
-                  ? "Syncing all call logs..."
-                  : syncResult
-                    ? `✓ ${syncResult.accepted} new · ${syncResult.duplicates} duplicates`
-                    : lastSync
-                      ? `Last synced: ${lastSync}`
-                      : "Auto-syncs every 5 min · tap to sync now"}
-              </Text>
-            </View>
-            {!syncing && <Ionicons name="chevron-forward" size={20} color={palette.teal} />}
-          </Pressable>
-
-          {/* ── Theme toggle ── */}
-          <View style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16 }]}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-              <View style={iconBox(palette.violet + "1f")}><Ionicons name={dark ? "moon" : "sunny"} size={18} color={palette.violet} /></View>
-              <View>
-                <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>Theme</Text>
-                <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>{dark ? "Dark Mode" : "Light Mode"}</Text>
-              </View>
-            </View>
-            <Pressable onPress={toggle} style={{ width: 46, height: 26, borderRadius: 13, backgroundColor: dark ? palette.teal : theme.borderStrong, justifyContent: "center", paddingHorizontal: 2 }}>
-              <View style={{ position: "absolute", left: dark ? 22 : 2, width: 22, height: 22, borderRadius: 11, backgroundColor: "#fff" }} />
+              {!syncing && <Ionicons name="chevron-forward" size={18} color={palette.teal} />}
             </Pressable>
           </View>
 
-          {/* ── App info ── */}
-          <View style={[card, shadowSoft, { flexDirection: "row", alignItems: "center", padding: 16 }]}>
-            <Image source={require("../../assets/logo.png")} style={{ width: 38, height: 38, borderRadius: 10 }} resizeMode="contain" />
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={{ fontSize: 15, fontWeight: "600", color: theme.primary }}>CallNexa</Text>
-              <Text style={{ fontSize: 12.5, color: theme.muted, marginTop: 1 }}>v1.0.0 · {e.companyName}</Text>
+          {/* ── SECTION: ABOUT ── */}
+          <Text style={sectionLabel}>About</Text>
+
+          <View style={[card, shadowSoft, { padding: 0, overflow: "hidden" }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", padding: SPACE.lg }}>
+              <Image source={require("../../assets/logo.png")} style={{ width: 38, height: 38, borderRadius: RADIUS.md }} resizeMode="contain" />
+              <View style={{ flex: 1, marginLeft: SPACE.md }}>
+                <Text style={{ ...TYPE.title, color: theme.primary }}>CallNexa</Text>
+                <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>v1.0.0 · {e.companyName}</Text>
+              </View>
             </View>
           </View>
 
           {/* ── Sign out ── */}
           <Pressable onPress={handleSignOut}
-            style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-              paddingVertical: 15, borderRadius: 12, borderWidth: 1.5, borderColor: theme.danger + "44",
-              backgroundColor: theme.dangerSoft }}>
+            style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACE.sm,
+              paddingVertical: SPACE.lg, borderRadius: RADIUS.lg, borderWidth: 1.5, borderColor: theme.danger + "44",
+              backgroundColor: theme.dangerSoft, marginBottom: SPACE.sm }}>
             <Ionicons name="log-out-outline" size={18} color={theme.danger} />
-            <Text style={{ fontSize: 14.5, fontWeight: "600", color: theme.danger }}>Sign Out</Text>
+            <Text style={{ ...TYPE.bodyBold, color: theme.danger }}>Sign Out</Text>
           </Pressable>
         </View>
       </ScrollView>

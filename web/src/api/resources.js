@@ -42,6 +42,8 @@ export const callsApi = {
   sync: (payload) => client.post("/calls/sync", payload).then((r) => r.data),
   getRecordingUrl: (callId) => client.get(`/calls/${callId}/recording-url`).then((r) => r.data),
   updateNote: (callId, status, notes) => client.patch(`/calls/${callId}/note`, { call_status: status, notes }).then((r) => r.data),
+  setPrivacy: (callId, privacy) => client.patch(`/calls/${callId}/privacy`, { call_privacy: privacy }).then((r) => r.data),
+  deleteRecording: (callId) => client.delete(`/calls/${callId}/recording`).then((r) => r.data),
 };
 
 export const analyticsApi = {

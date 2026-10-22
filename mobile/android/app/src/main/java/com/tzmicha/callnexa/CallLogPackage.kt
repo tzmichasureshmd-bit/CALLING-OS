@@ -10,6 +10,7 @@ class CallLogPackage : ReactPackage {
         return listOf(
             CallLogModule(reactContext),
             SimModule(reactContext),
+            RecordingModule(reactContext),
         )
     }
     override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {

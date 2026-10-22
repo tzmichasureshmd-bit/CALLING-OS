@@ -1,6 +1,6 @@
 import * as FileSystem from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { readCallLog, readSimInfo } from "./nativeModules";
+import { readCallLog, readSimInfo, findRecordingsForCall as nativeFindRecordings } from "./nativeModules";
 import { findSimForCall, buildCallSource } from "./simInventoryService";
 import { BASE_URL } from "./api";
 
@@ -72,12 +72,15 @@ const RECORDING_MIME_MAP = {
   amr: "audio/amr", ogg: "audio/ogg",
 };
 const MIN_RECORDING_BYTES = 1024;
-const MATCH_WINDOW_SEC    = 180;
+const MATCH_WINDOW_SEC    = 60;  // extra buffer after call end; total window = duration + 60s
 
-async function _findRecordingFile(startMs, phoneNumber, durationSec) {
+async function _findRecordingFileJS(startMs, phoneNumber, durationSec) {
   try {
     const startSec = Math.floor(startMs / 1000);
-    const endSec = startSec + (durationSec || 0) + MATCH_WINDOW_SEC;
+    // Window: from 30s before call start to duration + 60s after — covers OEMs that
+    // save the file before the call ends or up to 1 min after.
+    const endSec = startSec + Math.max(durationSec || 0, 0) + MATCH_WINDOW_SEC;
+    const windowStart = startSec - 30;
     const digits = phoneNumber && phoneNumber !== "unknown"
       ? phoneNumber.replace(/\D/g, "").slice(-7)
       : null;
@@ -96,7 +99,7 @@ async function _findRecordingFile(startMs, phoneNumber, durationSec) {
             if (!fileInfo.size || fileInfo.size < MIN_RECORDING_BYTES) continue;
             if (fileInfo.modificationTime) {
               const fileSec = Math.floor(fileInfo.modificationTime);
-              if (fileSec >= startSec && fileSec <= endSec) {
+              if (fileSec >= windowStart && fileSec <= endSec) {
                 return { path: dir + filename, mimeType: RECORDING_MIME_MAP[ext] || "audio/mp4", fileSize: fileInfo.size };
               }
             }
@@ -197,6 +200,9 @@ export async function getCallsSince(sinceMs) {
 }
 
 export async function getCallsLastDays(days) {
+  // No cap — the caller (syncService) is responsible for choosing the window.
+  // Capping here caused calls from days 3-7 to be silently dropped after
+  // any offline period longer than 2 days.
   return _readAndNormalize(days);
 }
 
@@ -241,30 +247,111 @@ export async function applySimFilter(calls) {
   return kept;
 }
 
-// ── Recording helpers (no local queue — used by syncService directly) ─────────
+// ── Recording helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Deferred recording check — runs in background, never blocks sync cycle.
- * Returns { path, mimeType, fileSize } or null after up to 3 attempts.
+ * findRecordingForCall
+ *
+ * Strategy (in priority order):
+ *   1. Native RecordingModule (Kotlin) — queries MediaStore then OEM filesystem.
+ *      Returns a confidence-scored list. We take the highest-scoring match.
+ *      If two candidates share the top score, we return null (ambiguous) rather
+ *      than uploading the wrong file.
+ *   2. JS filesystem fallback — used only when RecordingModule is unavailable
+ *      (e.g. dev build without native module). Same time-window heuristic as
+ *      before but with the modificationTime unit bug fixed.
+ *
+ * Returns { path, contentUri, mimeType, fileSize, durationSec, fingerprint }
+ * or null if no reliable match is found.
+ *
+ * NEVER returns a match with confidence_score <= 0.
+ * NEVER returns an ambiguous match (two files with equal top score).
  */
 export async function findRecordingForCall(c) {
   const startMs = c._start_ms || new Date(c.start_time).getTime();
+  const endMs   = c.duration_seconds > 0 ? startMs + c.duration_seconds * 1000 : 0;
   const phone   = c._raw_number || c.phone_number;
   const dur     = c.duration_seconds || 0;
 
   console.log(`[RECORDING_DETECTION_STARTED] client_event_id=${c.client_event_id} dur=${dur}s ts=${Date.now()}`);
 
-  const delays = [0, 10000, 30000];
+  // ── Attempt 1: native RecordingModule (MediaStore + filesystem) ────────────
+  const delays = [0, 10_000, 30_000];
   for (let attempt = 0; attempt < delays.length; attempt++) {
     if (delays[attempt] > 0) await new Promise(r => setTimeout(r, delays[attempt]));
-    const found = await _findRecordingFile(startMs, phone, dur);
-    if (found) {
-      console.log(`[RECORDING_FOUND] client_event_id=${c.client_event_id} size=${found.fileSize} mime=${found.mimeType} attempt=${attempt + 1} ts=${Date.now()}`);
-      return found;
+
+    const result = await nativeFindRecordings(startMs, endMs, dur, phone);
+
+    if (!result.success) {
+      // Module unavailable — fall through to JS fallback
+      console.warn(`[RECORDING_NATIVE_UNAVAILABLE] client_event_id=${c.client_event_id} error=${result.error} ts=${Date.now()}`);
+      break;
     }
+
+    const recordings = result.recordings || [];
+
+    if (recordings.length === 0) {
+      console.log(`[RECORDING_NOT_FOUND_ATTEMPT] client_event_id=${c.client_event_id} attempt=${attempt + 1} source=${result.source} ts=${Date.now()}`);
+      continue; // try again after delay
+    }
+
+    // Check for ambiguity: if top two candidates share the same score, do not upload
+    const top = recordings[0];
+    const second = recordings[1];
+    if (second && second.confidence_score === top.confidence_score) {
+      console.warn(
+        `[RECORDING_AMBIGUOUS] client_event_id=${c.client_event_id} ` +
+        `top_score=${top.confidence_score} candidates=${recordings.length} ` +
+        `files=[${top.display_name},${second.display_name}] ts=${Date.now()}`
+      );
+      // Return null — do not upload an ambiguous match
+      return null;
+    }
+
+    // Resolve the usable path: prefer content_uri on API 29+, fall back to file_path
+    const usablePath = top.content_uri || top.file_path;
+    if (!usablePath) {
+      console.warn(`[RECORDING_NO_PATH] client_event_id=${c.client_event_id} fingerprint=${top.fingerprint} ts=${Date.now()}`);
+      continue;
+    }
+
+    console.log(
+      `[RECORDING_FOUND] client_event_id=${c.client_event_id} ` +
+      `score=${top.confidence_score} source=${top.source} ` +
+      `size=${top.size_bytes} mime=${top.mime_type} ` +
+      `fingerprint=${top.fingerprint} attempt=${attempt + 1} ts=${Date.now()}`
+    );
+
+    return {
+      path:        usablePath,
+      contentUri:  top.content_uri  || null,
+      filePath:    top.file_path    || null,
+      mimeType:    top.mime_type    || "audio/mp4",
+      fileSize:    top.size_bytes   || 0,
+      durationSec: top.duration_sec || 0,
+      fingerprint: top.fingerprint,
+      source:      top.source,
+    };
   }
 
-  console.log(`[RECORDING_NOT_AVAILABLE] client_event_id=${c.client_event_id} reason="no_file_in_oem_dirs" ts=${Date.now()}`);
+  // ── Attempt 2: JS filesystem fallback (when native module not in build) ────
+  console.log(`[RECORDING_JS_FALLBACK] client_event_id=${c.client_event_id} ts=${Date.now()}`);
+  const jsFallback = await _findRecordingFileJS(startMs, phone, dur);
+  if (jsFallback) {
+    console.log(`[RECORDING_FOUND] client_event_id=${c.client_event_id} source=js_fallback size=${jsFallback.fileSize} ts=${Date.now()}`);
+    return {
+      path:        jsFallback.path,
+      contentUri:  null,
+      filePath:    jsFallback.path,
+      mimeType:    jsFallback.mimeType,
+      fileSize:    jsFallback.fileSize,
+      durationSec: 0,
+      fingerprint: `js:${jsFallback.path}:${jsFallback.fileSize}`,
+      source:      "js_fallback",
+    };
+  }
+
+  console.log(`[RECORDING_NOT_AVAILABLE] client_event_id=${c.client_event_id} reason=no_file_found ts=${Date.now()}`);
   return null;
 }
 

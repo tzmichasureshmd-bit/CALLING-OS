@@ -6,6 +6,11 @@ engine = create_engine(
     settings.DATABASE_URL,
     echo=settings.debug,
     pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=20,          # wait max 20s for a pool slot before raising
+    pool_recycle=1800,        # recycle connections every 30 min (Supabase pooler idle timeout)
+    connect_args={"connect_timeout": 10},  # TCP connect timeout to Supabase
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

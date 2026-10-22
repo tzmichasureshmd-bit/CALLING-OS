@@ -35,6 +35,7 @@ function normalizeCall(c) {
       : null,
     callStatus: c.call_status || null,
     notes:      c.notes       || null,
+    callPrivacy: c.call_privacy || "unclassified",
     updatedAt:        c.updated_at         || null,
     syncConfirmedAt:  c.sync_confirmed_at   || null,
     // sync_status from backend: "synced" | "failed" | "offline"

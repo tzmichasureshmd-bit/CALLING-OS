@@ -36,16 +36,30 @@ VALID_CALL_TYPES = {"incoming", "outgoing", "missed", "rejected"}
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def normalize_phone(phone: str) -> str:
-    """Normalize to +91XXXXXXXXXX. Returns original if pattern unrecognised."""
+    """Normalize phone number. Preserves E.164 if already formatted.
+    For 10-digit numbers without country code, defaults to +91 (India).
+    For numbers already starting with +, keeps as-is after cleaning.
+    """
+    if not phone or phone.strip() in ("", "unknown"):
+        return phone
     cleaned = re.sub(r"[^\d+]", "", phone.strip())[:16]
+    # Already E.164
+    if cleaned.startswith("+") and len(cleaned) >= 8:
+        return cleaned
     digits = re.sub(r"\D", "", cleaned)
+    if not digits:
+        return phone
+    # 10-digit: assume India (+91) — most common deployment
     if len(digits) == 10:
         return f"+91{digits}"
+    # 12-digit starting with 91: India with country code
     if len(digits) == 12 and digits.startswith("91"):
         return f"+{digits}"
+    # 11-digit starting with 0: India trunk prefix
     if len(digits) == 11 and digits.startswith("0"):
         return f"+91{digits[1:]}"
-    return f"+{digits}" if not phone.startswith("+") else cleaned
+    # Any other length: just prepend + and keep digits
+    return f"+{digits}"
 
 
 def _call_out(c: Call) -> CallOut:
@@ -118,7 +132,6 @@ async def sync_calls(
     user: User = Depends(get_current_user),
 ):
     from datetime import timedelta
-    from sqlalchemy import text as sa_text
 
     # 1. Verify device belongs to this org
     device = db.query(Device).filter(
@@ -184,8 +197,8 @@ async def sync_calls(
         resolved_sim_id = _resolve_sim_id(db, device.id, item.sim_slot, item.subscription_id)
         source = item.source or (f"SIM {item.sim_slot}" if item.sim_slot else "UNKNOWN")
 
-        # 6. INSERT using ORM — generate ID explicitly to avoid server_default issues
-        call_id = db.execute(sa_text("SELECT generate_prefixed_id('tzm','cal')")).scalar()
+        # 6. INSERT using ORM — generate ID in Python to avoid one DB round-trip per row
+        call_id = "tzm-cal-" + uuid.uuid4().hex[:12]
         call = Call(
             id=call_id,
             client_event_id=item.client_event_id,
@@ -381,6 +394,54 @@ async def upload_recording(
         if not emp or call.employee_id != emp.id:
             raise HTTPException(status_code=403, detail="Not authorized to upload recording for this call")
 
+    # ── Privacy guard ─────────────────────────────────────────────────────────
+    # Personal calls must never be uploaded, transcribed, or analyzed.
+    # Unclassified calls require explicit business classification before upload.
+    privacy = getattr(call, "call_privacy", "unclassified") or "unclassified"
+    if privacy == "personal":
+        logger.warning(
+            "[RECORDING_UPLOAD_BLOCKED] call_id=%s reason=personal_call org=%s",
+            call_id, user.organization_id,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Recording upload blocked: this call is classified as personal. "
+                   "Personal calls cannot be recorded, uploaded, or transcribed.",
+        )
+    if privacy == "unclassified":
+        logger.warning(
+            "[RECORDING_UPLOAD_BLOCKED] call_id=%s reason=unclassified org=%s",
+            call_id, user.organization_id,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Recording upload blocked: this call is unclassified. "
+                   "Classify it as 'business' before uploading a recording.",
+        )
+
+    # ── Excluded-number guard ─────────────────────────────────────────────────
+    # If the phone number is on the org's excluded list, block upload.
+    from ..models import ExcludedNumber
+    normalized = normalize_phone(call.phone_number or "")
+    excluded = db.query(ExcludedNumber).filter(
+        ExcludedNumber.organization_id == user.organization_id,
+        ExcludedNumber.number == normalized,
+    ).first()
+    if not excluded and call.phone_number:
+        excluded = db.query(ExcludedNumber).filter(
+            ExcludedNumber.organization_id == user.organization_id,
+            ExcludedNumber.number == call.phone_number,
+        ).first()
+    if excluded:
+        logger.warning(
+            "[RECORDING_UPLOAD_BLOCKED] call_id=%s reason=excluded_number org=%s",
+            call_id, user.organization_id,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Recording upload blocked: this phone number is on the excluded list.",
+        )
+
     # ── File validation ───────────────────────────────────────────────────────
     content_type = (file.content_type or "").lower().split(";")[0].strip()
     if content_type and content_type not in ALLOWED_AUDIO_MIME:
@@ -483,6 +544,148 @@ async def upload_recording(
         "transcript_status": call.transcript_status,
         "size_bytes": len(content),
     }
+
+
+# ── privacy classification ───────────────────────────────────────────────────
+
+from pydantic import BaseModel as _PydanticBase
+
+VALID_PRIVACY_VALUES = {"unclassified", "business", "personal"}
+
+
+class _PrivacyBody(_PydanticBase):
+    call_privacy: str
+
+
+@router.patch("/{call_id}/privacy")
+async def set_call_privacy(
+    call_id: str,
+    body: _PrivacyBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Set the privacy classification for a call.
+    - personal: excluded from recording, upload, transcription, and AI analysis.
+    - business: eligible for recording and processing.
+    - unclassified: not automatically recorded or uploaded.
+
+    Changing a call to 'personal' immediately prevents any further processing.
+    It does NOT delete an already-uploaded recording — use DELETE /calls/{id}/recording
+    for that (requires ADMIN authorization).
+    """
+    if body.call_privacy not in VALID_PRIVACY_VALUES:
+        raise HTTPException(status_code=422, detail=f"call_privacy must be one of: {', '.join(sorted(VALID_PRIVACY_VALUES))}")
+
+    call = db.query(Call).filter(
+        Call.id == call_id,
+        Call.organization_id == user.organization_id,
+    ).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    # Employees may only classify their own calls
+    if user.role == "EMPLOYEE":
+        emp = db.query(Employee).filter(Employee.user_id == user.id).first()
+        if not emp or call.employee_id != emp.id:
+            raise HTTPException(status_code=403, detail="Not authorized to classify this call")
+
+    old_privacy = call.call_privacy
+    call.call_privacy = body.call_privacy
+    call.updated_at = datetime.now(timezone.utc)
+
+    audit.log(
+        db,
+        organization_id=user.organization_id,
+        action="call.privacy_set",
+        actor=user,
+        resource="call",
+        resource_id=call_id,
+        metadata={"old": old_privacy, "new": body.call_privacy},
+        request=request,
+    )
+    db.commit()
+    logger.info("[PRIVACY_SET] call_id=%s old=%s new=%s org=%s", call_id, old_privacy, body.call_privacy, user.organization_id)
+    return {"call_id": call_id, "call_privacy": call.call_privacy}
+
+
+# ── delete recording (authorized, personal-call cleanup) ─────────────────────
+
+@router.delete("/{call_id}/recording", status_code=204)
+async def delete_recording(
+    call_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("ADMIN")),
+):
+    """
+    Delete a recording from storage and clear all associated transcript/summary data.
+    Only ADMINs of the owning organization may delete.
+    Required when a personal call was accidentally uploaded.
+    """
+    call = db.query(Call).filter(
+        Call.id == call_id,
+        Call.organization_id == user.organization_id,
+    ).first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+    if not call.recording_available or not call.recording_url:
+        raise HTTPException(status_code=404, detail="No recording to delete")
+
+    storage_path = call.recording_url
+
+    # Delete from Supabase Storage
+    if settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY:
+        import httpx
+        del_url = (
+            f"{settings.SUPABASE_URL}/storage/v1/object"
+            f"/{settings.SUPABASE_RECORDINGS_BUCKET}/{storage_path}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.delete(
+                    del_url,
+                    headers={"Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"},
+                )
+            if resp.status_code not in (200, 204):
+                logger.warning("[RECORDING_DELETE] storage delete returned %s for %s", resp.status_code, storage_path)
+        except Exception as exc:
+            logger.warning("[RECORDING_DELETE] storage delete failed: %s", exc)
+
+    # Clear recording and transcript fields — never expose deleted content
+    call.recording_url = None
+    call.recording_available = False
+    call.recording_status = RECORDING_STATUS_NOT_AVAILABLE
+    call.recording_size_bytes = None
+    call.recording_mime_type = None
+    call.recording_uploaded_at = None
+    call.recording_error = None
+    call.transcript_status = None
+    call.transcript_text = None
+    call.transcript_error = None
+    call.transcription_started_at = None
+    call.transcription_completed_at = None
+    call.summary_status = None
+    call.summary_text = None
+    call.summary_data = None
+    call.summary_error = None
+    call.updated_at = datetime.now(timezone.utc)
+
+    audit.log(
+        db,
+        organization_id=user.organization_id,
+        action="recording.delete",
+        actor=user,
+        resource="call",
+        resource_id=call_id,
+        metadata={"storage_path": storage_path, "call_privacy": call.call_privacy},
+        request=request,
+    )
+    db.commit()
+    logger.info("[RECORDING_DELETED] call_id=%s storage_path=%s org=%s", call_id, storage_path, user.organization_id)
+    from fastapi import Response as _Resp
+    return _Resp(status_code=204)
 
 
 # ── note / progress update ───────────────────────────────────────────────────

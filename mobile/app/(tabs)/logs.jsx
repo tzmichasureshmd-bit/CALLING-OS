@@ -7,7 +7,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { palette, gradientBrand, useTheme } from "../../src/theme";
+import { palette, gradientBrand, useTheme, TYPE, SPACE, RADIUS } from "../../src/theme";
 import { AppHeader } from "../../src/components";
 import { getRealCallLog } from "../../src/callLogService";
 import { getAllCallStatuses, STATUS } from "../../src/callStatusStore";
@@ -372,8 +372,8 @@ function DetailsSheet({ visible, onClose, call, allCalls, syncedIds, theme }) {
 
           {/* Pipeline progress bar */}
           <Text style={{ fontSize:11, fontWeight:"700", color:theme.muted, textTransform:"uppercase", letterSpacing:0.6, marginBottom:10 }}>Processing Pipeline</Text>
-          <View style={{ height:6, backgroundColor:theme.border, borderRadius:3, marginBottom:14, overflow:"hidden" }}>
-            <View style={{ width:`${pct}%`, height:"100%", backgroundColor: pct===100 ? palette.emerald : palette.teal, borderRadius:3 }}/>
+          <View style={{ height:8, backgroundColor:theme.border, borderRadius:4, marginBottom:14, overflow:"hidden" }}>
+            <View style={{ width:`${pct}%`, height:"100%", backgroundColor: pct===100 ? palette.emerald : palette.teal, borderRadius:4 }}/>
           </View>
 
           {/* Pipeline steps */}
@@ -392,7 +392,7 @@ function DetailsSheet({ visible, onClose, call, allCalls, syncedIds, theme }) {
                       ? <Ionicons name={current ? "time-outline" : "checkmark"} size={12} color={color}/>
                       : <View style={{ width:6, height:6, borderRadius:3, backgroundColor:theme.border }}/>}
                   </View>
-                  <Text style={{ fontSize:8.5, color: done ? color : theme.dim, fontWeight: done ? "700" : "400", textAlign:"center" }}>{p.label}</Text>
+                  <Text style={{ fontSize:11, color: done ? color : theme.dim, fontWeight: done ? "700" : "500", textAlign:"center" }}>{p.label}</Text>
                 </View>
               );
             })}
@@ -479,7 +479,7 @@ const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteData, theme
 
   return (
     <Pressable onPress={onToggle}
-      style={[{ backgroundColor:theme.card, borderRadius:16, padding:14, marginBottom:8,
+      style={[{ backgroundColor:theme.card, borderRadius:RADIUS.xl, padding:14, marginBottom:SPACE.sm,
         borderWidth:1, borderColor: ns ? ns.color+"55" : theme.border, overflow:"hidden" }, shadowSoft]}>
       {/* Left color bar */}
       <View style={{ position:"absolute", left:0, top:0, bottom:0, width:4, backgroundColor: ns ? ns.color : meta.color }}/>
@@ -514,18 +514,18 @@ const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteData, theme
               <Text style={{ fontSize:10, color:theme.muted, fontWeight:"600" }}>{c.sim}</Text>
             </View>
             {c.synced && (
-              <View style={{ backgroundColor:palette.emerald+"22", borderRadius:5, paddingHorizontal:5, paddingVertical:1 }}>
-                <Text style={{ fontSize:9, fontWeight:"700", color:palette.emerald }}>✓ Synced</Text>
+              <View style={{ backgroundColor:palette.emerald+"22", borderRadius:RADIUS.sm, paddingHorizontal:SPACE.sm, paddingVertical:2, borderWidth:1, borderColor:palette.emerald+"44" }}>
+                <Text style={{ ...TYPE.micro, fontWeight:"700", color:palette.emerald }}>✓ Synced</Text>
               </View>
             )}
             {syncBadge && (
-              <View style={{ backgroundColor:syncBadge.color+"22", borderRadius:5, paddingHorizontal:6, paddingVertical:1 }}>
-                <Text style={{ fontSize:9, fontWeight:"700", color:syncBadge.color }}>{syncBadge.label}</Text>
+              <View style={{ backgroundColor:syncBadge.color+"22", borderRadius:RADIUS.sm, paddingHorizontal:SPACE.sm, paddingVertical:2, borderWidth:1, borderColor:syncBadge.color+"44" }}>
+                <Text style={{ ...TYPE.micro, fontWeight:"700", color:syncBadge.color }}>{syncBadge.label}</Text>
               </View>
             )}
             {ns && (
-              <View style={{ backgroundColor:ns.color+"22", borderRadius:5, paddingHorizontal:6, paddingVertical:1 }}>
-                <Text style={{ fontSize:9, fontWeight:"700", color:ns.color }}>{ns.label}</Text>
+              <View style={{ backgroundColor:ns.color+"22", borderRadius:RADIUS.sm, paddingHorizontal:SPACE.sm, paddingVertical:2, borderWidth:1, borderColor:ns.color+"44" }}>
+                <Text style={{ ...TYPE.micro, fontWeight:"700", color:ns.color }}>{ns.label}</Text>
               </View>
             )}
           </View>

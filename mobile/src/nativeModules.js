@@ -18,8 +18,9 @@ import { Platform, PermissionsAndroid, NativeModules } from "react-native";
 import * as Device from "expo-device";
 
 // -- Native module references
-const _NativeCallLog    = NativeModules.CallLogModule || null;  // our Kotlin module
-let   _RNCallLog        = null;                                  // react-native-call-log fallback
+const _NativeCallLog    = NativeModules.CallLogModule    || null;  // our Kotlin module
+const _NativeRecording  = NativeModules.RecordingModule  || null;  // recording discovery
+let   _RNCallLog        = null;                                     // react-native-call-log fallback
 let   _SimCardsManager  = null;
 
 try { _RNCallLog = require("react-native-call-log"); } catch { _RNCallLog = null; }
@@ -141,7 +142,7 @@ export async function readCallLog(limitDays = 30) {
           date:           r.date,
           duration:       r.duration,
           new:            r.new,
-          simSlot:        null,
+          simSlot:        r.simSlot ?? r.sim_slot ?? null,
           // subscriptionId from the dedicated column is primary; phoneAccountId is fallback
           subscriptionId: r.subscriptionId || r.phoneAccountId || null,
           phoneAccountId: r.phoneAccountId || null,
@@ -391,5 +392,77 @@ export async function checkPermissions() {
     return { callLog, phoneState, phoneNumbers, contacts, storage, recording, allGranted: callLog && phoneState };
   } catch {
     return { allGranted: false };
+  }
+}
+
+// ── Recording discovery — native Kotlin RecordingModule ───────────────────────────────
+//
+// These functions wrap RecordingModule.kt which uses MediaStore (primary) and
+// filesystem scan (fallback). They replace the JS _findRecordingFile() in
+// callLogService.js for all new recording discovery.
+
+/**
+ * Check whether the audio storage permission is granted.
+ * Returns { granted, api_level, manufacturer, model, required_permission }
+ */
+export async function checkRecordingPermission() {
+  if (Platform.OS !== "android") return { granted: true, api_level: 0 };
+  if (_NativeRecording) {
+    try { return await _NativeRecording.checkRecordingPermission(); } catch {}
+  }
+  // Fallback: check via PermissionsAndroid
+  const P = PermissionsAndroid.PERMISSIONS;
+  const androidVersion = parseInt(Platform.Version, 10);
+  const perm = androidVersion >= 33 ? P.READ_MEDIA_AUDIO : P.READ_EXTERNAL_STORAGE;
+  const granted = await PermissionsAndroid.check(perm).catch(() => false);
+  return { granted, api_level: androidVersion };
+}
+
+/**
+ * Find recordings that plausibly match a specific call.
+ *
+ * @param {number} callStartMs  - call start time in ms (Unix epoch)
+ * @param {number} callEndMs    - call end time in ms (0 if missed/unknown)
+ * @param {number} durationSec  - call duration in seconds
+ * @param {string|null} phoneNumber - raw phone number
+ * @returns {{ success, recordings, source, error }}
+ *   recordings[] each contain:
+ *     media_store_id, content_uri, file_path, display_name, size_bytes,
+ *     duration_ms, duration_sec, modified_ms, mime_type, source,
+ *     fingerprint (stable dedup key), confidence_score
+ */
+export async function findRecordingsForCall(callStartMs, callEndMs, durationSec, phoneNumber) {
+  if (Platform.OS !== "android") {
+    return { success: true, recordings: [], source: "not_android", error: null };
+  }
+  if (!_NativeRecording) {
+    return { success: false, recordings: [], source: "none",
+             error: "RecordingModule not available — rebuild APK with native module" };
+  }
+  try {
+    return await _NativeRecording.findRecordingsForCall(
+      callStartMs, callEndMs, durationSec, phoneNumber || ""
+    );
+  } catch (e) {
+    return { success: false, recordings: [], source: "error", error: e?.message };
+  }
+}
+
+/**
+ * Return all audio files added/modified since sinceMs.
+ * Used for pre-fetching and diagnostic display.
+ */
+export async function getRecentRecordings(sinceMs, maxResults = 30) {
+  if (Platform.OS !== "android") {
+    return { success: true, recordings: [], source: "not_android", error: null };
+  }
+  if (!_NativeRecording) {
+    return { success: false, recordings: [], source: "none",
+             error: "RecordingModule not available" };
+  }
+  try {
+    return await _NativeRecording.getRecentRecordings(sinceMs, maxResults);
+  } catch (e) {
+    return { success: false, recordings: [], source: "error", error: e?.message };
   }
 }

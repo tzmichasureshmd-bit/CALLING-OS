@@ -58,6 +58,8 @@ def _row(call: Call) -> dict:
         "summary_status":            call.summary_status,
         "summary_text":              call.summary_text,
         "summary_data":              call.summary_data,
+        # privacy
+        "call_privacy":              getattr(call, "call_privacy", "unclassified") or "unclassified",
     }
 
 
@@ -164,6 +166,19 @@ def _run_whisper_sync(call_id: str, storage_path: str, org_id: str) -> None:
         if not call:
             return
 
+        # Privacy guard — must be checked again in the background task because
+        # the call's privacy may have changed between upload and transcription start.
+        privacy = getattr(call, "call_privacy", "unclassified") or "unclassified"
+        if privacy in ("personal", "unclassified"):
+            call.transcript_status = "failed"
+            call.transcript_error = f"Transcription blocked: call_privacy='{privacy}'. Classify as 'business' to enable transcription."
+            db.commit()
+            logger.warning(
+                "[TRANSCRIPTION_BLOCKED] call_id=%s privacy=%s",
+                call_id, privacy,
+            )
+            return
+
         # Mark started_at
         call.transcription_started_at = datetime.now(timezone.utc)
         db.commit()
@@ -240,8 +255,7 @@ def _run_whisper_sync(call_id: str, storage_path: str, org_id: str) -> None:
 
         # Broadcast transcript status update
         try:
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(
+            asyncio.run(
                 manager.broadcast(
                     org_id,
                     {
@@ -252,7 +266,6 @@ def _run_whisper_sync(call_id: str, storage_path: str, org_id: str) -> None:
                     },
                 )
             )
-            loop.close()
         except Exception:
             pass
 
@@ -291,6 +304,12 @@ def transcribe_call(
         raise HTTPException(status_code=404, detail="Call not found")
     if not call.recording_url or not call.recording_available:
         raise HTTPException(status_code=400, detail="No recording available for this call")
+    # Privacy guard — personal/unclassified calls must not be transcribed
+    privacy = getattr(call, "call_privacy", "unclassified") or "unclassified"
+    if privacy == "personal":
+        raise HTTPException(status_code=403, detail="Transcription blocked: personal call")
+    if privacy == "unclassified":
+        raise HTTPException(status_code=403, detail="Transcription blocked: call is unclassified. Classify as 'business' first.")
     if call.transcript_status == "completed":
         return {"status": "completed", "transcript": call.transcript_text}
     if call.transcript_status == "processing":
@@ -397,8 +416,7 @@ def _run_ai_summary_sync(call_id: str, org_id: str) -> None:
         logger.info("AI summary completed for call %s", call_id)
 
         try:
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(
+            asyncio.run(
                 manager.broadcast(
                     org_id,
                     {
@@ -408,7 +426,6 @@ def _run_ai_summary_sync(call_id: str, org_id: str) -> None:
                     },
                 )
             )
-            loop.close()
         except Exception:
             pass
 
