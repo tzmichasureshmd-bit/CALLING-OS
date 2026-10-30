@@ -27,6 +27,7 @@ import {
   notifyRecordingUploaded,
 } from "./notificationManager";
 import { checkPermissions, startCallLogObserver, stopCallLogObserver } from "./nativeModules";
+import { startCallRecording, stopCallRecording, setupRecordingEventListener } from "./callRecordingService";
 import { api, BASE_URL } from "./api";
 
 const BG_TASK_NAME   = "CALLNEXA_BG_SYNC";
@@ -350,13 +351,17 @@ export async function runSyncCycle(deviceId, mode) {
     if (!newCalls.length) return;
 
     console.log(`[CALL_SYNC_ELIGIBLE] mode=${mode} new_calls=${newCalls.length} ts=${Date.now()}`);
-    newCalls.forEach(c => upsertCallStatus(c.client_event_id, {
-      sync_status:      STATUS.DETECTED,
-      phone_number:     c.phone_number,
-      call_type:        c.call_type,
-      duration_seconds: c.duration_seconds,
-      start_time:       c.start_time,
-    }));
+    newCalls.forEach(c => {
+      upsertCallStatus(c.client_event_id, {
+        sync_status:      STATUS.DETECTED,
+        phone_number:     c.phone_number,
+        call_type:        c.call_type,
+        duration_seconds: c.duration_seconds,
+        start_time:       c.start_time,
+      });
+      // Auto-start recording if enabled
+      startCallRecording(c.phone_number, c.client_event_id).catch(() => {});
+    });
 
     await directSync(deviceId, newCalls);
   } catch (e) {
