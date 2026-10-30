@@ -132,19 +132,21 @@ async def sync_calls(
     user: User = Depends(get_current_user),
 ):
     from datetime import timedelta
+    
+    try:
+        # 1. Verify device belongs to this org
+        device = db.query(Device).filter(
+            Device.id == body.device_id,
+            Device.organization_id == user.organization_id,
+        ).first()
+        if not device:
+            logger.error("[SYNC] Device not found: device_id=%s org=%s", body.device_id, user.organization_id)
+            raise HTTPException(status_code=400, detail="Device not found in your organization")
 
-    # 1. Verify device belongs to this org
-    device = db.query(Device).filter(
-        Device.id == body.device_id,
-        Device.organization_id == user.organization_id,
-    ).first()
-    if not device:
-        raise HTTPException(status_code=400, detail="Device not found in your organization")
-
-    accepted = duplicates = failed = 0
-    new_call_ids: list[str] = []
-    results: list[CallSyncItemResult] = []
-    now_utc = datetime.now(timezone.utc)
+        accepted = duplicates = failed = 0
+        new_call_ids: list[str] = []
+        results: list[CallSyncItemResult] = []
+        now_utc = datetime.now(timezone.utc)
 
     for item in body.calls:
         # 2. Idempotency check
@@ -253,21 +255,27 @@ async def sync_calls(
     db.commit()
     logger.info("[SYNC] committed: accepted=%d dup=%d failed=%d", accepted, duplicates, failed)
 
-    # 8. Broadcast to web dashboard
-    if accepted > 0:
-        try:
-            await manager.broadcast(
-                user.organization_id,
-                {"event": "calls_synced", "accepted": accepted,
-                 "device_id": body.device_id, "employee_id": device.employee_id},
-            )
-        except Exception as exc:
-            logger.warning("[SYNC] WS broadcast failed: %s", exc)
+        # 8. Broadcast to web dashboard
+        if accepted > 0:
+            try:
+                await manager.broadcast(
+                    user.organization_id,
+                    {"event": "calls_synced", "accepted": accepted,
+                     "device_id": body.device_id, "employee_id": device.employee_id},
+                )
+            except Exception as exc:
+                logger.warning("[SYNC] WS broadcast failed: %s", exc)
 
-    return CallSyncResponse(
-        accepted=accepted, duplicates=duplicates, failed=failed,
-        total=len(body.calls), results=results,
-    )
+        return CallSyncResponse(
+            accepted=accepted, duplicates=duplicates, failed=failed,
+            total=len(body.calls), results=results,
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("[SYNC] Unexpected error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Sync error: {str(exc)[:100]}")
 
 
 # ── list calls ────────────────────────────────────────────────────────────────
