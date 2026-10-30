@@ -48,10 +48,10 @@ async function fetchWithRetry(url, options, retries = 2) {
   let lastErr;
   for (let i = 0; i < retries; i++) {
     const controller = new AbortController();
-    // 30s for sync/upload endpoints (batch DB inserts over Supabase pooler are slow);
-    // 12s for everything else. Determined by path prefix.
+    // 60s for sync/upload endpoints (batch DB inserts can be slow on shared hosting);
+    // 12s for everything else.
     const isSyncOrUpload = options?._isSyncOrUpload === true;
-    const timeout = isSyncOrUpload ? 30000 : 12000;
+    const timeout = isSyncOrUpload ? 60000 : 12000;
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
       const res = await fetch(url, { ...options, signal: controller.signal });
