@@ -148,112 +148,112 @@ async def sync_calls(
         results: list[CallSyncItemResult] = []
         now_utc = datetime.now(timezone.utc)
 
-    for item in body.calls:
-        # 2. Idempotency check
-        exists = db.query(Call).filter(
-            Call.organization_id == user.organization_id,
-            Call.client_event_id == item.client_event_id,
-        ).first()
-        if exists:
-            duplicates += 1
-            exists.sync_confirmed_at = now_utc
-            results.append(CallSyncItemResult(
+        for item in body.calls:
+            # 2. Idempotency check
+            exists = db.query(Call).filter(
+                Call.organization_id == user.organization_id,
+                Call.client_event_id == item.client_event_id,
+            ).first()
+            if exists:
+                duplicates += 1
+                exists.sync_confirmed_at = now_utc
+                results.append(CallSyncItemResult(
+                    client_event_id=item.client_event_id,
+                    call_id=exists.id,
+                    status="duplicate",
+                    sync_status="synced",
+                    recording_status="uploaded" if exists.recording_available else "not_available",
+                    transcript_status=exists.transcript_status,
+                ))
+                continue
+
+            # 3. Sanitize
+            call_type = item.call_type if item.call_type in VALID_CALL_TYPES else "incoming"
+            duration = max(0, item.duration_seconds or 0)
+
+            if call_type == "missed":             call_status = "missed"
+            elif call_type == "rejected":         call_status = "rejected"
+            elif call_type == "outgoing" and duration == 0: call_status = "no_answer"
+            elif duration > 0:                    call_status = "connected"
+            else:                                 call_status = "unknown"
+
+            # 4. Timestamps
+            start = item.start_time
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            end = item.end_time
+            if end and end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+
+            if start > now_utc + timedelta(minutes=5):
+                logger.warning("[SYNC] %s rejected: future timestamp", item.client_event_id)
+                failed += 1
+                results.append(CallSyncItemResult(
+                    client_event_id=item.client_event_id,
+                    status="failed", sync_status="failed",
+                    recording_status="not_available", error="future_timestamp",
+                ))
+                continue
+
+            # 5. Resolve SIM + source
+            resolved_sim_id = _resolve_sim_id(db, device.id, item.sim_slot, item.subscription_id)
+            source = item.source or (f"SIM {item.sim_slot}" if item.sim_slot else "UNKNOWN")
+
+            # 6. INSERT using ORM — generate ID in Python to avoid one DB round-trip per row
+            call_id = "tzm-cal-" + uuid.uuid4().hex[:12]
+            call = Call(
+                id=call_id,
                 client_event_id=item.client_event_id,
-                call_id=exists.id,
-                status="duplicate",
+                organization_id=user.organization_id,
+                employee_id=device.employee_id,
+                device_id=device.id,
+                sim_id=resolved_sim_id,
+                phone_number=item.phone_number or "unknown",
+                phone_number_normalized=normalize_phone(item.phone_number or ""),
+                contact_name=item.contact_name or "Unknown",
+                call_type=call_type,
+                call_status=call_status,
+                start_time=start,
+                end_time=end,
+                duration_seconds=duration,
+                sim_slot=item.sim_slot,
+                subscription_id=item.subscription_id,
+                source=source,
+                recording_available=False,
+                recording_status=RECORDING_STATUS_NOT_AVAILABLE,
                 sync_status="synced",
-                recording_status="uploaded" if exists.recording_available else "not_available",
-                transcript_status=exists.transcript_status,
-            ))
-            continue
-
-        # 3. Sanitize
-        call_type = item.call_type if item.call_type in VALID_CALL_TYPES else "incoming"
-        duration = max(0, item.duration_seconds or 0)
-
-        if call_type == "missed":             call_status = "missed"
-        elif call_type == "rejected":         call_status = "rejected"
-        elif call_type == "outgoing" and duration == 0: call_status = "no_answer"
-        elif duration > 0:                    call_status = "connected"
-        else:                                 call_status = "unknown"
-
-        # 4. Timestamps
-        start = item.start_time
-        if start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
-        end = item.end_time
-        if end and end.tzinfo is None:
-            end = end.replace(tzinfo=timezone.utc)
-
-        if start > now_utc + timedelta(minutes=5):
-            logger.warning("[SYNC] %s rejected: future timestamp", item.client_event_id)
-            failed += 1
+                sync_confirmed_at=now_utc,
+                updated_at=now_utc,
+            )
+            db.add(call)
+            new_call_ids.append(call_id)
+            accepted += 1
+            logger.info("[SYNC] queued %s -> %s", item.client_event_id, call_id)
             results.append(CallSyncItemResult(
                 client_event_id=item.client_event_id,
-                status="failed", sync_status="failed",
-                recording_status="not_available", error="future_timestamp",
+                call_id=call_id,
+                status="accepted",
+                sync_status="synced",
+                recording_status=RECORDING_STATUS_NOT_AVAILABLE,
             ))
-            continue
 
-        # 5. Resolve SIM + source
-        resolved_sim_id = _resolve_sim_id(db, device.id, item.sim_slot, item.subscription_id)
-        source = item.source or (f"SIM {item.sim_slot}" if item.sim_slot else "UNKNOWN")
+        # 7. Update device + audit + commit everything at once
+        device.last_seen_at = datetime.now(timezone.utc)
+        device.is_online = True
 
-        # 6. INSERT using ORM — generate ID in Python to avoid one DB round-trip per row
-        call_id = "tzm-cal-" + uuid.uuid4().hex[:12]
-        call = Call(
-            id=call_id,
-            client_event_id=item.client_event_id,
+        audit.log(
+            db,
             organization_id=user.organization_id,
-            employee_id=device.employee_id,
-            device_id=device.id,
-            sim_id=resolved_sim_id,
-            phone_number=item.phone_number or "unknown",
-            phone_number_normalized=normalize_phone(item.phone_number or ""),
-            contact_name=item.contact_name or "Unknown",
-            call_type=call_type,
-            call_status=call_status,
-            start_time=start,
-            end_time=end,
-            duration_seconds=duration,
-            sim_slot=item.sim_slot,
-            subscription_id=item.subscription_id,
-            source=source,
-            recording_available=False,
-            recording_status=RECORDING_STATUS_NOT_AVAILABLE,
-            sync_status="synced",
-            sync_confirmed_at=now_utc,
-            updated_at=now_utc,
+            action=audit.CALL_SYNC,
+            actor=user,
+            resource="call",
+            metadata={"accepted": accepted, "duplicates": duplicates, "failed": failed,
+                      "device_id": body.device_id},
+            request=request,
         )
-        db.add(call)
-        new_call_ids.append(call_id)
-        accepted += 1
-        logger.info("[SYNC] queued %s -> %s", item.client_event_id, call_id)
-        results.append(CallSyncItemResult(
-            client_event_id=item.client_event_id,
-            call_id=call_id,
-            status="accepted",
-            sync_status="synced",
-            recording_status=RECORDING_STATUS_NOT_AVAILABLE,
-        ))
 
-    # 7. Update device + audit + commit everything at once
-    device.last_seen_at = datetime.now(timezone.utc)
-    device.is_online = True
-
-    audit.log(
-        db,
-        organization_id=user.organization_id,
-        action=audit.CALL_SYNC,
-        actor=user,
-        resource="call",
-        metadata={"accepted": accepted, "duplicates": duplicates, "failed": failed,
-                  "device_id": body.device_id},
-        request=request,
-    )
-
-    db.commit()
-    logger.info("[SYNC] committed: accepted=%d dup=%d failed=%d", accepted, duplicates, failed)
+        db.commit()
+        logger.info("[SYNC] committed: accepted=%d dup=%d failed=%d", accepted, duplicates, failed)
 
         # 8. Broadcast to web dashboard
         if accepted > 0:
