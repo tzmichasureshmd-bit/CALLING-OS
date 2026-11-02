@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..auth import get_current_user, require_role
 from ..database import SessionLocal, get_db
 from ..models import Call, User
+from ..privacy import recording_denial_reason
 from ..config import settings
 from ..ws_manager import manager
 from .. import audit
@@ -49,7 +50,7 @@ def _row(call: Call) -> dict:
         "recording_mime_type":       call.recording_mime_type,
         "recording_uploaded_at":     call.recording_uploaded_at,
         # transcript
-        "transcript_status":         call.transcript_status or "pending",
+        "transcript_status":         call.transcript_status or ("pending" if call.recording_available else None),
         "transcript_text":           call.transcript_text,
         "transcript_error":          call.transcript_error,
         "transcription_started_at":  call.transcription_started_at,
@@ -162,25 +163,26 @@ def _run_whisper_sync(call_id: str, storage_path: str, org_id: str) -> None:
 
     db: Session = SessionLocal()
     try:
-        call = db.query(Call).filter(Call.id == call_id).first()
+        call = db.query(Call).filter(
+            Call.id == call_id,
+            Call.organization_id == org_id,
+        ).first()
         if not call:
             return
 
-        # Privacy guard — must be checked again in the background task because
-        # the call's privacy may have changed between upload and transcription start.
-        privacy = getattr(call, "call_privacy", "unclassified") or "unclassified"
-        if privacy in ("personal", "unclassified"):
+        denial = recording_denial_reason(db, call)
+        if denial:
             call.transcript_status = "failed"
-            call.transcript_error = f"Transcription blocked: call_privacy='{privacy}'. Classify as 'business' to enable transcription."
+            call.transcript_text = None
+            call.transcript_error = "Transcription blocked by recording privacy policy"
             db.commit()
-            logger.warning(
-                "[TRANSCRIPTION_BLOCKED] call_id=%s privacy=%s",
-                call_id, privacy,
-            )
+            logger.warning("[TRANSCRIPTION_BLOCKED] call_id=%s reason=%s", call_id, denial)
             return
 
-        # Mark started_at
+        # Mark the automatic and manual paths consistently before work begins.
+        call.transcript_status = "processing"
         call.transcription_started_at = datetime.now(timezone.utc)
+        call.transcript_error = None
         db.commit()
 
         # ── Generate signed URL ───────────────────────────────────────────────
@@ -191,27 +193,8 @@ def _run_whisper_sync(call_id: str, storage_path: str, org_id: str) -> None:
             db.commit()
             return
 
-        # ── Download audio (max 500 MB) ───────────────────────────────────────
+        # ── Stream audio to a bounded temporary file ──────────────────────────
         MAX_BYTES = 500 * 1024 * 1024
-        try:
-            with httpx.stream("GET", signed_url, timeout=120, follow_redirects=True) as r:
-                if r.status_code != 200:
-                    raise RuntimeError(f"Download failed: HTTP {r.status_code}")
-                chunks = []
-                total = 0
-                for chunk in r.iter_bytes(chunk_size=65536):
-                    total += len(chunk)
-                    if total > MAX_BYTES:
-                        raise RuntimeError("Recording too large for transcription (>500 MB)")
-                    chunks.append(chunk)
-            audio_bytes = b"".join(chunks)
-        except Exception as exc:
-            call.transcript_status = "failed"
-            call.transcript_error = f"Download failed: {exc}"
-            db.commit()
-            return
-
-        # ── Determine safe extension ──────────────────────────────────────────
         safe_exts = {".m4a", ".ogg", ".wav", ".aac", ".mp4", ".webm", ".mp3", ".3gp", ".amr"}
         suffix = ".mp4"
         path_lower = storage_path.lower().split("?")[0]
@@ -220,36 +203,56 @@ def _run_whisper_sync(call_id: str, storage_path: str, org_id: str) -> None:
                 suffix = ext
                 break
 
-        # ── Transcribe ────────────────────────────────────────────────────────
         tmp_path = None
         try:
             with tempfile.NamedTemporaryFile(
                 delete=False, suffix=suffix, dir=tempfile.gettempdir()
             ) as tmp:
-                tmp.write(audio_bytes)
                 tmp_path = tmp.name
+                total = 0
+                with httpx.stream("GET", signed_url, timeout=120, follow_redirects=True) as response:
+                    if response.status_code != 200:
+                        raise RuntimeError(f"Download failed with HTTP {response.status_code}")
+                    for chunk in response.iter_bytes(chunk_size=65536):
+                        total += len(chunk)
+                        if total > MAX_BYTES:
+                            raise RuntimeError("Recording exceeds transcription size limit")
+                        tmp.write(chunk)
 
+            if total == 0:
+                raise RuntimeError("Downloaded recording is empty")
             if _whisper_model is None:
-                raise RuntimeError(
-                    "faster-whisper not installed. Run: pip install faster-whisper==1.0.3"
-                )
+                raise RuntimeError("Transcription engine unavailable")
+
             segments, _ = _whisper_model.transcribe(tmp_path, beam_size=5)
             transcript = " ".join(seg.text.strip() for seg in segments).strip()
-            call.transcript_text = transcript or "(no speech detected)"
-            call.transcript_status = "completed"
-            call.transcript_error = None
-            call.transcription_completed_at = datetime.now(timezone.utc)
-            logger.info("Transcription completed for call %s (%d chars)", call_id, len(transcript))
+
+            # Eligibility may be revoked while Whisper is running. Re-read and
+            # fail closed immediately before persisting any derived content.
+            db.refresh(call)
+            denial = recording_denial_reason(db, call)
+            if denial:
+                call.transcript_text = None
+                call.transcript_status = "failed"
+                call.transcript_error = "Transcription discarded by recording privacy policy"
+                call.transcription_completed_at = None
+                logger.warning("[TRANSCRIPTION_DISCARDED] call_id=%s reason=%s", call_id, denial)
+            else:
+                call.transcript_text = transcript or "(no speech detected)"
+                call.transcript_status = "completed"
+                call.transcript_error = None
+                call.transcription_completed_at = datetime.now(timezone.utc)
+                logger.info("Transcription completed for call %s (%d chars)", call_id, len(transcript))
         except Exception as exc:
             call.transcript_status = "failed"
-            call.transcript_error = str(exc)
+            call.transcript_error = "Transcription processing failed"
             logger.warning("Transcription failed for call %s: %s", call_id, exc)
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 try:
                     os.unlink(tmp_path)
                 except Exception:
-                    pass
+                    logger.warning("Could not remove transcription temp file for call %s", call_id)
 
         db.commit()
 
@@ -299,23 +302,21 @@ def transcribe_call(
     call = db.query(Call).filter(
         Call.id == call_id,
         Call.organization_id == user.organization_id,
-    ).first()
+    ).with_for_update().first()
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
     if not call.recording_url or not call.recording_available:
         raise HTTPException(status_code=400, detail="No recording available for this call")
-    # Privacy guard — personal/unclassified calls must not be transcribed
-    privacy = getattr(call, "call_privacy", "unclassified") or "unclassified"
-    if privacy == "personal":
-        raise HTTPException(status_code=403, detail="Transcription blocked: personal call")
-    if privacy == "unclassified":
-        raise HTTPException(status_code=403, detail="Transcription blocked: call is unclassified. Classify as 'business' first.")
+    denial = recording_denial_reason(db, call)
+    if denial:
+        raise HTTPException(status_code=403, detail="Transcription blocked by recording privacy policy")
     if call.transcript_status == "completed":
         return {"status": "completed", "transcript": call.transcript_text}
     if call.transcript_status == "processing":
         return {"status": "processing", "message": "Already in progress. Check back shortly."}
 
     call.transcript_status = "processing"
+    call.transcription_started_at = datetime.now(timezone.utc)
     call.transcript_error = None
 
     audit.log(
@@ -360,11 +361,13 @@ def retry_transcription(
         )
     if not call.recording_url or not call.recording_available:
         raise HTTPException(status_code=400, detail="No recording available")
+    if recording_denial_reason(db, call):
+        raise HTTPException(status_code=403, detail="Transcription blocked by recording privacy policy")
 
     call.transcript_status = "processing"
     call.transcript_text = None
     call.transcript_error = None
-    call.transcription_started_at = None
+    call.transcription_started_at = datetime.now(timezone.utc)
     call.transcription_completed_at = None
     db.commit()
 
@@ -389,8 +392,19 @@ def _run_ai_summary_sync(call_id: str, org_id: str) -> None:
 
     db: Session = SessionLocal()
     try:
-        call = db.query(Call).filter(Call.id == call_id).first()
+        call = db.query(Call).filter(
+            Call.id == call_id,
+            Call.organization_id == org_id,
+        ).first()
         if not call or not call.transcript_text:
+            return
+        denial = recording_denial_reason(db, call)
+        if denial:
+            call.summary_status = "failed"
+            call.summary_text = None
+            call.summary_data = None
+            call.summary_error = "Summary blocked by recording privacy policy"
+            db.commit()
             return
         if call.summary_status == "completed":
             return
@@ -407,9 +421,21 @@ def _run_ai_summary_sync(call_id: str, org_id: str) -> None:
 
         summary_data = _generate_summary(transcript)
 
+        # Do not persist AI output if eligibility changed during provider work.
+        db.refresh(call)
+        denial = recording_denial_reason(db, call)
+        if denial:
+            call.summary_status = "failed"
+            call.summary_text = None
+            call.summary_data = None
+            call.summary_error = "Summary discarded by recording privacy policy"
+            db.commit()
+            logger.warning("[SUMMARY_DISCARDED] call_id=%s reason=%s", call_id, denial)
+            return
+
         call.summary_status = "completed"
         call.summary_text = summary_data.get("summary", "")
-        call.summary_data = json.dumps(summary_data)
+        call.summary_data = summary_data
         call.summary_error = None
         db.commit()
 
@@ -435,7 +461,7 @@ def _run_ai_summary_sync(call_id: str, org_id: str) -> None:
             call = db.query(Call).filter(Call.id == call_id).first()
             if call:
                 call.summary_status = "failed"
-                call.summary_error = str(exc)
+                call.summary_error = "Summary generation failed"
                 db.commit()
         except Exception:
             pass
@@ -490,12 +516,17 @@ def _generate_summary(transcript: str) -> dict:
     except Exception as exc:
         logger.warning("OpenAI summary failed, using rule-based fallback: %s", exc)
 
-    # Rule-based fallback — never invents data
+    # Deterministic extractive fallback. It leaves analytical judgments empty
+    # rather than fabricating sentiment, lead quality, or next actions.
     words = transcript.split()
-    word_count = len(words)
     sentences = [s.strip() for s in transcript.replace("?", "?.").split(".") if s.strip()]
     questions = [s for s in sentences if "?" in s]
     summary = " ".join(sentences[:2]) if sentences else transcript[:200]
+    keywords = sorted({
+        "".join(ch for ch in word.lower() if ch.isalnum())
+        for word in words
+        if len(word) > 5
+    } - {""})[:10]
 
     return {
         "summary": summary,
@@ -503,13 +534,14 @@ def _generate_summary(transcript: str) -> dict:
         "customer_requirements": [],
         "questions_asked": questions[:5],
         "follow_up_actions": [],
-        "suggested_next_step": "Review call recording and follow up with customer",
-        "sentiment": "neutral",
-        "lead_quality": "warm",
-        "keywords": list({w.lower() for w in words if len(w) > 5})[:10],
+        "suggested_next_step": None,
+        "sentiment": None,
+        "lead_quality": None,
+        "keywords": keywords,
         "ai_generated": False,
-        "model": "rule_based",
-        "word_count": word_count,
+        "model": "rule_based_extractive",
+        "word_count": len(words),
+        "analysis_limited": True,
     }
 
 
@@ -524,9 +556,11 @@ def summarize_call(
     call = db.query(Call).filter(
         Call.id == call_id,
         Call.organization_id == user.organization_id,
-    ).first()
+    ).with_for_update().first()
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
+    if recording_denial_reason(db, call):
+        raise HTTPException(status_code=403, detail="Summary blocked by recording privacy policy")
     if call.transcript_status != "completed" or not call.transcript_text:
         raise HTTPException(status_code=400, detail="Transcription must be completed before summarizing")
     if call.summary_status == "processing":
@@ -553,9 +587,11 @@ def retry_summary(
     call = db.query(Call).filter(
         Call.id == call_id,
         Call.organization_id == user.organization_id,
-    ).first()
+    ).with_for_update().first()
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
+    if recording_denial_reason(db, call):
+        raise HTTPException(status_code=403, detail="Summary blocked by recording privacy policy")
     if call.summary_status not in ("failed", None):
         raise HTTPException(status_code=400, detail=f"Cannot retry — status is '{call.summary_status}'")
     if call.transcript_status != "completed":

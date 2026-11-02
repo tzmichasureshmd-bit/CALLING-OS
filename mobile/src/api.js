@@ -43,6 +43,33 @@ async function getToken() {
 
 // ── HTTP client ───────────────────────────────────────────────────────────────
 
+let _refreshPromise = null;
+
+async function refreshAccessToken() {
+  if (_refreshPromise) return _refreshPromise;
+
+  _refreshPromise = (async () => {
+    const refreshToken = await secureGet("callos_refresh_token");
+    if (!refreshToken) throw new Error("No refresh token available");
+
+    const res = await fetchWithRetry(`${BASE_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.access_token) {
+      throw new Error(`HTTP ${res.status}: Session refresh failed`);
+    }
+
+    await secureSet("callos_token", data.access_token);
+    if (data.refresh_token) await secureSet("callos_refresh_token", data.refresh_token);
+    return data.access_token;
+  })().finally(() => { _refreshPromise = null; });
+
+  return _refreshPromise;
+}
+
 // Retry fetch with exponential backoff — works on both WiFi and mobile data
 async function fetchWithRetry(url, options, retries = 2) {
   let lastErr;
@@ -66,9 +93,12 @@ async function fetchWithRetry(url, options, retries = 2) {
   throw lastErr;
 }
 
-async function request(method, path, body = null) {
+async function request(method, path, body = null, allowAuthRefresh = true) {
   const token = await getToken();
-  const headers = { "Content-Type": "application/json" };
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Correlation-ID": `mob-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+  };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   // Mark sync and recording upload paths so fetchWithRetry uses the longer timeout
@@ -82,7 +112,19 @@ async function request(method, path, body = null) {
       _isSyncOrUpload: isSyncOrUpload,
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+
+    if (res.status === 401 && allowAuthRefresh && path !== "/auth/refresh") {
+      try {
+        await refreshAccessToken();
+      } catch {
+        throw new Error("HTTP 401: Session expired. Please sign in again.");
+      }
+      return request(method, path, body, false);
+    }
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${data.detail || data.message || "Request failed"}`);
+    }
     return data;
   } catch (e) {
     if (e.name === "AbortError") throw new Error("Request timed out. Check your connection.");
@@ -152,6 +194,10 @@ export async function clearSession() {
     "callos_selected_sim_carrier",
     "callos_selected_sim_snapshot",
     "callos_inapp_notifications",
+    // Privacy-sensitive preferences/caches are account-scoped in practice.
+    // Do not carry them into a different employee or organization session.
+    "callos_recording_enabled",
+    "callos_excluded_numbers_cache",
   ]);
 }
 
@@ -182,4 +228,8 @@ export async function getRefreshToken() {
 
 export async function updateAccessToken(token) {
   await secureSet("callos_token", token);
+}
+
+export async function updateRefreshToken(token) {
+  await secureSet("callos_refresh_token", token);
 }

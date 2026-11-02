@@ -24,6 +24,7 @@ class SIMOut(BaseModel):
     id:              str
     slot:            int
     carrier:         Optional[str] = None
+    display_name:    Optional[str] = None
     phone_number:    Optional[str] = None
     mcc:             Optional[str] = None
     mnc:             Optional[str] = None
@@ -31,6 +32,7 @@ class SIMOut(BaseModel):
     subscription_id: Optional[str] = None
     network_type:    Optional[str] = None
     is_active:       bool
+    is_selected:     bool = False
     last_detected_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 

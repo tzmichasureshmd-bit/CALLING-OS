@@ -60,7 +60,7 @@ function AccountSwitcherModal({ user, onClose }) {
         name: user.organization_name || "Organization",
         code: user.organization_code || "",
         access_token: localStorage.getItem("callos_token") || "",
-        refresh_token: "",
+        refresh_token: localStorage.getItem("callos_refresh_token") || "",
         email: user.email || "",
       }];
       saveOrgs(updated);
@@ -80,13 +80,19 @@ function AccountSwitcherModal({ user, onClose }) {
     if (!org.access_token) { return; }
     setSwitching(org.id);
     const prevToken = localStorage.getItem("callos_token");
+    const prevRefreshToken = localStorage.getItem("callos_refresh_token");
     setAccessToken(org.access_token);
     localStorage.setItem("callos_token", org.access_token);
+    if (org.refresh_token) localStorage.setItem("callos_refresh_token", org.refresh_token);
+    else localStorage.removeItem("callos_refresh_token");
     authApi.me()
       .then((me) => { localStorage.setItem("callos_user", JSON.stringify(me)); window.location.reload(); })
       .catch(() => {
         setAccessToken(prevToken);
-        localStorage.setItem("callos_token", prevToken);
+        if (prevToken) localStorage.setItem("callos_token", prevToken);
+        else localStorage.removeItem("callos_token");
+        if (prevRefreshToken) localStorage.setItem("callos_refresh_token", prevRefreshToken);
+        else localStorage.removeItem("callos_refresh_token");
         setSwitching(null);
       });
   };
@@ -291,6 +297,7 @@ export default function Topbar({ title, onMenu }) {
   const [query, setQuery] = useState("");
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
+  const [browserOnline, setBrowserOnline] = useState(() => navigator.onLine);
   const [notifs, setNotifs] = useState([]);
   const [notifsLoading, setNotifsLoading] = useState(false);
   const notifRef = useRef();
@@ -310,7 +317,19 @@ export default function Topbar({ title, onMenu }) {
     finally { setNotifsLoading(false); }
   }, []);
 
-  // Load on mount + poll every 60s
+  // Report browser connectivity only; do not claim WebSocket/backend health here.
+  useEffect(() => {
+    const online = () => setBrowserOnline(true);
+    const offline = () => setBrowserOnline(false);
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => {
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+  }, []);
+
+  // Load on mount + poll every 30s
   useEffect(() => {
     loadNotifs();
     const t = setInterval(loadNotifs, 30000);  // 30s — catches device permission changes quickly
@@ -404,10 +423,12 @@ export default function Topbar({ title, onMenu }) {
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search..." style={{ border: "none", outline: "none", background: "transparent", color: "var(--text-primary)", fontSize: 13, width: "100%" }} />
           </div>
 
-          {/* Live */}
-          <div className="nova-cmd-hide" style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 11px", background: "var(--success-soft)", borderRadius: 10 }}>
-            <span className="nova-live-dot" />
-            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--success)" }}>Live</span>
+          {/* Browser connectivity; backend real-time state is page-specific. */}
+          <div className="nova-cmd-hide" style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 11px", background: browserOnline ? "var(--success-soft)" : "var(--danger-soft)", borderRadius: 10 }}>
+            <span className={browserOnline ? "nova-live-dot" : ""} style={!browserOnline ? { width: 7, height: 7, borderRadius: "50%", background: "var(--danger)" } : undefined} />
+            <span style={{ fontSize: 12, fontWeight: 600, color: browserOnline ? "var(--success)" : "var(--danger)" }}>
+              {browserOnline ? "Internet" : "Offline"}
+            </span>
           </div>
 
           {/* Connect code */}

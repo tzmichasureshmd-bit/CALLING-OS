@@ -79,7 +79,10 @@ def log(
             extra_data=metadata or {},
             created_at=datetime.now(timezone.utc),
         )
-        db.add(entry)
-        db.flush()   # write in same transaction as the main operation
+        # Isolate audit persistence in a savepoint. If the audit row fails, the
+        # caller's business transaction remains usable as promised by this API.
+        with db.begin_nested():
+            db.add(entry)
+            db.flush()
     except Exception as exc:
         logger.warning("Audit log write failed: %s", exc)

@@ -40,11 +40,23 @@ def _verify_firebase_token(id_token: str) -> dict:
         raise HTTPException(status_code=503, detail="Firebase not configured on this server")
     try:
         return firebase_auth.verify_id_token(id_token)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid Firebase token: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Firebase token")
+
+
+def _require_active_organization(user: User, db: Session) -> None:
+    if (user.role or "").upper() == "SUPER_ADMIN":
+        return
+    organization = db.query(Organization).filter(
+        Organization.id == user.organization_id,
+        Organization.status == "active",
+    ).first()
+    if not organization:
+        raise HTTPException(status_code=403, detail="Organization is not active")
 
 
 def _issue_tokens(user: User, db: Session) -> TokenResponse:
+    _require_active_organization(user, db)
     user.last_login_at = datetime.now(timezone.utc)
     db.commit()
     token_data = {"sub": user.id, "org": user.organization_id, "role": user.role}
@@ -82,12 +94,15 @@ def google_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
     info = _verify_firebase_token(body.credential)
     google_id = info.get("uid")
     email = info.get("email")
-    if not google_id or not email:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+    if not google_id or not email or info.get("email_verified") is not True:
+        raise HTTPException(status_code=401, detail="Verified Google email required")
 
     user = db.query(User).filter(User.google_id == google_id).first()
     if not user:
-        user = db.query(User).filter(User.email == email, User.status == "active").first()
+        matches = db.query(User).filter(User.email == email, User.status == "active").all()
+        if len(matches) > 1:
+            raise HTTPException(status_code=409, detail="Email belongs to multiple organizations; use password login with a unique account")
+        user = matches[0] if matches else None
         if user:
             user.google_id = google_id
         else:
@@ -111,9 +126,12 @@ def otp_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
 
     user = db.query(User).filter(User.google_id == firebase_uid).first()
     if not user:
-        emp = db.query(Employee).filter(
+        employees = db.query(Employee).filter(
             Employee.phone == phone.replace("+91", "").strip()
-        ).first()
+        ).all()
+        if len(employees) > 1:
+            raise HTTPException(status_code=409, detail="Phone number belongs to multiple accounts")
+        emp = employees[0] if employees else None
         if emp:
             user = db.query(User).filter(User.id == emp.user_id).first()
             if user:
@@ -128,9 +146,14 @@ def otp_login(body: GoogleAuthRequest, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == body.email, User.status == "active").first()
-    if not user or not verify_password(body.password, user.password_hash):
+    candidates = db.query(User).filter(User.email == body.email, User.status == "active").all()
+    matches = [u for u in candidates if u.password_hash and verify_password(body.password, u.password_hash)]
+    if not matches:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    if len(matches) > 1:
+        raise HTTPException(status_code=409, detail="Email belongs to multiple organizations; use a unique account email")
+    user = matches[0]
+    _require_active_organization(user, db)
     user.last_login_at = datetime.now(timezone.utc)
     audit.log(db, organization_id=user.organization_id, action=audit.LOGIN,
               actor=user, request=request)
@@ -215,6 +238,7 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == payload.get("sub"), User.status == "active").first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    _require_active_organization(user, db)
     token_data = {"sub": user.id, "org": user.organization_id, "role": user.role}
     return TokenResponse(
         access_token=create_access_token(token_data),
@@ -234,9 +258,10 @@ def register_employee(body: EmployeeRegisterRequest, db: Session = Depends(get_d
     if not org:
         raise HTTPException(status_code=404, detail="Invalid company code. Ask your manager for the correct code.")
 
-    # Email must be unique within the org
-    if db.query(User).filter(User.email == body.email, User.organization_id == org.id).first():
-        raise HTTPException(status_code=409, detail="An account with this email already exists in this organization.")
+    # Email login has no tenant selector, so new employee accounts must remain
+    # globally unambiguous.
+    if db.query(User).filter(User.email == body.email).first():
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
 
     # Generate employee code
     emp_count = db.query(Employee).filter(Employee.organization_id == org.id).count()

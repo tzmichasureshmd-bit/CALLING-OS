@@ -29,9 +29,9 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     # APP_DEBUG is deliberately project-prefixed. Generic DEBUG variables are
     # often supplied by shells, editors, and hosting platforms.
-    APP_DEBUG: bool = True
+    APP_DEBUG: bool = False
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
-    SEED_DEMO_DATA: bool = True
+    SEED_DEMO_DATA: bool = False
 
     GOOGLE_CLIENT_ID: str = ""
 

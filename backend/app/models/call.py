@@ -1,4 +1,5 @@
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer, BigInteger, SmallInteger, Index, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from ..database import Base
@@ -65,7 +66,7 @@ class Call(Base):
     summary_status              = Column(String(20), nullable=True)   # pending|processing|completed|failed
     summary_text                = Column(String, nullable=True)
     summary_error               = Column(String(500), nullable=True)
-    summary_data                = Column(String, nullable=True)        # JSON string: points, sentiment, keywords
+    summary_data                = Column(JSONB, nullable=True)         # JSON string: points, sentiment, keywords (column is JSONB per migration 008)
 
     # Sync
     sync_status                 = Column(String(20), default="synced")
@@ -89,9 +90,11 @@ class Call(Base):
     device       = relationship("Device",       back_populates="calls")
 
     __table_args__ = (
-        Index("ix_calls_org_event_id",      "organization_id", "client_event_id", unique=True),
+        Index("ix_calls_org_device_event_id", "organization_id", "device_id", "client_event_id", unique=True),
         Index("ix_calls_org_start",         "organization_id", "start_time"),
         Index("ix_calls_org_emp_start",     "organization_id", "employee_id", "start_time"),
+        Index("ix_calls_org_device_start",  "organization_id", "device_id", "start_time"),
+        Index("ix_calls_org_type_start",    "organization_id", "call_type", "start_time"),
         Index("ix_calls_recording_status",  "organization_id", "recording_status"),
         Index("ix_calls_subscription_id",   "subscription_id"),
         Index("ix_calls_sim_id",            "sim_id"),

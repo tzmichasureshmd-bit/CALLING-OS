@@ -19,8 +19,29 @@ import { useDeviceSocket } from "../api/useDeviceSocket.js";
 import { useRange } from "../context/RangeContext.jsx";
 
 // Fetch last 200 calls — enough for all practical ranges without hammering the DB
-function rangeToParams() {
-  return { page_size: 200 };
+function rangeToParams(range) {
+  const now = new Date();
+  let fromDate = null;
+  let toDate = now;
+
+  if (range === "today" || range === "yesterday") {
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (range === "today") {
+      fromDate = todayStart;
+    } else {
+      fromDate = new Date(todayStart.getTime() - 86400000);
+      toDate = todayStart;
+    }
+  } else if (range === "7d" || range === "30d") {
+    fromDate = new Date(now.getTime() - (range === "7d" ? 7 : 30) * 86400000);
+  }
+
+  return {
+    page_size: 500,
+    all_pages: true,
+    ...(fromDate && { from_date: fromDate.toISOString() }),
+    ...(range !== "all" && { to_date: toDate.toISOString() }),
+  };
 }
 
 function clientFilterByRange(calls, range) {
@@ -88,7 +109,7 @@ export default function CallLogs() {
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   const { loading, error, data, reload } = useResource(
-    () => dataSource.getCalls(rangeToParams()),
+    () => dataSource.getCalls(rangeToParams(range)),
     [range]
   );
 
@@ -114,6 +135,13 @@ export default function CallLogs() {
       reload();
     }
   }, [newCallEvent]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep an open drawer aligned with the latest API record after polling/WS reloads.
+  useEffect(() => {
+    if (!selected?.id || !data?.items) return;
+    const current = data.items.find((call) => call.id === selected.id);
+    if (current) setSelected(current);
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <PageContainer><Card><SkeletonRows rows={8} cols={6} /></Card></PageContainer>;
   if (error)   return <PageContainer><Card><ErrorState title="Sync interrupted" message={error.message} code={error.error_code} onRetry={reload} /></Card></PageContainer>;
@@ -164,7 +192,7 @@ export default function CallLogs() {
             {/* Auto-refresh toggle */}
             <button
               onClick={() => setAutoRefresh(a => !a)}
-              title={autoRefresh ? "Auto-refresh ON (every 10s)" : "Auto-refresh OFF"}
+              title={autoRefresh ? "Auto-refresh ON (every 30s)" : "Auto-refresh OFF"}
               style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--border)", background: autoRefresh ? "var(--success-soft)" : "transparent", color: autoRefresh ? "var(--success)" : "var(--text-muted)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
             >
               <RotateCcw size={12} style={{ animation: autoRefresh ? "nova-spin 2s linear infinite" : "none" }} />
@@ -267,7 +295,7 @@ export default function CallLogs() {
         </div>
       </Card>
 
-      <CallIntelligenceDrawer call={selected} onClose={() => setSelected(null)} />
+      <CallIntelligenceDrawer call={selected} onClose={() => setSelected(null)} reload={reload} />
     </PageContainer>
   );
 }
@@ -390,21 +418,22 @@ function ProgressPanel({ call, onSaved, reload }) {
       setTimeout(() => reload?.(), 300);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
-      const msg = e?.response?.data?.detail || e?.message || "";
+      const msg = e?.message || "";
+      const statusCode = e?.status;
       let userMsg;
       if (!navigator.onLine || msg.includes("Network") || msg.includes("ERR_INTERNET")) {
         userMsg = "No internet connection.";
       } else if (msg.includes("timeout") || msg.includes("ECONNABORTED")) {
         userMsg = "Request timed out. Please retry.";
-      } else if (e?.response?.status === 401) {
+      } else if (statusCode === 401) {
         userMsg = "Session expired. Please log in again.";
-      } else if (e?.response?.status === 403) {
+      } else if (statusCode === 403) {
         userMsg = "You do not have permission to update this call.";
-      } else if (e?.response?.status === 404) {
+      } else if (statusCode === 404) {
         userMsg = "Call not found.";
-      } else if (e?.response?.status === 422) {
+      } else if (statusCode === 422) {
         userMsg = msg || "Invalid data.";
-      } else if (e?.response?.status >= 500) {
+      } else if (statusCode >= 500) {
         userMsg = "Server error. Please try again later.";
       } else {
         userMsg = msg || "Unable to save changes. Please try again.";
@@ -488,7 +517,7 @@ function ProgressPanel({ call, onSaved, reload }) {
   );
 }
 
-function CallIntelligenceDrawer({ call, onClose }) {
+function CallIntelligenceDrawer({ call, onClose, reload }) {
   const [playing, setPlaying]       = useState(false);
   const [progress, setProgress]     = useState(0);
   const [audioDur, setAudioDur]     = useState(0);
@@ -547,7 +576,16 @@ function CallIntelligenceDrawer({ call, onClose }) {
   async function handlePlay() {
     if (!call?.id || !call?.hasRecording) return;
     if (playing && audioRef.current) { audioRef.current.pause(); setPlaying(false); return; }
-    if (audioRef.current && signedUrl) { audioRef.current.play(); setPlaying(true); return; }
+    if (audioRef.current && signedUrl) {
+      try {
+        await audioRef.current.play();
+        setPlaying(true);
+      } catch (e) {
+        setUrlError(e?.message || "Could not resume recording.");
+        setPlaying(false);
+      }
+      return;
+    }
     setLoadingUrl(true); setUrlError(null);
     try {
       const res = await callsApi.getRecordingUrl(call.id);
@@ -575,7 +613,10 @@ function CallIntelligenceDrawer({ call, onClose }) {
   const txText    = txData?.transcript_text   || call.transcriptText;
   const sumText   = txData?.summary_text      || call.summaryText;
   const sumData   = txData?.summary_data
-    ? (() => { try { return JSON.parse(txData.summary_data); } catch { return null; } })()
+    ? (() => {
+        if (typeof txData.summary_data === "object") return txData.summary_data;
+        try { return JSON.parse(txData.summary_data); } catch { return null; }
+      })()
     : call.summaryData;
 
   const isPersonal      = privacy === "personal";

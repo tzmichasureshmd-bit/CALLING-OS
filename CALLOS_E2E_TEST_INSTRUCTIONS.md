@@ -195,7 +195,7 @@ After build completes:
 **Fix:**
 ```bash
 # Backend database
-psql postgresql://postgres:password@localhost:5432/callos
+psql postgresql://USER:PASSWORD@HOST:5432/DATABASE
 
 # Check device exists
 SELECT id, employee_id, organization_id FROM devices LIMIT 1;
@@ -270,7 +270,7 @@ cd mobile && eas build -p android --profile customClient
 tail -f backend/backend.log
 
 # Query database
-psql postgresql://postgres:password@localhost:5432/callos
+psql postgresql://USER:PASSWORD@HOST:5432/DATABASE
 
 # Clear mobile cache
 npx expo start --clear

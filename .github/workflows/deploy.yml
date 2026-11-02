@@ -1,49 +1,70 @@
-name: Deploy CallingOS to VPS
+name: Validate and deploy CallNexa
 
 on:
   push:
     branches: [main]
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+concurrency:
+  group: callnexa-production
+  cancel-in-progress: false
 
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile backend source
+        run: python -m compileall -q backend/app
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
+          script_stop: true
+          command_timeout: 25m
           script: |
+            set -eu
             cd /opt/callingos
-            # Use GitHub token for authentication
+
+            # Authenticate the pull with the Actions token (existing setup).
             git config --global credential.helper store
             echo "https://${{ secrets.GITHUB_TOKEN }}:x-oauth-basic@github.com" > ~/.git-credentials
-            
-            git stash
+
+            git stash || true
             git pull origin main
-            
+
+            # Backend runtime secrets (required).
             printf '%s' '${{ secrets.BACKEND_ENV }}' > /opt/callingos/backend/.env
             printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /opt/callingos/backend/firebase-service-account.json
+            chmod 600 /opt/callingos/backend/.env /opt/callingos/backend/firebase-service-account.json
 
-            # Run pending migrations — continue on error
             cd /opt/callingos/backend
-            for f in migrations/*.sql; do
-              if [ -f "$f" ]; then
-                echo "=== Running $f ==="
-                docker run --rm postgres:15-alpine psql \
-                  "postgresql://postgres.gjfohkxocurrzbdpybuu:TzMicha%40123@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres" \
-                  -f /dev/stdin < "$f" || echo "Migration $f skipped or already applied"
-              fi
-            done
 
-            docker compose down --remove-orphans
-            docker compose build --no-cache
-            docker compose up -d
+            # Apply pending database migrations (ordered, fail-fast, recorded).
+            docker compose run --rm callingos-backend python migration_runner.py
+
+            # Rebuild and restart. Web Firebase build-args come from the
+            # existing docker-compose defaults if WEB_BUILD_ENV is unset.
+            docker compose build
+            docker compose up -d --remove-orphans
             docker image prune -f
 
-            echo "✅ Deploy complete — backend + web rebuilt"
+            # Fail the deploy if the backend is not healthy afterward.
+            curl --fail --silent --show-error --retry 15 --retry-delay 4 \
+              https://api.callingos.tzmicha.com/health/db > /dev/null
+            echo "Deploy verified: backend healthy"

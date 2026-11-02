@@ -149,7 +149,17 @@ export async function syncSimInventory(deviceId, force = false) {
 
   const previous = await _loadStored();
   const changes  = _detectChanges(previous, currentRaw);
-  const syncItems = currentRaw.map(_toSyncItem);
+  const selectedSubId = await AsyncStorage.getItem("callos_selected_subscription_id").catch(() => null);
+  const selectedSlotRaw = await AsyncStorage.getItem("callos_selected_sim_slot").catch(() => null);
+  const selectedSlot = selectedSlotRaw !== null && selectedSlotRaw !== "" ? parseInt(selectedSlotRaw, 10) : null;
+  const syncItems = currentRaw.map((sim) => ({
+    ..._toSyncItem(sim),
+    is_selected: selectedSubId
+      ? String(sim.subscriptionId || "") === selectedSubId
+      : selectedSlot !== null
+        ? sim.slot === selectedSlot
+        : sim.slot === 0,
+  }));
 
   let synced = false;
   try {

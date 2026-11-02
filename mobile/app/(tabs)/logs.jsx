@@ -34,7 +34,9 @@ const RANGES = [
   { label: "90 Days", days: 90 },
 ];
 
-const TYPE = {
+// Renamed from TYPE -> CALL_TYPE: TYPE is the typography scale imported from src/theme.
+// The duplicate identifier broke the production (EAS) bundle.
+const CALL_TYPE = {
   incoming: { icon: "call-received", color: palette.teal,   label: "Incoming" },
   outgoing: { icon: "call-made",     color: palette.violet, label: "Outgoing" },
   missed:   { icon: "call-missed",   color: palette.red,    label: "Missed"   },
@@ -360,7 +362,7 @@ function DetailsSheet({ visible, onClose, call, allCalls, syncedIds, theme }) {
           {/* Call meta row */}
           <View style={{ flexDirection:"row", gap:8, marginBottom:18, flexWrap:"wrap" }}>
             {[
-              `${TYPE[call.type]?.label || "Call"} · ${call.sim}`,
+              `${CALL_TYPE[call.type]?.label || "Call"} · ${call.sim}`,
               `${call.time} · ${call.ago}`,
               `Duration: ${call.duration}`,
             ].map((t,i) => (
@@ -443,7 +445,7 @@ function DetailsSheet({ visible, onClose, call, allCalls, syncedIds, theme }) {
                 Call History · {history.length} calls with this number
               </Text>
               {history.map((h, i) => {
-                const meta = TYPE[h.type] || TYPE.incoming;
+                const meta = CALL_TYPE[h.type] || CALL_TYPE.incoming;
                 return (
                   <View key={h.id} style={{ flexDirection:"row", alignItems:"center", gap:10, paddingVertical:9,
                     borderBottomWidth: i < history.length-1 ? 1 : 0, borderBottomColor:theme.border }}>
@@ -468,7 +470,7 @@ function DetailsSheet({ visible, onClose, call, allCalls, syncedIds, theme }) {
 
 // ── Call Row ──────────────────────────────────────────────────────────────────
 const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteData, theme, shadowSoft }) => {
-  const meta = TYPE[c.type] || TYPE.incoming;
+  const meta = CALL_TYPE[c.type] || CALL_TYPE.incoming;
   const open = expanded === c.id;
   const ns   = STATUSES.find(s => s.key === (noteData?.status || c.callStatus));
   const hasNotes = (noteData?.notes || c.notes || "").trim().length > 0;

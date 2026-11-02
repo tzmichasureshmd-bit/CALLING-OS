@@ -12,6 +12,7 @@ import { formatDuration, formatDateTime } from "../data/mockData.js";
 import { dataSource } from "../api/dataSource.js";
 import { callsApi, transcriptsApi } from "../api/resources.js";
 import client from "../api/client.js";
+import { useDeviceSocket } from "../api/useDeviceSocket.js";
 
 // ── Recording status helpers ──────────────────────────────────────────────────
 const REC_STATUS = {
@@ -35,6 +36,12 @@ const SUM_STATUS = {
   failed:     { label: "Summary Failed",tone: "danger" },
 };
 
+function parseSummaryData(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
 // ── Poll transcript status every 8s while processing ─────────────────────────
 function usePollTranscript(id, active) {
   const [result, setResult] = useState(null);
@@ -43,6 +50,8 @@ function usePollTranscript(id, active) {
   useEffect(() => {
     if (!active || !id) return;
     let cancelled = false;
+    let polls = 0;
+    let networkFailures = 0;
 
     async function poll() {
       try {
@@ -50,14 +59,30 @@ function usePollTranscript(id, active) {
         const { transcript_status, transcript_text, transcript_error,
                 summary_status, summary_text, summary_data } = res.data;
         if (cancelled) return;
-        if (transcript_status === "completed" || transcript_status === "failed") {
+        polls += 1;
+        networkFailures = 0;
+
+        const transcriptTerminal = transcript_status === "completed" || transcript_status === "failed";
+        const summaryTerminal = summary_status === "completed" || summary_status === "failed";
+
+        if (
+          transcript_status === "failed"
+          || (transcript_status === "completed" && summaryTerminal)
+          || polls >= 40
+        ) {
           setResult({ transcript_status, transcript_text, transcript_error,
                       summary_status, summary_text, summary_data });
-        } else {
+          return;
+        }
+
+        if (!transcriptTerminal || !summaryTerminal) {
           timer.current = setTimeout(poll, 8000);
         }
       } catch {
-        if (!cancelled) setResult({ transcript_status: "failed", transcript_text: null });
+        if (cancelled) return;
+        networkFailures += 1;
+        const delay = Math.min(8000 * 2 ** (networkFailures - 1), 30000);
+        timer.current = setTimeout(poll, delay);
       }
     }
 
@@ -104,8 +129,13 @@ function AudioPlayer({ callId, hasRecording, recordingStatus }) {
       return;
     }
     if (state === "paused" && audioRef.current) {
-      audioRef.current.play();
-      setState("playing");
+      try {
+        await audioRef.current.play();
+        setState("playing");
+      } catch (e) {
+        setState("error");
+        setErrorMsg(e?.message || "Could not resume recording");
+      }
       return;
     }
     const url = await fetchSignedUrl();
@@ -317,9 +347,7 @@ function TranscriptRow({ c, onDone }) {
     setTxError(pollResult.transcript_error);
     if (pollResult.summary_status) setSumStatus(pollResult.summary_status);
     if (pollResult.summary_text)   setSumText(pollResult.summary_text);
-    if (pollResult.summary_data) {
-      try { setSumData(JSON.parse(pollResult.summary_data)); } catch {}
-    }
+    if (pollResult.summary_data) setSumData(parseSummaryData(pollResult.summary_data));
     if (pollResult.transcript_status === "completed") onDone?.();
   }, [pollResult]);
 
@@ -472,7 +500,7 @@ function TranscriptRow({ c, onDone }) {
             client.get(`/transcripts/${c.id}`).then(r => {
               setSumStatus(r.data.summary_status);
               setSumText(r.data.summary_text);
-              try { setSumData(JSON.parse(r.data.summary_data)); } catch {}
+              setSumData(parseSummaryData(r.data.summary_data));
             }).catch(() => {});
           }}
         />
@@ -533,7 +561,7 @@ export default function Transcribe() {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
-  const wsRef                 = useRef(null);
+  const { newCallEvent }      = useDeviceSocket();
 
   const load = useCallback(async (f = filters) => {
     setLoading(true);
@@ -558,27 +586,14 @@ export default function Transcribe() {
 
   useEffect(() => { load(filters); }, [filters]);
 
-  // WebSocket — real-time transcript/recording updates
+  // Reuse the authenticated WS/SSE/polling transport used by the rest of the
+  // dashboard. Always reload the current filter/page state.
   useEffect(() => {
-    const wsBase = (import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1")
-      .replace(/^http/, "ws");
-    const token = localStorage.getItem("callos_token");
-    if (!token) return;
-    try {
-      const ws = new WebSocket(`${wsBase}/ws?token=${token}`);
-      wsRef.current = ws;
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          if (["transcript_updated", "recording_uploaded", "summary_updated"].includes(msg.event)) {
-            // Reload current page silently
-            load(filters);
-          }
-        } catch {}
-      };
-      return () => ws.close();
-    } catch {}
-  }, []);
+    if (!newCallEvent) return;
+    if (["transcript_updated", "recording_uploaded", "summary_updated"].includes(newCallEvent.event)) {
+      load(filters);
+    }
+  }, [newCallEvent, load, filters]);
 
   function handleFiltersChange(newFilters) {
     setFilters(newFilters);

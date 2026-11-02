@@ -12,7 +12,7 @@ class Device(Base):
     organization_id     = Column(String(50), ForeignKey("organizations.id", ondelete="CASCADE"),
                                  nullable=False, index=True)
     employee_id         = Column(String(50), ForeignKey("employees.id", ondelete="CASCADE"),
-                                 nullable=True, index=True)
+                                 nullable=False, index=True)
     device_identifier   = Column(String(200), nullable=False)
     manufacturer        = Column(String(100))
     model               = Column(String(100))
@@ -59,6 +59,7 @@ class SIM(Base):
     subscription_id    = Column(String(50))                     # Android subscription ID where available
     network_type       = Column(String(20))                     # 2G | 3G | 4G | 5G | UNKNOWN
     is_active          = Column(Boolean, default=True)
+    is_selected        = Column(Boolean, default=False, nullable=False)
     first_detected_at  = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_detected_at   = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     created_at         = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -71,4 +72,6 @@ class SIM(Base):
         UniqueConstraint("device_id", "slot", name="uq_sims_device_slot"),
         Index("ix_sims_subscription_id", "subscription_id"),
         Index("ix_sims_last_detected", "device_id", "last_detected_at"),
+        Index("ix_sims_one_selected_per_device", "device_id", unique=True,
+              postgresql_where=text("is_selected = true")),
     )

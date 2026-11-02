@@ -15,7 +15,7 @@ Use this checklist before sharing APK or deploying to production.
 
 ### Database
 - [ ] PostgreSQL is running
-- [ ] Can connect: `psql postgresql://user:pass@localhost:5432/callos`
+- [ ] Can connect: `psql postgresql://USER:PASSWORD@HOST:5432/DATABASE`
 - [ ] Tables exist: `SELECT * FROM pg_tables WHERE schemaname='public';`
 - [ ] Migrations applied: `SELECT * FROM alembic_version;` (or similar)
 - [ ] No data corruption: `PRAGMA integrity_check;` (or equivalent)
@@ -250,7 +250,7 @@ Add any deployment-specific notes here:
 tail -f backend/backend.log
 
 # Check database
-psql postgresql://user:pass@localhost:5432/callos -c "SELECT COUNT(*) FROM calls;"
+psql postgresql://USER:PASSWORD@HOST:5432/DATABASE -c "SELECT COUNT(*) FROM calls;"
 
 # Test mobile API
 curl -H "Authorization: Bearer TOKEN" http://localhost:8000/api/v1/calls

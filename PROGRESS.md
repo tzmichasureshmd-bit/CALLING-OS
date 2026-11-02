@@ -20,7 +20,7 @@
 ```env
 # Supabase — go to supabase.com → your project → Settings → API
 SUPABASE_URL=https://gjfohkxocurrzbdpybuu.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJ...   ← Settings → API → service_role key
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY   ← Settings → API → service_role key
 
 # OpenAI — platform.openai.com → API Keys
 OPENAI_API_KEY=sk-proj-...

@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request, BackgroundTasks
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
@@ -16,6 +17,8 @@ from ..config import settings
 from ..ws_manager import manager
 from .. import audit
 from ..models.call import RECORDING_STATUS_NOT_AVAILABLE, RECORDING_STATUS_UPLOADED
+from ..phone import normalize_phone
+from ..privacy import recording_denial_reason
 
 logger = logging.getLogger("callnexa.calls")
 
@@ -33,33 +36,28 @@ MAX_RECORDING_BYTES = 200 * 1024 * 1024   # 200 MB hard limit
 VALID_CALL_TYPES = {"incoming", "outgoing", "missed", "rejected"}
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+def _has_supported_audio_signature(header: bytes, extension: str) -> bool:
+    """Conservative magic-byte check before private storage upload."""
+    if extension in {"mp4", "m4a", "3gp"}:
+        return len(header) >= 12 and header[4:8] == b"ftyp"
+    if extension == "wav":
+        return header.startswith(b"RIFF") and header[8:12] == b"WAVE"
+    if extension == "ogg":
+        return header.startswith(b"OggS")
+    if extension == "webm":
+        return header.startswith(b"\x1aE\xdf\xa3")
+    if extension == "amr":
+        return header.startswith((b"#!AMR\n", b"#!AMR-WB\n"))
+    if extension == "mp3":
+        return header.startswith(b"ID3") or (
+            len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0
+        )
+    if extension == "aac":
+        return len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xF6) == 0xF0
+    return False
 
-def normalize_phone(phone: str) -> str:
-    """Normalize phone number. Preserves E.164 if already formatted.
-    For 10-digit numbers without country code, defaults to +91 (India).
-    For numbers already starting with +, keeps as-is after cleaning.
-    """
-    if not phone or phone.strip() in ("", "unknown"):
-        return phone
-    cleaned = re.sub(r"[^\d+]", "", phone.strip())[:16]
-    # Already E.164
-    if cleaned.startswith("+") and len(cleaned) >= 8:
-        return cleaned
-    digits = re.sub(r"\D", "", cleaned)
-    if not digits:
-        return phone
-    # 10-digit: assume India (+91) — most common deployment
-    if len(digits) == 10:
-        return f"+91{digits}"
-    # 12-digit starting with 91: India with country code
-    if len(digits) == 12 and digits.startswith("91"):
-        return f"+{digits}"
-    # 11-digit starting with 0: India trunk prefix
-    if len(digits) == 11 and digits.startswith("0"):
-        return f"+91{digits[1:]}"
-    # Any other length: just prepend + and keep digits
-    return f"+{digits}"
+
+# ── helpers ───────────────────────────────────────────────────────────────────
 
 
 def _call_out(c: Call) -> CallOut:
@@ -143,6 +141,18 @@ async def sync_calls(
             logger.error("[SYNC] Device not found: device_id=%s org=%s", body.device_id, user.organization_id)
             raise HTTPException(status_code=400, detail="Device not found in your organization")
 
+        # An employee may only upload calls through their own registered device.
+        # Organization scope alone is insufficient because it would allow call
+        # attribution to another employee in the same company.
+        if (user.role or "").upper() == "EMPLOYEE":
+            employee = db.query(Employee).filter(
+                Employee.user_id == user.id,
+                Employee.organization_id == user.organization_id,
+                Employee.status == "active",
+            ).first()
+            if not employee or device.employee_id != employee.id:
+                raise HTTPException(status_code=403, detail="Device is not assigned to this employee")
+
         accepted = duplicates = failed = 0
         new_call_ids: list[str] = []
         results: list[CallSyncItemResult] = []
@@ -152,6 +162,7 @@ async def sync_calls(
             # 2. Idempotency check
             exists = db.query(Call).filter(
                 Call.organization_id == user.organization_id,
+                Call.device_id == device.id,
                 Call.client_event_id == item.client_event_id,
             ).first()
             if exists:
@@ -199,7 +210,9 @@ async def sync_calls(
             resolved_sim_id = _resolve_sim_id(db, device.id, item.sim_slot, item.subscription_id)
             source = item.source or (f"SIM {item.sim_slot}" if item.sim_slot else "UNKNOWN")
 
-            # 6. INSERT using ORM — generate ID in Python to avoid one DB round-trip per row
+            # 6. INSERT inside a savepoint. The database unique index is the
+            # concurrency authority; if another request commits the same
+            # device event first, convert that race into a duplicate ACK.
             call_id = "tzm-cal-" + uuid.uuid4().hex[:12]
             call = Call(
                 id=call_id,
@@ -225,7 +238,38 @@ async def sync_calls(
                 sync_confirmed_at=now_utc,
                 updated_at=now_utc,
             )
-            db.add(call)
+            try:
+                with db.begin_nested():
+                    db.add(call)
+                    db.flush()
+            except IntegrityError:
+                exists = db.query(Call).filter(
+                    Call.organization_id == user.organization_id,
+                    Call.device_id == device.id,
+                    Call.client_event_id == item.client_event_id,
+                ).first()
+                if exists:
+                    duplicates += 1
+                    exists.sync_confirmed_at = now_utc
+                    results.append(CallSyncItemResult(
+                        client_event_id=item.client_event_id,
+                        call_id=exists.id,
+                        status="duplicate",
+                        sync_status="synced",
+                        recording_status="uploaded" if exists.recording_available else "not_available",
+                        transcript_status=exists.transcript_status,
+                    ))
+                else:
+                    failed += 1
+                    logger.exception("[SYNC] insert rejected for event=%s", item.client_event_id)
+                    results.append(CallSyncItemResult(
+                        client_event_id=item.client_event_id,
+                        status="failed",
+                        sync_status="failed",
+                        error="database_rejected",
+                    ))
+                continue
+
             new_call_ids.append(call_id)
             accepted += 1
             logger.info("[SYNC] queued %s -> %s", item.client_event_id, call_id)
@@ -275,7 +319,7 @@ async def sync_calls(
         raise
     except Exception as exc:
         logger.error("[SYNC] Unexpected error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Sync error: {str(exc)[:100]}")
+        raise HTTPException(status_code=500, detail="Call synchronization failed")
 
 
 # ── list calls ────────────────────────────────────────────────────────────────
@@ -357,9 +401,14 @@ def get_call(
     )
     # Employees can only view their own calls
     if user.role == "EMPLOYEE":
-        emp = db.query(Employee).filter(Employee.user_id == user.id).first()
-        if emp:
-            q = q.filter(Call.employee_id == emp.id)
+        emp = db.query(Employee).filter(
+            Employee.user_id == user.id,
+            Employee.organization_id == user.organization_id,
+            Employee.status == "active",
+        ).first()
+        if not emp:
+            raise HTTPException(status_code=404, detail="Call not found")
+        q = q.filter(Call.employee_id == emp.id)
     call = q.first()
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
@@ -396,59 +445,32 @@ async def upload_recording(
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
 
-    # If EMPLOYEE, verify they own this call
-    if user.role == "EMPLOYEE":
-        emp = db.query(Employee).filter(Employee.user_id == user.id).first()
+    # Organization admins may upload any organization call. Other roles must
+    # own the call through an active employee profile.
+    if (user.role or "").upper() not in {"ADMIN", "SUPER_ADMIN"}:
+        emp = db.query(Employee).filter(
+            Employee.user_id == user.id,
+            Employee.organization_id == user.organization_id,
+            Employee.status == "active",
+        ).first()
         if not emp or call.employee_id != emp.id:
             raise HTTPException(status_code=403, detail="Not authorized to upload recording for this call")
 
     # ── Privacy guard ─────────────────────────────────────────────────────────
-    # Personal calls must never be uploaded, transcribed, or analyzed.
-    # Unclassified calls require explicit business classification before upload.
-    privacy = getattr(call, "call_privacy", "unclassified") or "unclassified"
-    if privacy == "personal":
+    # Fail closed for every value other than explicit "business", then enforce
+    # the normalized excluded-number list. This remains authoritative even if a
+    # modified/old mobile client bypasses its local checks.
+    denial = recording_denial_reason(db, call)
+    if denial:
         logger.warning(
-            "[RECORDING_UPLOAD_BLOCKED] call_id=%s reason=personal_call org=%s",
-            call_id, user.organization_id,
+            "[RECORDING_UPLOAD_BLOCKED] call_id=%s reason=%s org=%s",
+            call_id, denial, user.organization_id,
         )
-        raise HTTPException(
-            status_code=403,
-            detail="Recording upload blocked: this call is classified as personal. "
-                   "Personal calls cannot be recorded, uploaded, or transcribed.",
-        )
-    if privacy == "unclassified":
-        logger.warning(
-            "[RECORDING_UPLOAD_BLOCKED] call_id=%s reason=unclassified org=%s",
-            call_id, user.organization_id,
-        )
-        raise HTTPException(
-            status_code=403,
-            detail="Recording upload blocked: this call is unclassified. "
-                   "Classify it as 'business' before uploading a recording.",
-        )
-
-    # ── Excluded-number guard ─────────────────────────────────────────────────
-    # If the phone number is on the org's excluded list, block upload.
-    from ..models import ExcludedNumber
-    normalized = normalize_phone(call.phone_number or "")
-    excluded = db.query(ExcludedNumber).filter(
-        ExcludedNumber.organization_id == user.organization_id,
-        ExcludedNumber.number == normalized,
-    ).first()
-    if not excluded and call.phone_number:
-        excluded = db.query(ExcludedNumber).filter(
-            ExcludedNumber.organization_id == user.organization_id,
-            ExcludedNumber.number == call.phone_number,
-        ).first()
-    if excluded:
-        logger.warning(
-            "[RECORDING_UPLOAD_BLOCKED] call_id=%s reason=excluded_number org=%s",
-            call_id, user.organization_id,
-        )
-        raise HTTPException(
-            status_code=403,
-            detail="Recording upload blocked: this phone number is on the excluded list.",
-        )
+        detail = {
+            "personal_call": "Recording upload blocked: personal call",
+            "excluded_number": "Recording upload blocked: excluded phone number",
+        }.get(denial, "Recording upload blocked: call must be classified as business")
+        raise HTTPException(status_code=403, detail=detail)
 
     # ── File validation ───────────────────────────────────────────────────────
     content_type = (file.content_type or "").lower().split(";")[0].strip()
@@ -463,15 +485,26 @@ async def upload_recording(
 
     ext = raw_ext if raw_ext in ALLOWED_AUDIO_EXT else "mp4"
 
-    # Read with size limit
-    content = await file.read(MAX_RECORDING_BYTES + 1)
-    if len(content) > MAX_RECORDING_BYTES:
-        raise HTTPException(status_code=413, detail="Recording file exceeds 200 MB limit")
-    if len(content) == 0:
+    # Validate size without retaining the entire recording in memory.
+    file_size = 0
+    header = b""
+    while True:
+        chunk = await file.read(64 * 1024)
+        if not chunk:
+            break
+        if len(header) < 16:
+            header = (header + chunk)[:16]
+        file_size += len(chunk)
+        if file_size > MAX_RECORDING_BYTES:
+            raise HTTPException(status_code=413, detail="Recording file exceeds 200 MB limit")
+    if file_size == 0:
         raise HTTPException(status_code=400, detail="Recording file is empty")
+    if not _has_supported_audio_signature(header, ext):
+        raise HTTPException(status_code=400, detail="File content does not match a supported recording format")
+    await file.seek(0)
 
     logger.info("[RECORDING_UPLOAD_STARTED] call_id=%s size=%d ext=%s org=%s",
-                call_id, len(content), ext, user.organization_id)
+                call_id, file_size, ext, user.organization_id)
 
     # ── Storage ───────────────────────────────────────────────────────────────
     if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
@@ -485,32 +518,63 @@ async def upload_recording(
         f"/{settings.SUPABASE_RECORDINGS_BUCKET}/{storage_path}"
     )
 
+    async def recording_chunks():
+        while True:
+            chunk = await file.read(64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(
             storage_url,
-            content=content,
+            content=recording_chunks(),
             headers={
                 "Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}",
                 "Content-Type": content_type or "audio/mp4",
+                "Content-Length": str(file_size),
                 "x-upsert": "true",
             },
         )
     if resp.status_code not in (200, 201):
-        logger.error("Supabase upload failed %s: %s", resp.status_code, resp.text[:200])
+        logger.error("Supabase upload failed with status %s", resp.status_code)
         raise HTTPException(status_code=502, detail="Storage upload failed")
 
-    # Store path only — NOT a public URL
+    # Re-read and lock only for the short DB state transition. This prevents two
+    # concurrent uploads from both scheduling transcription, and rechecks policy
+    # after the storage request in case classification changed mid-upload.
+    db.expire_all()
+    call = db.query(Call).filter(
+        Call.id == call_id,
+        Call.organization_id == user.organization_id,
+    ).with_for_update().first()
+    if not call:
+        await _delete_recording_object(storage_path)
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    denial = recording_denial_reason(db, call)
+    if denial:
+        deleted = await _delete_recording_object(storage_path)
+        if not deleted:
+            logger.error("Privacy cleanup required after rejected upload for call_id=%s", call_id)
+        raise HTTPException(status_code=403, detail="Recording upload blocked by privacy policy")
+
+    old_storage_path = call.recording_url
     already_uploaded = call.recording_available
+    should_transcribe = call.transcript_status not in ("processing", "completed")
+    now = datetime.now(timezone.utc)
+
     call.recording_url           = storage_path
     call.recording_available     = True
     call.recording_status        = RECORDING_STATUS_UPLOADED
-    call.recording_size_bytes    = len(content)
+    call.recording_size_bytes    = file_size
     call.recording_mime_type     = content_type or "audio/mp4"
-    call.recording_uploaded_at   = datetime.now(timezone.utc)
+    call.recording_uploaded_at   = now
     call.recording_error         = None
-    # Auto-queue transcription — do not require manual trigger
-    if call.transcript_status not in ("processing", "completed"):
-        call.transcript_status = "pending"
+    if should_transcribe:
+        call.transcript_status = "processing"
+        call.transcription_started_at = now
+        call.transcript_error = None
 
     audit.log(
         db,
@@ -519,30 +583,38 @@ async def upload_recording(
         actor=user,
         resource="call",
         resource_id=call_id,
-        metadata={"size_bytes": len(content), "ext": ext, "duplicate": already_uploaded},
+        metadata={"size_bytes": file_size, "ext": ext, "duplicate": already_uploaded},
         request=request,
     )
-    db.commit()
-    if already_uploaded:
-        logger.info("[RECORDING_UPLOAD_CONFIRMED] call_id=%s size=%d ext=%s (re-upload/upsert)",
-                    call_id, len(content), ext)
-    else:
-        logger.info("[RECORDING_UPLOAD_CONFIRMED] call_id=%s size=%d ext=%s",
-                    call_id, len(content), ext)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        if not already_uploaded:
+            await _delete_recording_object(storage_path)
+        raise
 
-    # Auto-trigger transcription in background — no manual button needed
-    from .transcripts import _run_whisper_sync
-    background_tasks.add_task(_run_whisper_sync, call_id, storage_path, user.organization_id)
+    logger.info(
+        "[RECORDING_UPLOAD_CONFIRMED] call_id=%s size=%d ext=%s duplicate=%s",
+        call_id, file_size, ext, already_uploaded,
+    )
 
-    # Broadcast recording available event
+    if old_storage_path and old_storage_path != storage_path:
+        if not await _delete_recording_object(old_storage_path):
+            logger.warning("Old recording object cleanup failed for call_id=%s", call_id)
+
+    if should_transcribe:
+        from .transcripts import _run_whisper_sync
+        background_tasks.add_task(_run_whisper_sync, call_id, storage_path, user.organization_id)
+
     try:
         await manager.broadcast(
             user.organization_id,
             {"event": "recording_uploaded", "call_id": call_id,
-             "recording_status": "uploaded", "transcript_status": "processing"},
+             "recording_status": "uploaded", "transcript_status": call.transcript_status},
         )
     except Exception:
-        pass
+        logger.warning("Recording dashboard broadcast failed for call_id=%s", call_id)
 
     return {
         "status": "uploaded",
@@ -550,7 +622,7 @@ async def upload_recording(
         "recording_available": True,
         "recording_status": "uploaded",
         "transcript_status": call.transcript_status,
-        "size_bytes": len(content),
+        "size_bytes": file_size,
     }
 
 
@@ -559,6 +631,48 @@ async def upload_recording(
 from pydantic import BaseModel as _PydanticBase
 
 VALID_PRIVACY_VALUES = {"unclassified", "business", "personal"}
+
+
+async def _delete_recording_object(storage_path: str) -> bool:
+    """Delete one private storage object; never log the private path or credentials."""
+    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
+        return False
+    import httpx
+
+    url = (
+        f"{settings.SUPABASE_URL}/storage/v1/object"
+        f"/{settings.SUPABASE_RECORDINGS_BUCKET}/{storage_path}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.delete(
+                url,
+                headers={"Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"},
+            )
+        return response.status_code in (200, 204, 404)
+    except Exception:
+        logger.exception("Recording storage deletion failed")
+        return False
+
+
+def _clear_recording_and_ai(call: Call, *, clear_storage_path: bool) -> None:
+    if clear_storage_path:
+        call.recording_url = None
+    call.recording_available = False
+    call.recording_status = RECORDING_STATUS_NOT_AVAILABLE
+    call.recording_size_bytes = None
+    call.recording_mime_type = None
+    call.recording_uploaded_at = None
+    call.recording_error = None
+    call.transcript_status = None
+    call.transcript_text = None
+    call.transcript_error = None
+    call.transcription_started_at = None
+    call.transcription_completed_at = None
+    call.summary_status = None
+    call.summary_text = None
+    call.summary_data = None
+    call.summary_error = None
 
 
 class _PrivacyBody(_PydanticBase):
@@ -579,9 +693,9 @@ async def set_call_privacy(
     - business: eligible for recording and processing.
     - unclassified: not automatically recorded or uploaded.
 
-    Changing a call to 'personal' immediately prevents any further processing.
-    It does NOT delete an already-uploaded recording — use DELETE /calls/{id}/recording
-    for that (requires ADMIN authorization).
+    Changing a call to ``personal`` immediately revokes application access to
+    any recording and clears transcript/summary data. Storage deletion is
+    attempted in the same request; failures are reported as cleanup pending.
     """
     if body.call_privacy not in VALID_PRIVACY_VALUES:
         raise HTTPException(status_code=422, detail=f"call_privacy must be one of: {', '.join(sorted(VALID_PRIVACY_VALUES))}")
@@ -589,7 +703,7 @@ async def set_call_privacy(
     call = db.query(Call).filter(
         Call.id == call_id,
         Call.organization_id == user.organization_id,
-    ).first()
+    ).with_for_update().first()
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
 
@@ -603,6 +717,20 @@ async def set_call_privacy(
     call.call_privacy = body.call_privacy
     call.updated_at = datetime.now(timezone.utc)
 
+    cleanup_state = "not_required"
+    if body.call_privacy == "personal":
+        storage_path = call.recording_url
+        deleted = not storage_path or await _delete_recording_object(storage_path)
+        _clear_recording_and_ai(call, clear_storage_path=deleted)
+        if deleted:
+            cleanup_state = "completed"
+        else:
+            # Fail closed in the application while retaining the private pointer
+            # so an administrator can retry physical storage deletion.
+            call.recording_status = "failed"
+            call.recording_error = "Privacy cleanup pending"
+            cleanup_state = "pending"
+
     audit.log(
         db,
         organization_id=user.organization_id,
@@ -610,12 +738,16 @@ async def set_call_privacy(
         actor=user,
         resource="call",
         resource_id=call_id,
-        metadata={"old": old_privacy, "new": body.call_privacy},
+        metadata={"old": old_privacy, "new": body.call_privacy, "recording_cleanup": cleanup_state},
         request=request,
     )
     db.commit()
-    logger.info("[PRIVACY_SET] call_id=%s old=%s new=%s org=%s", call_id, old_privacy, body.call_privacy, user.organization_id)
-    return {"call_id": call_id, "call_privacy": call.call_privacy}
+    logger.info("[PRIVACY_SET] call_id=%s old=%s new=%s cleanup=%s org=%s", call_id, old_privacy, body.call_privacy, cleanup_state, user.organization_id)
+    return {
+        "call_id": call_id,
+        "call_privacy": call.call_privacy,
+        "recording_cleanup": cleanup_state,
+    }
 
 
 # ── delete recording (authorized, personal-call cleanup) ─────────────────────
@@ -638,46 +770,16 @@ async def delete_recording(
     ).first()
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
-    if not call.recording_available or not call.recording_url:
+    if not call.recording_url:
         raise HTTPException(status_code=404, detail="No recording to delete")
 
     storage_path = call.recording_url
+    if not await _delete_recording_object(storage_path):
+        # Keep the private pointer so deletion can be retried. Never claim
+        # success or erase evidence while the storage object may still exist.
+        raise HTTPException(status_code=502, detail="Recording deletion failed; retry required")
 
-    # Delete from Supabase Storage
-    if settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY:
-        import httpx
-        del_url = (
-            f"{settings.SUPABASE_URL}/storage/v1/object"
-            f"/{settings.SUPABASE_RECORDINGS_BUCKET}/{storage_path}"
-        )
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.delete(
-                    del_url,
-                    headers={"Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"},
-                )
-            if resp.status_code not in (200, 204):
-                logger.warning("[RECORDING_DELETE] storage delete returned %s for %s", resp.status_code, storage_path)
-        except Exception as exc:
-            logger.warning("[RECORDING_DELETE] storage delete failed: %s", exc)
-
-    # Clear recording and transcript fields — never expose deleted content
-    call.recording_url = None
-    call.recording_available = False
-    call.recording_status = RECORDING_STATUS_NOT_AVAILABLE
-    call.recording_size_bytes = None
-    call.recording_mime_type = None
-    call.recording_uploaded_at = None
-    call.recording_error = None
-    call.transcript_status = None
-    call.transcript_text = None
-    call.transcript_error = None
-    call.transcription_started_at = None
-    call.transcription_completed_at = None
-    call.summary_status = None
-    call.summary_text = None
-    call.summary_data = None
-    call.summary_error = None
+    _clear_recording_and_ai(call, clear_storage_path=True)
     call.updated_at = datetime.now(timezone.utc)
 
     audit.log(
@@ -687,11 +789,11 @@ async def delete_recording(
         actor=user,
         resource="call",
         resource_id=call_id,
-        metadata={"storage_path": storage_path, "call_privacy": call.call_privacy},
+        metadata={"call_privacy": call.call_privacy},
         request=request,
     )
     db.commit()
-    logger.info("[RECORDING_DELETED] call_id=%s storage_path=%s org=%s", call_id, storage_path, user.organization_id)
+    logger.info("[RECORDING_DELETED] call_id=%s org=%s", call_id, user.organization_id)
     from fastapi import Response as _Resp
     return _Resp(status_code=204)
 
@@ -740,6 +842,15 @@ async def update_call_note(
     ).first()
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
+
+    if (user.role or "").upper() == "EMPLOYEE":
+        emp = db.query(Employee).filter(
+            Employee.user_id == user.id,
+            Employee.organization_id == user.organization_id,
+            Employee.status == "active",
+        ).first()
+        if not emp or call.employee_id != emp.id:
+            raise HTTPException(status_code=404, detail="Call not found")
 
     if body.call_status is not None:
         call.call_status = body.call_status

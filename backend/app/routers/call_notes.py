@@ -7,7 +7,7 @@ from typing import Optional
 
 from ..auth import get_current_user, require_role
 from ..database import get_db
-from ..models import User, Employee
+from ..models import User, Employee, Call
 
 router = APIRouter(prefix="/call-notes", tags=["call-notes"])
 
@@ -41,6 +41,17 @@ def upsert_note(
         {"uid": user.id, "oid": user.organization_id},
     ).fetchone()
     employee_id = emp[0] if emp else None
+    if not employee_id:
+        raise HTTPException(status_code=403, detail="Active employee profile required")
+
+    if body.call_id:
+        call = db.query(Call).filter(
+            Call.id == body.call_id,
+            Call.organization_id == user.organization_id,
+            Call.employee_id == employee_id,
+        ).first()
+        if not call:
+            raise HTTPException(status_code=404, detail="Call not found")
 
     now = datetime.now(timezone.utc)
 

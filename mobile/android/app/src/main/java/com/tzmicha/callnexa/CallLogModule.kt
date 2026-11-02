@@ -224,7 +224,6 @@ class CallLogModule(private val reactContext: ReactApplicationContext) :
                 CallLog.Calls.DATE,
                 CallLog.Calls.DURATION,
                 CallLog.Calls.PHONE_ACCOUNT_ID,
-                "subscription_id",
             )
 
             val cursor: Cursor? = reactContext.contentResolver.query(
@@ -243,7 +242,6 @@ class CallLogModule(private val reactContext: ReactApplicationContext) :
                 val dateIdx  = it.getColumnIndex(CallLog.Calls.DATE)
                 val durIdx   = it.getColumnIndex(CallLog.Calls.DURATION)
                 val subIdx   = it.getColumnIndex(CallLog.Calls.PHONE_ACCOUNT_ID)
-                val subIdIdx = it.getColumnIndex("subscription_id")
 
                 while (it.moveToNext()) {
                     val map = Arguments.createMap()
@@ -253,8 +251,14 @@ class CallLogModule(private val reactContext: ReactApplicationContext) :
                     map.putInt   ("type",           if (typeIdx  >= 0) it.getInt(typeIdx)     else 0)
                     map.putString("date",           if (dateIdx  >= 0) it.getString(dateIdx)  else null)
                     map.putInt   ("duration",       if (durIdx   >= 0) it.getInt(durIdx)      else 0)
-                    map.putString("phoneAccountId", if (subIdx   >= 0) it.getString(subIdx)   else null)
-                    map.putString("subscriptionId", if (subIdIdx >= 0) it.getString(subIdIdx) else null)
+                    val phoneAccountId = if (subIdx >= 0) it.getString(subIdx) else null
+                    map.putString("phoneAccountId", phoneAccountId)
+                    // PHONE_ACCOUNT_ID is OEM-defined. Expose it as a subscription
+                    // ID only when it has Android's normal numeric subscription shape.
+                    map.putString(
+                        "subscriptionId",
+                        phoneAccountId?.takeIf { value -> value.all(Char::isDigit) },
+                    )
                     records.pushMap(map)
                 }
             }

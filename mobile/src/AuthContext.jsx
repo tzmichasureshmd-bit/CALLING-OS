@@ -3,7 +3,7 @@ import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   api, saveSession, clearSession, getStoredUser,
-  getDeviceId, saveDeviceId, getRefreshToken, updateAccessToken,
+  getDeviceId, saveDeviceId, getRefreshToken, updateAccessToken, updateRefreshToken,
 } from "./api";
 import { getDeviceInfo, requestAllPermissions, checkPermissions, readSimInfo } from "./nativeModules";
 import { syncSimInventory } from "./simInventoryService";
@@ -25,23 +25,27 @@ async function ensureInstallDate() {
 // ── First-time and reconciliation sync ───────────────────────────────────────
 // Both delegate to runSyncCycle in syncService — single sync path, no duplication.
 export async function doFirstFullSync(deviceId) {
-  if (!deviceId) return { accepted: 0, total: 0 };
+  if (!deviceId) return { accepted: 0, duplicates: 0, failed: 1, total: 0, error: "No device registered" };
   try {
     console.log("[SYNC] doFirstFullSync: delegating to runSyncCycle");
-    await runSyncCycle(deviceId, "reconcile");
-    await AsyncStorage.setItem(FIRST_SYNC_KEY, "1");
-    return { accepted: 0, total: 0 }; // counts tracked inside syncService
+    const result = await runSyncCycle(deviceId, "reconcile");
+    if ((result?.failed || 0) === 0) {
+      await AsyncStorage.setItem(FIRST_SYNC_KEY, "1");
+    }
+    return result;
   } catch (e) {
     console.warn("[SYNC] doFirstFullSync error:", e?.message);
-    return { accepted: 0, total: 0, error: e?.message };
+    return { accepted: 0, duplicates: 0, failed: 1, total: 0, error: e?.message };
   }
 }
 
 async function doStartReconciliation(deviceId) {
   try {
     console.log("[SYNC] doStartReconciliation: delegating to runSyncCycle");
-    await runSyncCycle(deviceId, "reconcile");
-  } catch { /* silent */ }
+    return await runSyncCycle(deviceId, "reconcile");
+  } catch (e) {
+    return { accepted: 0, duplicates: 0, failed: 1, total: 0, error: e?.message };
+  }
 }
 
 // ── Live device heartbeat ─────────────────────────────────────────────────────
@@ -95,7 +99,7 @@ export async function sendHeartbeat(deviceId) {
       sims:                   simItems,
       network_type:           networkType,
       background_sync_status: "active",
-      app_version:            "1.0.0",
+      app_version:            "1.1.0",
     });
   } catch {}
 }
@@ -179,7 +183,7 @@ export function AuthProvider({ children }) {
       await ensureInstallDate(); // save install date on every app open (first time only)
       if (u) {
         setUser(u);
-        const d = await getDeviceId();
+        let d = await getDeviceId();
         setDeviceId(d);
 
         // Auto-refresh token on app start
@@ -189,14 +193,18 @@ export function AuthProvider({ children }) {
             const newTokens = await api.refresh(refresh);
             await updateAccessToken(newTokens.access_token);
             if (newTokens.refresh_token) {
-              // Update refresh token in secure storage
-              const { default: SecureStore } = await import("expo-secure-store").catch(() => ({ default: null }));
-              if (SecureStore) {
-                await SecureStore.setItemAsync("callos_refresh_token", newTokens.refresh_token);
-              }
+              await updateRefreshToken(newTokens.refresh_token);
             }
           }
-        } catch { /* token refresh failed — user stays logged in until actual 401 */ }
+        } catch { /* runtime request refresh will retry; login is required if it also fails */ }
+
+        // Re-upsert on every authenticated startup. This repairs a stale cached
+        // backend device ID while preserving the stable hardware identifier.
+        const ensuredDeviceId = await ensureDevice(u);
+        if (ensuredDeviceId) {
+          d = ensuredDeviceId;
+          setDeviceId(d);
+        }
 
         if (d) {
           sendHeartbeat(d).catch(() => {});
@@ -225,7 +233,7 @@ export function AuthProvider({ children }) {
     setUser(userData);
 
     if (Platform.OS === "android") {
-      requestAllPermissions().catch(() => {});
+      await requestAllPermissions().catch(() => {});
     }
 
     // Register device — MUST succeed before any sync
@@ -266,9 +274,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const syncCalls = useCallback(async () => {
-    if (!deviceId) return { accepted: 0, error: "No device registered" };
-    await runSyncCycle(deviceId, "manual");
-    return { accepted: 0 };
+    if (!deviceId) return { accepted: 0, duplicates: 0, failed: 1, total: 0, error: "No device registered" };
+    return runSyncCycle(deviceId, "manual");
   }, [deviceId]);
 
   return (

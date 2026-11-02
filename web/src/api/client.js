@@ -15,6 +15,24 @@ export function setAccessToken(token) {
   accessToken = token;
 }
 
+function updateSavedOrganizationTokens(newAccessToken, newRefreshToken) {
+  try {
+    const user = JSON.parse(localStorage.getItem("callos_user") || "null");
+    const organizations = JSON.parse(localStorage.getItem("callos_orgs") || "[]");
+    if (!user?.organization_id || !Array.isArray(organizations)) return;
+    const updated = organizations.map((organization) =>
+      organization.id === user.organization_id
+        ? {
+            ...organization,
+            access_token: newAccessToken,
+            refresh_token: newRefreshToken || organization.refresh_token || "",
+          }
+        : organization
+    );
+    localStorage.setItem("callos_orgs", JSON.stringify(updated));
+  } catch { /* malformed optional account cache must not break auth */ }
+}
+
 client.interceptors.request.use((config) => {
   if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`;
   return config;
@@ -41,7 +59,9 @@ client.interceptors.response.use(
               const newToken = res.data.access_token;
               setAccessToken(newToken);
               localStorage.setItem("callos_token", newToken);
+              const newRefreshToken = res.data.refresh_token || refreshToken;
               if (res.data.refresh_token) localStorage.setItem("callos_refresh_token", res.data.refresh_token);
+              updateSavedOrganizationTokens(newToken, newRefreshToken);
               return newToken;
             })
             .finally(() => { _refreshPromise = null; });
@@ -55,6 +75,7 @@ client.interceptors.response.use(
         localStorage.removeItem("callos_token");
         localStorage.removeItem("callos_refresh_token");
         localStorage.removeItem("callos_user");
+        localStorage.removeItem("callos_orgs");
         window.location.href = "/login";
         return Promise.reject(error);
       }

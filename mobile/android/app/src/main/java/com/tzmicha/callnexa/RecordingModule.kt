@@ -52,6 +52,10 @@ class RecordingModule(private val reactContext: ReactApplicationContext) :
         // Minimum file size to be considered a real recording (not a 0-byte placeholder)
         private const val MIN_FILE_BYTES = 1024L
 
+        // Privacy-first threshold. A broad time-window match alone scores 1 and
+        // must never be considered enough to upload a customer's audio.
+        private const val MIN_CONFIDENCE_SCORE = 3
+
         // Maximum number of recordings returned per query (prevents runaway scans)
         private const val MAX_RESULTS = 50
 
@@ -404,7 +408,7 @@ class RecordingModule(private val reactContext: ReactApplicationContext) :
                     if (ratio in 0.8..1.2) score += 1   // within 20%
                 }
 
-                if (score <= 0) null else Pair(score, rec)
+                if (score < MIN_CONFIDENCE_SCORE) null else Pair(score, rec)
             }.sortedByDescending { it.first }
 
             val recordingsArray = Arguments.createArray()

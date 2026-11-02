@@ -13,6 +13,12 @@ function relativeDate(iso) {
   return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
+function parseSummaryData(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
 function normalizeCall(c) {
   return {
     id: c.id,
@@ -30,9 +36,7 @@ function normalizeCall(c) {
     transcriptText:   c.transcript_text   || null,
     summaryStatus: c.summary_status || null,
     summaryText:   c.summary_text   || null,
-    summaryData:   c.summary_data
-      ? (() => { try { return JSON.parse(c.summary_data); } catch { return null; } })()
-      : null,
+    summaryData: parseSummaryData(c.summary_data),
     callStatus: c.call_status || null,
     notes:      c.notes       || null,
     callPrivacy: c.call_privacy || "unclassified",
@@ -71,8 +75,9 @@ function normalizeDevice(d) {
   const callLog    = perms.callLog    ?? perms.call_log    ?? false;
   const phoneState = perms.phoneState ?? perms.phone_state ?? false;
   const contacts   = perms.contacts   ?? false;
-  const recording  = perms.recording  ?? false;
-  const allOk = callLog && phoneState && contacts && recording;
+  const storage     = perms.storage ?? perms.recording ?? false;
+  const recording   = storage;
+  const allOk = callLog && phoneState && contacts && storage;
   const status = !d.is_online ? "offline" : !allOk ? "warning" : "healthy";
   const lastSeen = d.last_seen_at
     ? (() => {
@@ -95,6 +100,7 @@ function normalizeDevice(d) {
       callLog:    callLog,
       phoneState: phoneState,
       contacts:   contacts,
+      storage:    storage,
       recording:  recording,
     },
     sim: "SIM 1",
@@ -241,9 +247,22 @@ export const dataSource = {
     return { items: (res.items || []).map(normalizeEmployee), total: res.total || 0 };
   },
 
-  getCalls: async (params) => {
-    const res = await api.callsApi.list(params);
-    return { items: (res.items || []).map(normalizeCall), total: res.total || 0 };
+  getCalls: async (params = {}) => {
+    const { all_pages: allPages = false, ...apiParams } = params;
+    const first = await api.callsApi.list({ ...apiParams, page: 1 });
+    let rows = first.items || [];
+    const totalPages = first.total_pages || 1;
+
+    if (allPages && totalPages > 1) {
+      for (let page = 2; page <= totalPages; page += 1) {
+        const next = await api.callsApi.list({ ...apiParams, page });
+        rows = rows.concat(next.items || []);
+      }
+    }
+
+    // Defensive ID dedup protects the UI from repeated pages/events.
+    const unique = Array.from(new Map(rows.map((call) => [call.id, call])).values());
+    return { items: unique.map(normalizeCall), total: first.total || unique.length };
   },
 
   getOpportunities: async () => {
@@ -302,7 +321,7 @@ export const dataSource = {
         // summary
         summaryStatus:           c.summary_status || null,
         summaryText:             c.summary_text || null,
-        summaryData:             c.summary_data ? (() => { try { return JSON.parse(c.summary_data); } catch { return null; } })() : null,
+        summaryData:             parseSummaryData(c.summary_data),
       })),
       total: res.total || 0,
       page: res.page || 1,

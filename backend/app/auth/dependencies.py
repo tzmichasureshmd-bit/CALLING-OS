@@ -37,6 +37,16 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id, User.status == "active").first()
     if not user:
         raise exc
+    if (user.role or "").upper() != "SUPER_ADMIN":
+        organization = db.query(Organization).filter(
+            Organization.id == user.organization_id,
+            Organization.status == "active",
+        ).first()
+        if not organization:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Organization is not active",
+            )
     return user
 
 

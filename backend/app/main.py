@@ -1,5 +1,7 @@
 import logging
+import re
 import time
+import uuid
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +26,7 @@ logger = logging.getLogger("callnexa")
 # ── Rate limiting ──────────────────────────────────────────────────────────────
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.middleware import SlowAPIMiddleware
     from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
     limiter = Limiter(key_func=get_remote_address, default_limits=["300/minute"])
@@ -45,12 +48,12 @@ app = FastAPI(
 if _rate_limiting_available:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
 
 # ── CORS ───────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
-    allow_origin_regex=r"https://.*\.tzmicha\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -72,32 +75,34 @@ async def security_headers(request: Request, call_next):
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.time()
+    supplied = request.headers.get("x-correlation-id", "")
+    correlation_id = supplied if re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", supplied) else uuid.uuid4().hex
+    request.state.correlation_id = correlation_id
     response = await call_next(request)
     ms = int((time.time() - start) * 1000)
-    logger.info("%s %s → %s (%dms)", request.method, request.url.path, response.status_code, ms)
+    response.headers["X-Correlation-ID"] = correlation_id
+    logger.info(
+        "request_id=%s method=%s path=%s status=%s duration_ms=%d",
+        correlation_id, request.method, request.url.path, response.status_code, ms,
+    )
     return response
 
 
 # ── Global error handlers ──────────────────────────────────────────────────────
 @app.exception_handler(IntegrityError)
 async def integrity_error_handler(request: Request, exc: IntegrityError):
-    origin = request.headers.get("origin", "*")
     return JSONResponse(
         status_code=409,
         content={"error_code": "CONFLICT", "message": "A record with this data already exists."},
-        headers={"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true"},
     )
 
 
 @app.exception_handler(Exception)
 async def generic_error_handler(request: Request, exc: Exception):
     logger.exception("Unhandled error on %s %s: %s", request.method, request.url.path, exc)
-    origin = request.headers.get("origin", "*")
-    # Never expose internal details to clients
     return JSONResponse(
         status_code=500,
         content={"error_code": "SERVER_ERROR", "message": "An internal error occurred."},
-        headers={"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true"},
     )
 
 
@@ -105,8 +110,11 @@ async def generic_error_handler(request: Request, exc: Exception):
 @app.on_event("startup")
 async def startup():
     logger.info("CallNexa API starting up...")
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables ready.")
+    if settings.APP_ENV == "development":
+        Base.metadata.create_all(bind=engine)
+        logger.info("Development database tables checked.")
+    else:
+        logger.info("Production schema is managed by migration_runner.py.")
 
     from .routers.devices import start_offline_watcher
     start_offline_watcher()
@@ -121,30 +129,35 @@ async def startup():
         from datetime import timedelta
         from .database import SessionLocal as _SL
         from .models import Call as _Call
-        _cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
         _db = _SL()
         try:
+            # FastAPI BackgroundTasks do not survive a process restart. Every
+            # processing row observed during startup is therefore orphaned,
+            # regardless of its timestamp.
             _stuck = (
                 _db.query(_Call)
-                .filter(
-                    _Call.transcript_status == "processing",
-                    _Call.transcription_started_at < _cutoff,
-                )
+                .filter(_Call.transcript_status == "processing")
                 .all()
             )
-            if _stuck:
-                for _c in _stuck:
-                    _c.transcript_status = "failed"
-                    _c.transcript_error = (
-                        "Transcription interrupted or timed out. Please retry."
-                    )
+            _stuck_summaries = (
+                _db.query(_Call)
+                .filter(_Call.summary_status == "processing")
+                .all()
+            )
+            for _c in _stuck:
+                _c.transcript_status = "failed"
+                _c.transcript_error = "Transcription interrupted by a server restart. Please retry."
+            for _c in _stuck_summaries:
+                _c.summary_status = "failed"
+                _c.summary_error = "Summary interrupted by a server restart. Please retry."
+            if _stuck or _stuck_summaries:
                 _db.commit()
                 logger.warning(
-                    "Startup recovery: reset %d stuck transcription(s) to 'failed'.",
-                    len(_stuck),
+                    "Startup recovery: reset %d transcription(s) and %d summary job(s).",
+                    len(_stuck), len(_stuck_summaries),
                 )
             else:
-                logger.info("Startup recovery: no stuck transcriptions found.")
+                logger.info("Startup recovery: no interrupted AI jobs found.")
         finally:
             _db.close()
     except Exception as _exc:
@@ -170,18 +183,21 @@ def health():
 
 @app.get("/health/db", tags=["health"])
 def health_db():
+    db = None
     try:
         from .database import SessionLocal
         import sqlalchemy
         db = SessionLocal()
         db.execute(sqlalchemy.text("SELECT 1"))
-        db.close()
         return {"status": "healthy", "database": "connected"}
-    except Exception as e:
+    except Exception:
         return JSONResponse(
             status_code=503,
             content={"status": "unhealthy", "database": "connection failed"},
         )
+    finally:
+        if db is not None:
+            db.close()
 
 
 @app.get("/health/storage", tags=["health"])
@@ -189,7 +205,6 @@ def health_storage():
     configured = bool(settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY)
     return {
         "status": "configured" if configured else "not_configured",
-        "bucket": settings.SUPABASE_RECORDINGS_BUCKET if configured else None,
     }
 
 

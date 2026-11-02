@@ -7,6 +7,9 @@ __pycache__/
 .Python
 *.egg-info/
 dist/
+dist-check/
+.audit-dist/
+.ci-dist/
 dist-ssr/
 build/
 .expo/

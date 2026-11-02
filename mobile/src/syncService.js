@@ -27,7 +27,6 @@ import {
   notifyRecordingUploaded,
 } from "./notificationManager";
 import { checkPermissions, startCallLogObserver, stopCallLogObserver } from "./nativeModules";
-import { startCallRecording, stopCallRecording, setupRecordingEventListener } from "./callRecordingService";
 import { api, BASE_URL } from "./api";
 
 const BG_TASK_NAME   = "CALLNEXA_BG_SYNC";
@@ -68,7 +67,9 @@ async function getExcludedNumbers() {
     await AsyncStorage.setItem(EXCLUDED_CACHE_KEY, JSON.stringify({ numbers, ts: Date.now() }));
     return numbers;
   } catch {
-    return [];
+    // Privacy policy must fail closed. Do not treat an unavailable exclusion
+    // service as an empty exclusion list.
+    throw new Error("Excluded-number policy could not be verified");
   }
 }
 
@@ -103,10 +104,13 @@ export async function getInstallCutoffMs() {
   return Date.now();
 }
 
-// ── Session-only dedup set ────────────────────────────────────────────────────
-// Tracks client_event_ids confirmed by the backend this session.
-// NOT persisted — backend is the source of truth across restarts.
-const _sessionConfirmed = new Set();
+const RECORDING_RECHECK_MS = 5 * 60 * 1000;
+const LAST_SYNC_KEY = "callos_last_sync_ts";
+
+// Session cache of backend-confirmed metadata. Backend uniqueness remains the
+// cross-restart authority; this map also enables bounded privacy rechecks for
+// recordings after a manager classifies a call as Business.
+const _sessionConfirmed = new Map();
 
 // ── Battery ───────────────────────────────────────────────────────────────────
 async function getBatteryLevel() {
@@ -125,7 +129,8 @@ async function getBatteryLevel() {
  * Any other response is treated as a failure — no local save, no false sync mark.
  */
 async function directSync(deviceId, calls) {
-  if (!calls.length) return;
+  const totals = { accepted: 0, duplicates: 0, failed: 0, total: calls.length };
+  if (!calls.length) return totals;
 
   for (let i = 0; i < calls.length; i += BATCH_SIZE) {
     const batch = calls.slice(i, i + BATCH_SIZE);
@@ -171,6 +176,7 @@ async function directSync(deviceId, calls) {
       const errStatus = isOffline ? STATUS.SYNC_OFFLINE : STATUS.SYNC_FAILED;
       const errMsg    = isOffline ? "No internet connection — will retry when online" : msg;
       batch.forEach(c => updateSyncStatus(c.client_event_id, errStatus, { last_error: errMsg }));
+      totals.failed += batch.length;
 
       if (i + BATCH_SIZE < calls.length) await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
       continue;
@@ -182,19 +188,30 @@ async function directSync(deviceId, calls) {
       if (r.status === "accepted") {
         // Backend confirmed INSERT
         console.log(`[BACKEND_INSERT_CONFIRMED] client_event_id=${r.client_event_id} call_id=${r.call_id} ts=${Date.now()}`);
-        _sessionConfirmed.add(r.client_event_id);
+        _sessionConfirmed.set(r.client_event_id, {
+          call_id: r.call_id,
+          recording_status: r.recording_status,
+          last_recording_check_at: Date.now(),
+        });
+        totals.accepted += 1;
         updateSyncStatus(r.client_event_id, STATUS.SYNCED, { call_id: r.call_id });
-        confirmed.push({ ...batch.find(c => c.client_event_id === r.client_event_id), call_id: r.call_id });
+        confirmed.push({ ...batch.find(c => c.client_event_id === r.client_event_id), call_id: r.call_id, _backend_recording_status: r.recording_status });
       } else if (r.status === "duplicate") {
         // Backend confirmed already persisted
         console.log(`[BACKEND_DUPLICATE_CONFIRMED] client_event_id=${r.client_event_id} call_id=${r.call_id} ts=${Date.now()}`);
-        _sessionConfirmed.add(r.client_event_id);
+        _sessionConfirmed.set(r.client_event_id, {
+          call_id: r.call_id,
+          recording_status: r.recording_status,
+          last_recording_check_at: Date.now(),
+        });
+        totals.duplicates += 1;
         updateSyncStatus(r.client_event_id, STATUS.SYNCED, { call_id: r.call_id });
-        confirmed.push({ ...batch.find(c => c.client_event_id === r.client_event_id), call_id: r.call_id });
+        confirmed.push({ ...batch.find(c => c.client_event_id === r.client_event_id), call_id: r.call_id, _backend_recording_status: r.recording_status });
       } else {
         // status === "failed" or unexpected — do NOT mark synced
         console.warn(`[SYNC_FAILED] client_event_id=${r.client_event_id} status=${r.status} error=${r.error || "none"} ts=${Date.now()}`);
         updateSyncStatus(r.client_event_id, STATUS.SYNC_FAILED, { last_error: r.error || "backend rejected" });
+        totals.failed += 1;
       }
     }
 
@@ -203,6 +220,7 @@ async function directSync(deviceId, calls) {
     batch.filter(c => !resultIds.has(c.client_event_id)).forEach(c => {
       console.warn(`[SYNC_FAILED] no result for client_event_id=${c.client_event_id} ts=${Date.now()}`);
       updateSyncStatus(c.client_event_id, STATUS.SYNC_FAILED, { last_error: "no result in backend response" });
+      totals.failed += 1;
     });
 
     // Notify and kick off recording check for confirmed calls
@@ -213,6 +231,7 @@ async function directSync(deviceId, calls) {
 
     if (i + BATCH_SIZE < calls.length) await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
   }
+  return totals;
 }
 
 // ── Recording upload (with one auto-retry) ───────────────────────────────────
@@ -224,8 +243,16 @@ async function directSync(deviceId, calls) {
  *
  * Call-log sync is NEVER blocked by these checks — only recording upload is.
  */
-async function _checkAndUploadRecording(call, isRetry = false) {
+async function _checkAndUploadRecording(call, attempt = 0) {
   if (!call.call_id) return;
+
+  // Step 0: backend already has this recording — skip discovery and upload entirely.
+  // This fires on restart re-syncs, where calls return as "duplicate" with their
+  // current backend recording_status. Prevents wasted re-uploads and mobile data.
+  if (call._backend_recording_status === "uploaded") {
+    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_UPLOADED, { call_id: call.call_id });
+    return;
+  }
 
   // Step 0a: recording must be enabled by the user
   const recEnabled = await isRecordingEnabled();
@@ -237,8 +264,37 @@ async function _checkAndUploadRecording(call, isRetry = false) {
     return;
   }
 
-  // Step 0b: excluded-number check
-  const excluded = await isExcludedNumber(call.phone_number || call._raw_number);
+  // Step 0b: authoritative classification check before recording discovery or
+  // file access. Backend remains the source of truth across dashboard changes.
+  let serverCall;
+  try {
+    serverCall = await api.getCall(call.call_id);
+  } catch (e) {
+    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_FAILED, {
+      recording_error: "Could not verify recording privacy eligibility.",
+    });
+    console.warn(`[RECORDING_ELIGIBILITY_CHECK_FAILED] client_event_id=${call.client_event_id} error=${e?.message || "unknown"} ts=${Date.now()}`);
+    return;
+  }
+  if (serverCall?.call_privacy !== "business") {
+    console.log(`[RECORDING_SKIPPED] client_event_id=${call.client_event_id} reason=not_business ts=${Date.now()}`);
+    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_NOT_AVAILABLE, {
+      recording_error: "Classify this call as Business before recording upload.",
+    });
+    return;
+  }
+
+  // Step 0c: excluded-number check (fail closed when policy cannot be loaded)
+  let excluded;
+  try {
+    excluded = await isExcludedNumber(call.phone_number || call._raw_number);
+  } catch (e) {
+    console.warn(`[RECORDING_SKIPPED] client_event_id=${call.client_event_id} reason=exclusion_policy_unavailable ts=${Date.now()}`);
+    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_FAILED, {
+      recording_error: e?.message || "Could not verify excluded-number policy.",
+    });
+    return;
+  }
   if (excluded) {
     console.log(`[RECORDING_SKIPPED] client_event_id=${call.client_event_id} reason=excluded_number ts=${Date.now()}`);
     updateRecordingStatus(call.client_event_id, STATUS.RECORDING_NOT_AVAILABLE, {
@@ -283,16 +339,22 @@ async function _checkAndUploadRecording(call, isRetry = false) {
 
   let uploadResult;
   try {
-    uploadResult = await uploadRecording(call.call_id, found.path, token);
+    uploadResult = await uploadRecording(call.call_id, found.path, token, found.mimeType);
   } catch (e) {
     const errMsg = e?.message || "unknown upload error";
-    // HTTP 403 = privacy/excluded block from backend — do not retry
+    // HTTP 403 = privacy/excluded block from backend — never retry these
     const isPrivacyBlock = errMsg.includes("403") || errMsg.includes("personal") ||
                            errMsg.includes("unclassified") || errMsg.includes("excluded");
-    console.warn(`[RECORDING_UPLOAD_FAILED] client_event_id=${call.client_event_id} call_id=${call.call_id} error=${errMsg} retry=${isRetry} privacy_block=${isPrivacyBlock} ts=${Date.now()}`);
-    if (!isRetry && !isPrivacyBlock) {
-      console.log(`[RECORDING_UPLOAD_RETRY_SCHEDULED] client_event_id=${call.client_event_id} delay=60s ts=${Date.now()}`);
-      setTimeout(() => _checkAndUploadRecording(call, true).catch(() => {}), 60_000);
+    // Bounded retries with backoff: 60s, 5min, 15min. After the 3rd failure the
+    // status is RECORDING_FAILED — a later app restart re-triggers discovery via
+    // the duplicate re-sync path, so the upload is never permanently lost.
+    const RETRY_DELAYS_MS = [60_000, 300_000, 900_000];
+    const canRetry = !isPrivacyBlock && attempt < RETRY_DELAYS_MS.length;
+    console.warn(`[RECORDING_UPLOAD_FAILED] client_event_id=${call.client_event_id} call_id=${call.call_id} error=${errMsg} attempt=${attempt} will_retry=${canRetry} privacy_block=${isPrivacyBlock} ts=${Date.now()}`);
+    if (canRetry) {
+      const delayMs = RETRY_DELAYS_MS[attempt];
+      console.log(`[RECORDING_UPLOAD_RETRY_SCHEDULED] client_event_id=${call.client_event_id} attempt=${attempt + 1} delay=${delayMs}ms ts=${Date.now()}`);
+      setTimeout(() => _checkAndUploadRecording(call, attempt + 1).catch(() => {}), delayMs);
     } else {
       updateRecordingStatus(call.client_event_id, STATUS.RECORDING_FAILED, {
         recording_error: isPrivacyBlock
@@ -305,6 +367,8 @@ async function _checkAndUploadRecording(call, isRetry = false) {
 
   // Step 5: confirmed
   console.log(`[RECORDING_UPLOAD_CONFIRMED] client_event_id=${call.client_event_id} call_id=${call.call_id} ts=${Date.now()}`);
+  const confirmedState = _sessionConfirmed.get(call.client_event_id);
+  if (confirmedState) confirmedState.recording_status = "uploaded";
   updateRecordingStatus(call.client_event_id, STATUS.RECORDING_UPLOADED, {
     call_id:               call.call_id,
     recording_path:        found.path,
@@ -322,19 +386,15 @@ async function _checkAndUploadRecording(call, isRetry = false) {
 }
 
 // ── Main sync cycle ───────────────────────────────────────────────────────────
-export async function runSyncCycle(deviceId, mode) {
-  if (!deviceId) return;
+async function _runSyncCycle(deviceId, mode) {
+  if (!deviceId) {
+    return { accepted: 0, duplicates: 0, failed: 1, total: 0, error: "No device registered" };
+  }
   try {
-    let candidates;
-    if (mode === "instant" || mode === "foreground") {
-      candidates = await getRecentCalls();
-    } else {
-      candidates = await getCallsLastDays(7);
-    }
+    const candidates = (mode === "instant" || mode === "foreground")
+      ? await getRecentCalls()
+      : await getCallsLastDays(7);
 
-    // ── Install-time cutoff ───────────────────────────────────────────────────
-    // Never sync calls that existed before this app was installed.
-    // Prevents importing the device's full call history on first launch.
     const cutoffMs = await getInstallCutoffMs();
     const afterCutoff = candidates.filter(c => c._start_ms >= cutoffMs);
     const filteredOut = candidates.length - afterCutoff.length;
@@ -342,13 +402,29 @@ export async function runSyncCycle(deviceId, mode) {
       console.log(`[CALL_SYNC_CUTOFF] mode=${mode} cutoff=${new Date(cutoffMs).toISOString()} filtered_out=${filteredOut} eligible=${afterCutoff.length} ts=${Date.now()}`);
     }
 
-    // Apply SIM filter
     const simFiltered = await applySimFilter(afterCutoff);
+    const now = Date.now();
 
-    // Filter out calls already confirmed this session
+    // Calls already acknowledged do not need metadata re-upload. They may need
+    // a bounded eligibility recheck after a dashboard Business classification.
+    for (const call of simFiltered) {
+      const state = _sessionConfirmed.get(call.client_event_id);
+      if (
+        state
+        && state.recording_status !== "uploaded"
+        && now - (state.last_recording_check_at || 0) >= RECORDING_RECHECK_MS
+      ) {
+        state.last_recording_check_at = now;
+        _checkAndUploadRecording({
+          ...call,
+          call_id: state.call_id,
+          _backend_recording_status: state.recording_status,
+        }).catch(() => {});
+      }
+    }
+
     const newCalls = simFiltered.filter(c => !_sessionConfirmed.has(c.client_event_id));
-
-    if (!newCalls.length) return;
+    if (!newCalls.length) return { accepted: 0, duplicates: 0, failed: 0, total: 0 };
 
     console.log(`[CALL_SYNC_ELIGIBLE] mode=${mode} new_calls=${newCalls.length} ts=${Date.now()}`);
     newCalls.forEach(c => {
@@ -359,13 +435,53 @@ export async function runSyncCycle(deviceId, mode) {
         duration_seconds: c.duration_seconds,
         start_time:       c.start_time,
       });
-      // Auto-start recording if enabled
-      startCallRecording(c.phone_number, c.client_event_id).catch(() => {});
     });
 
-    await directSync(deviceId, newCalls);
+    return await directSync(deviceId, newCalls);
   } catch (e) {
     console.warn(`[SYNC_CYCLE_ERROR] mode=${mode} error=${e?.message} ts=${Date.now()}`);
+    return { accepted: 0, duplicates: 0, failed: 1, total: 0, error: e?.message || "Sync failed" };
+  }
+}
+
+// Serialize every trigger (observer, poll, auth startup, background and manual).
+// Concurrent requests collapse into one follow-up reconciliation, preventing an
+// unbounded queue while still catching a call that arrived during an active scan.
+let _syncInFlight = null;
+let _followUpRequested = false;
+
+export async function runSyncCycle(deviceId, mode = "reconcile") {
+  if (_syncInFlight) {
+    _followUpRequested = true;
+    return _syncInFlight;
+  }
+
+  const promise = (async () => {
+    const total = { accepted: 0, duplicates: 0, failed: 0, total: 0 };
+    let nextMode = mode;
+    do {
+      _followUpRequested = false;
+      const result = await _runSyncCycle(deviceId, nextMode);
+      total.accepted += result.accepted || 0;
+      total.duplicates += result.duplicates || 0;
+      total.failed += result.failed || 0;
+      total.total += result.total || 0;
+      if (result.error) total.error = result.error;
+      nextMode = "reconcile";
+    } while (_followUpRequested);
+
+    total.completed_at = Date.now();
+    if (total.failed === 0) {
+      await AsyncStorage.setItem(LAST_SYNC_KEY, String(total.completed_at)).catch(() => {});
+    }
+    return total;
+  })();
+
+  _syncInFlight = promise;
+  try {
+    return await promise;
+  } finally {
+    if (_syncInFlight === promise) _syncInFlight = null;
   }
 }
 
@@ -379,12 +495,12 @@ TaskManager.defineTask(BG_TASK_NAME, async () => {
       const level = await getBatteryLevel();
       const res = await api.heartbeat(deviceId, {
         is_online: true, battery_level: level,
-        permissions_status: { callLog: perms.callLog ?? false, phoneState: perms.phoneState ?? false, contacts: perms.contacts ?? false, recording: perms.recording ?? false },
+        permissions_status: { callLog: perms.callLog ?? false, phoneState: perms.phoneState ?? false, contacts: perms.contacts ?? false, storage: perms.storage ?? false, recording: perms.storage ?? false },
         background_sync_status: "active",
       });
       if (res?.sync_now) {
         const { doFirstFullSync } = require("./AuthContext");
-        doFirstFullSync(deviceId).catch(() => {});
+        await doFirstFullSync(deviceId);
         return BackgroundFetch.BackgroundFetchResult.NewData;
       }
     } catch {}
@@ -436,8 +552,8 @@ export function useAutoSync() {
         const [perms, battery] = await Promise.all([checkPermissions(), getBatteryLevel()]);
         const res = await api.heartbeat(dId, {
           is_online: true, battery_level: battery,
-          permissions_status: { callLog: perms.callLog ?? false, phoneState: perms.phoneState ?? false, contacts: perms.contacts ?? false, recording: perms.recording ?? false },
-          background_sync_status: "active", app_version: "1.0.0",
+          permissions_status: { callLog: perms.callLog ?? false, phoneState: perms.phoneState ?? false, contacts: perms.contacts ?? false, storage: perms.storage ?? false, recording: perms.storage ?? false },
+          background_sync_status: "active", app_version: "1.1.0",
         });
         if (res?.sync_now) {
           const { doFirstFullSync } = require("./AuthContext");

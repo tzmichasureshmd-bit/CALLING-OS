@@ -112,65 +112,40 @@ export default function Profile() {
 
   async function handleSync() {
     if (!deviceId) {
-      Alert.alert('Not Ready', 'Device ID is null.\nSign out and sign back in to re-register.');
+      Alert.alert("Not Ready", "This device is not registered. Sign out and sign back in.");
       return;
     }
-    setSyncing(true); setSyncResult(null);
+    setSyncing(true);
+    setSyncResult(null);
     try {
-      const { getRealCallLog, getSelectedSimIdentity } = require('../../src/callLogService');
-      const { api: _api } = require('../../src/api');
-      const BATCH = 50;
-      let allCalls = await getRealCallLog(7);
-      const { subscriptionId: selSubId, slot: selSlot } = await getSelectedSimIdentity();
-      if (selSubId !== null || selSlot !== null) {
-        allCalls = allCalls.filter((c) => {
-          if (selSubId && c.subscription_id) return c.subscription_id === selSubId;
-          if (selSlot !== null && c.sim_slot !== null) return c.sim_slot === selSlot + 1;
-          return true;
-        });
-      }
-      if (!allCalls.length) {
-        setSyncResult({ accepted: 0, duplicates: 0, failed: 0, total: 0 });
-        Alert.alert('No Calls', 'No calls found in last 7 days.');
+      const result = await syncCalls();
+      setSyncResult(result);
+
+      if ((result.failed || 0) > 0) {
+        Alert.alert(
+          "Sync Incomplete",
+          `${result.accepted || 0} new, ${result.duplicates || 0} already synced, ${result.failed} failed. Pending calls remain recoverable and will retry.`,
+        );
         return;
       }
-      let totalAccepted = 0, totalDup = 0, totalFailed = 0;
-      const confirmed = [];
-      let lastError = null;
-      for (let i = 0; i < allCalls.length; i += BATCH) {
-        const batch = allCalls.slice(i, i + BATCH);
-        try {
-          const res = await _api.syncCalls(deviceId, batch);
-          totalAccepted += res.accepted || 0;
-          totalDup      += res.duplicates || 0;
-          totalFailed   += res.failed || 0;
-          if ((res.accepted || 0) + (res.duplicates || 0) > 0) confirmed.push(...batch);
-        } catch (e) { lastError = e.message; }
-        if (i + BATCH < allCalls.length) await new Promise(r => setTimeout(r, 500));
-      }
-      const result = { accepted: totalAccepted, duplicates: totalDup, failed: totalFailed, total: allCalls.length };
-      setSyncResult(result);
-      const now = Date.now();
-      await AsyncStorage.setItem(LAST_SYNC_KEY, String(now));
-      setLastSync(new Date(now).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' }));
-      if (lastError && totalAccepted === 0 && totalDup === 0) {
-        // Classify the error so the user sees a meaningful message
-        const isTimeout  = lastError.includes('timed out') || lastError.includes('AbortError');
-        const isAuth     = lastError.includes('401') || lastError.includes('403') || lastError.includes('Unauthorized');
-        const isOffline  = lastError.includes('Network request failed') || lastError.includes('network');
-        const isDevice   = lastError.includes('Device not found');
-        let category = 'Sync failed';
-        if (isTimeout)  category = 'Sync timed out — server took too long';
-        else if (isAuth)     category = 'Authentication error — please sign out and back in';
-        else if (isOffline)  category = 'No internet connection';
-        else if (isDevice)   category = 'Device not registered — sign out and back in';
-        Alert.alert('Sync Failed', category + '\n\nDetail: ' + lastError);
+
+      const completedAt = result.completed_at || Date.now();
+      setLastSync(new Date(completedAt).toLocaleTimeString("en-IN", {
+        hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short",
+      }));
+      if ((result.total || 0) === 0) {
+        Alert.alert("Sync Complete", "No pending calls were found.");
       } else {
-        Alert.alert('Sync Done', totalAccepted + ' new, ' + totalDup + ' dup, ' + allCalls.length + ' total\nDev:' + deviceId + (lastError ? '\nErr:' + lastError : ''));
+        Alert.alert(
+          "Sync Complete",
+          `${result.accepted || 0} new, ${result.duplicates || 0} already synced, ${result.total || 0} checked.`,
+        );
       }
     } catch (e) {
-      Alert.alert('Sync Error', (e.message || String(e)) + '\n\nDevice ID: ' + (deviceId || 'NULL'));
-    } finally { setSyncing(false); }
+      Alert.alert("Sync Error", e?.message || "Unable to synchronize calls. Pending calls will retry.");
+    } finally {
+      setSyncing(false);
+    }
   }
 
     async function handleRequestPermission(key) {
@@ -189,14 +164,13 @@ export default function Profile() {
   }
 
   async function toggleRecording(val) {
-    if (val && !permissions.recording) {
-      // Request microphone permission first
+    if (val && !permissions.storage) {
       const result = await requestAllPermissions();
       setPermissions(result);
-      if (!result.recording) {
+      if (!result.storage) {
         Alert.alert(
-          "Microphone Permission Required",
-          "Go to Settings → Apps → CallNexa → Permissions → Microphone and enable it.",
+          "Audio Permission Required",
+          "Go to Settings → Apps → CallNexa → Permissions and allow music/audio file access.",
           [{ text: "Open Settings", onPress: () => Linking.openSettings() }, { text: "Cancel", style: "cancel" }]
         );
         return;
@@ -234,8 +208,7 @@ export default function Profile() {
     { key: "callLog",    icon: "call-outline",           label: "Call Log",    desc: "Read call history",          required: true },
     { key: "phoneState", icon: "phone-portrait-outline", label: "Phone State", desc: "Detect active calls & SIM",   required: true },
     { key: "contacts",   icon: "people-outline",         label: "Contacts",    desc: "Match caller names",         required: true },
-    { key: "storage",    icon: "folder-outline",         label: "Storage",     desc: "Access call recordings",     required: true },
-    { key: "recording",  icon: "mic-outline",            label: "Microphone",  desc: "Record calls (optional)",   required: false },
+    { key: "storage",    icon: "folder-outline",         label: "Audio Files", desc: "Access permitted call recordings", required: true },
   ];
 
   const requiredGranted = PERM_LIST.filter((p) => p.required).every((p) => permissions[p.key]);
@@ -406,7 +379,7 @@ export default function Profile() {
               <View style={{ flex: 1, marginLeft: SPACE.md }}>
                 <Text style={{ ...TYPE.title, color: theme.primary }}>Sync Calls Now</Text>
                 <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>
-                  {syncing ? "Syncing…" : syncResult ? `✓ ${syncResult.accepted} new · ${syncResult.duplicates} duplicates` : lastSync ? `Last synced: ${lastSync}` : "Auto-syncs every 5 min"}
+                  {syncing ? "Syncing…" : syncResult ? `✓ ${syncResult.accepted} new · ${syncResult.duplicates} duplicates` : lastSync ? `Last synced: ${lastSync}` : "Auto-syncs while the app is active"}
                 </Text>
               </View>
               {!syncing && <Ionicons name="chevron-forward" size={18} color={palette.teal} />}
@@ -421,7 +394,7 @@ export default function Profile() {
               <Image source={require("../../assets/logo.png")} style={{ width: 38, height: 38, borderRadius: RADIUS.md }} resizeMode="contain" />
               <View style={{ flex: 1, marginLeft: SPACE.md }}>
                 <Text style={{ ...TYPE.title, color: theme.primary }}>CallNexa</Text>
-                <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>v1.0.0 · {e.companyName}</Text>
+                <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>v1.1.0 · {e.companyName}</Text>
               </View>
             </View>
           </View>

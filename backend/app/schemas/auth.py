@@ -1,27 +1,28 @@
-from pydantic import BaseModel, EmailStr
 from typing import Optional
+
+from pydantic import BaseModel, EmailStr, Field
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=1, max_length=128)
 
 
 class RegisterRequest(BaseModel):
-    name: str
-    company_name: str
+    name: str = Field(min_length=1, max_length=200)
+    company_name: str = Field(min_length=1, max_length=200)
     email: EmailStr
-    phone: Optional[str] = None
-    team_size: Optional[str] = None
-    industry: Optional[str] = None
-    password: str
+    phone: Optional[str] = Field(default=None, max_length=30)
+    team_size: Optional[str] = Field(default=None, max_length=30)
+    industry: Optional[str] = Field(default=None, max_length=100)
+    password: str = Field(min_length=8, max_length=128)
 
 
 class EmployeeRegisterRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=200)
     email: EmailStr
-    password: str
-    company_code: str
+    password: str = Field(min_length=8, max_length=128)
+    company_code: str = Field(min_length=1, max_length=50)
 
 
 class TokenResponse(BaseModel):
@@ -33,7 +34,7 @@ class TokenResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str = Field(min_length=1, max_length=4096)
 
 
 class MeResponse(BaseModel):

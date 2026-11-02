@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+firebase-service-account.json
+*.log
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+venv/
+.venv/
+.git/
+.gitignore
+Dockerfile*
+docker-compose*.yml
+db_result.txt
+test_result.txt

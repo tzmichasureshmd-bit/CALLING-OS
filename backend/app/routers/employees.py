@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import User, Employee
+from ..models import User, Employee, Device
 from ..schemas import EmployeeCreate, EmployeeUpdate, EmployeeOut, PaginatedEmployees
 from ..auth import get_current_user, require_role
 import math
@@ -89,6 +89,20 @@ def update_employee(
         raise HTTPException(status_code=404, detail="Employee not found")
     for field, val in body.model_dump(exclude_none=True).items():
         setattr(emp, field, val)
+    if body.status is not None:
+        if emp.user_id:
+            db.query(User).filter(
+                User.id == emp.user_id,
+                User.organization_id == user.organization_id,
+            ).update(
+                {User.status: "active" if body.status == "active" else "suspended"},
+                synchronize_session=False,
+            )
+        if body.status != "active":
+            db.query(Device).filter(
+                Device.employee_id == emp.id,
+                Device.organization_id == user.organization_id,
+            ).update({Device.is_online: False}, synchronize_session=False)
     db.commit()
     db.refresh(emp)
     return emp
@@ -107,4 +121,13 @@ def delete_employee(
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
     emp.status = "trashed"
+    if emp.user_id:
+        db.query(User).filter(
+            User.id == emp.user_id,
+            User.organization_id == user.organization_id,
+        ).update({User.status: "suspended"}, synchronize_session=False)
+    db.query(Device).filter(
+        Device.employee_id == emp.id,
+        Device.organization_id == user.organization_id,
+    ).update({Device.is_online: False}, synchronize_session=False)
     db.commit()

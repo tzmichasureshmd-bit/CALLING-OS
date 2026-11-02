@@ -14,19 +14,26 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_CUSTOM_BUILD": "true"
+        "EXPO_PUBLIC_CUSTOM_BUILD": "true",
+        "EXPO_PUBLIC_API_URL": "https://api.callingos.tzmicha.com/api/v1"
       }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.callingos.tzmicha.com/api/v1"
       }
     },
     "production": {
       "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.callingos.tzmicha.com/api/v1"
       }
     }
   },

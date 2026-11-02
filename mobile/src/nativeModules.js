@@ -143,8 +143,8 @@ export async function readCallLog(limitDays = 30) {
           duration:       r.duration,
           new:            r.new,
           simSlot:        r.simSlot ?? r.sim_slot ?? null,
-          // subscriptionId from the dedicated column is primary; phoneAccountId is fallback
-          subscriptionId: r.subscriptionId || r.phoneAccountId || null,
+          // Only a dedicated/numeric subscription ID is trusted for SIM filtering.
+          subscriptionId: r.subscriptionId || (/^\d+$/.test(r.phoneAccountId || "") ? r.phoneAccountId : null),
           phoneAccountId: r.phoneAccountId || null,
           cachedName:     r.name || "",
           _typeName:      r.typeName,
@@ -336,8 +336,7 @@ const PERM_DEFS = (androidVersion) => {
     { key: "phoneState", perm: P.READ_PHONE_STATE, title: "Phone State", msg: "CallNexa needs phone state access to detect active calls and read SIM info." },
     { key: "phoneNumbers", perm: P.READ_PHONE_NUMBERS, title: "Phone Numbers", msg: "CallNexa needs this to read your SIM phone number." },
     { key: "contacts",   perm: P.READ_CONTACTS,    title: "Contacts",    msg: "CallNexa needs contacts access to match caller names automatically." },
-    { key: "storage",    perm: androidVersion >= 33 ? P.READ_MEDIA_AUDIO : P.READ_EXTERNAL_STORAGE, title: "Storage", msg: "CallNexa needs storage access to read call recordings." },
-    { key: "recording",  perm: P.RECORD_AUDIO,     title: "Microphone",  msg: "CallNexa needs microphone access for call transcription." },
+    { key: "storage",    perm: androidVersion >= 33 ? P.READ_MEDIA_AUDIO : P.READ_EXTERNAL_STORAGE, title: "Audio Files", msg: "CallNexa needs audio-file access to discover permitted call recordings." },
   ];
   if (androidVersion >= 33 && P.POST_NOTIFICATIONS) {
     defs.push({ key: "notifications", perm: P.POST_NOTIFICATIONS, title: "Notifications", msg: "CallNexa needs notification permission to show call sync status." });
@@ -381,15 +380,14 @@ export async function checkPermissions() {
     const P = PermissionsAndroid.PERMISSIONS;
     const androidVersion = parseInt(Platform.Version, 10);
     const storagePermission = androidVersion >= 33 ? P.READ_MEDIA_AUDIO : P.READ_EXTERNAL_STORAGE;
-    const [callLog, phoneState, phoneNumbers, contacts, storage, recording] = await Promise.all([
+    const [callLog, phoneState, phoneNumbers, contacts, storage] = await Promise.all([
       PermissionsAndroid.check(P.READ_CALL_LOG),
       PermissionsAndroid.check(P.READ_PHONE_STATE),
       androidVersion >= 26 ? PermissionsAndroid.check(P.READ_PHONE_NUMBERS) : Promise.resolve(false),
       PermissionsAndroid.check(P.READ_CONTACTS),
       PermissionsAndroid.check(storagePermission),
-      PermissionsAndroid.check(P.RECORD_AUDIO),
     ]);
-    return { callLog, phoneState, phoneNumbers, contacts, storage, recording, allGranted: callLog && phoneState };
+    return { callLog, phoneState, phoneNumbers, contacts, storage, recording: storage, allGranted: callLog && phoneState };
   } catch {
     return { allGranted: false };
   }

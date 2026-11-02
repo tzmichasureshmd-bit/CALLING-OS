@@ -5,25 +5,17 @@ services:
       dockerfile: Dockerfile
     container_name: callingos-backend
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql+psycopg://postgres.gjfohkxocurrzbdpybuu:TzMicha%40123@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres
-      - JWT_SECRET_KEY=69f88fc2d17716c5ddc6e94517dd5a1dc316d1d7f59374c5ece99f5390c4af99
-      - JWT_ALGORITHM=HS256
-      - ACCESS_TOKEN_EXPIRE_MINUTES=60
-      - REFRESH_TOKEN_EXPIRE_DAYS=30
-      - APP_ENV=production
-      - APP_DEBUG=false
-      - CORS_ORIGINS=https://callingos.tzmicha.com,https://www.callingos.tzmicha.com,https://api.callingos.tzmicha.com,http://localhost:5173,http://localhost:3000
-      - SEED_DEMO_DATA=false
-      - GOOGLE_CLIENT_ID=
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/firebase-service-account.json
-      - SUPABASE_URL=https://gjfohkxocurrzbdpybuu.supabase.co
-      - SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdqZm9oa3hvY3VycnpiZHB5YnV1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4ODM3NzQ2OCwiZXhwIjoyMTAzOTUzNDY4fQ.jKIf6t6Ngd9LGwB7ZxXm32Zgk1Yh81A2ZNvuyF6GgmI
-      - SUPABASE_RECORDINGS_BUCKET=call-recordings
+      APP_ENV: production
+      APP_DEBUG: "false"
+      SEED_DEMO_DATA: "false"
+      GOOGLE_APPLICATION_CREDENTIALS: /app/firebase-service-account.json
     networks:
       - traefik-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/db"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -39,16 +31,19 @@ services:
     build:
       context: ../web
       dockerfile: Dockerfile
+      # Firebase client config is public (ships in the browser bundle). These
+      # read from the VPS environment / compose .env with empty fallbacks so a
+      # missing value can never abort the build and block a backend deploy.
       args:
-        - VITE_API_URL=https://api.callingos.tzmicha.com/api/v1
-        - VITE_USE_MOCK=false
-        - VITE_FIREBASE_API_KEY=AIzaSyDCLRXATmV6FPQT_9OVpSYAd_tznGpOFlQ
-        - VITE_FIREBASE_AUTH_DOMAIN=calling-os-da2d7.firebaseapp.com
-        - VITE_FIREBASE_PROJECT_ID=calling-os-da2d7
-        - VITE_FIREBASE_STORAGE_BUCKET=calling-os-da2d7.firebasestorage.app
-        - VITE_FIREBASE_MESSAGING_SENDER_ID=94196761149
-        - VITE_FIREBASE_APP_ID=1:94196761149:web:c13db2c6bf81033f42e054
-        - VITE_FIREBASE_MEASUREMENT_ID=G-7WFVWBXGV5
+        VITE_API_URL: ${VITE_API_URL:-https://api.callingos.tzmicha.com/api/v1}
+        VITE_USE_MOCK: ${VITE_USE_MOCK:-false}
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
+        VITE_FIREBASE_STORAGE_BUCKET: ${VITE_FIREBASE_STORAGE_BUCKET:-}
+        VITE_FIREBASE_MESSAGING_SENDER_ID: ${VITE_FIREBASE_MESSAGING_SENDER_ID:-}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
+        VITE_FIREBASE_MEASUREMENT_ID: ${VITE_FIREBASE_MEASUREMENT_ID:-}
     container_name: callingos-web
     restart: unless-stopped
     networks:

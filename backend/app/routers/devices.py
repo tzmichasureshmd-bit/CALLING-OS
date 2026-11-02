@@ -10,7 +10,8 @@ from ..database import get_db, SessionLocal
 from ..models import User, Device, Employee, SIM
 from ..schemas import DeviceRegister, DeviceHeartbeat, DeviceOut
 from ..schemas.device import SIMSyncItem, SIMOut, SIMChangeEvent
-from ..auth import get_current_user
+from ..auth import get_current_user, require_role
+from ..config import settings
 from ..ws_manager import manager
 
 logger = logging.getLogger("callnexa.devices")
@@ -20,6 +21,23 @@ router = APIRouter(prefix="/devices", tags=["devices"])
 OFFLINE_AFTER_SECONDS = 90
 
 
+def _active_employee(db: Session, user: User) -> Employee | None:
+    return db.query(Employee).filter(
+        Employee.user_id == user.id,
+        Employee.organization_id == user.organization_id,
+        Employee.status == "active",
+    ).first()
+
+
+def _require_device_access(db: Session, user: User, device: Device) -> None:
+    """Employees may update only their own device; elevated roles stay org-scoped."""
+    if (user.role or "").upper() != "EMPLOYEE":
+        return
+    employee = _active_employee(db, user)
+    if not employee or device.employee_id != employee.id:
+        raise HTTPException(status_code=403, detail="Device is not assigned to this employee")
+
+
 # ── SIM serializer ────────────────────────────────────────────────────────────
 
 def _sim_dict(s: SIM) -> dict:
@@ -27,6 +45,7 @@ def _sim_dict(s: SIM) -> dict:
         "id":              s.id,
         "slot":            s.slot,
         "carrier":         s.carrier,
+        "display_name":    s.display_name,
         "phone_number":    s.phone_number,
         "mcc":             s.mcc,
         "mnc":             s.mnc,
@@ -34,6 +53,7 @@ def _sim_dict(s: SIM) -> dict:
         "subscription_id": s.subscription_id,
         "network_type":    s.network_type,
         "is_active":       s.is_active,
+        "is_selected":     s.is_selected,
         "last_detected_at": s.last_detected_at.isoformat() if s.last_detected_at else None,
     }
 
@@ -82,6 +102,15 @@ def _upsert_sims(
     now = datetime.now(timezone.utc)
     changes = []
 
+    selected_count = sum(1 for item in sim_items if item.is_selected)
+    if selected_count > 1:
+        raise HTTPException(status_code=422, detail="Only one SIM can be selected per device")
+    if selected_count == 1:
+        db.query(SIM).filter(
+            SIM.device_id == device.id,
+            SIM.is_selected.is_(True),
+        ).update({SIM.is_selected: False}, synchronize_session="fetch")
+
     for item in sim_items:
         existing = db.query(SIM).filter(
             SIM.device_id == device.id,
@@ -127,6 +156,7 @@ def _upsert_sims(
             if item.subscription_id is not None: existing.subscription_id = item.subscription_id
             if item.network_type   is not None: existing.network_type    = item.network_type
             existing.is_active       = item.is_active
+            existing.is_selected     = item.is_selected
             existing.last_detected_at = now
             existing.updated_at      = now
 
@@ -145,6 +175,7 @@ def _upsert_sims(
                 subscription_id=item.subscription_id,
                 network_type=item.network_type,
                 is_active=item.is_active,
+                is_selected=item.is_selected,
                 first_detected_at=now,
                 last_detected_at=now,
             )
@@ -216,8 +247,9 @@ def _sync_selected_sim_phone(db: Session, device: Device) -> None:
 async def _offline_watcher():
     while True:
         await asyncio.sleep(30)
+        db: Session | None = None
         try:
-            db: Session = SessionLocal()
+            db = SessionLocal()
             cutoff = datetime.now(timezone.utc) - timedelta(seconds=OFFLINE_AFTER_SECONDS)
             stale = (
                 db.query(Device)
@@ -235,9 +267,13 @@ async def _offline_watcher():
                         d.organization_id,
                         {"event": "device_update", "device": _device_payload(d, emp_name)},
                     )
-            db.close()
         except Exception:
-            pass
+            logger.exception("Device offline watcher failed")
+            if db is not None:
+                db.rollback()
+        finally:
+            if db is not None:
+                db.close()
 
 
 def start_offline_watcher():
@@ -255,10 +291,11 @@ async def register_device(
     emp = db.query(Employee).filter(
         Employee.user_id == user.id,
         Employee.organization_id == user.organization_id,
+        Employee.status == "active",
     ).first()
-    # ADMIN users may not have an Employee record — allow registration with employee_id=None
-    if not emp and user.role not in ("ADMIN", "admin"):
-        raise HTTPException(status_code=400, detail="No employee profile linked to this user")
+    # A mobile device must always be attributable to an active employee profile.
+    if not emp:
+        raise HTTPException(status_code=400, detail="No active employee profile linked to this user")
 
     device = db.query(Device).filter(
         Device.organization_id == user.organization_id,
@@ -269,10 +306,12 @@ async def register_device(
         device = Device(
             id=str(uuid.uuid4()),
             organization_id=user.organization_id,
-            employee_id=emp.id if emp else None,
+            employee_id=emp.id,
             device_identifier=body.device_identifier,
         )
         db.add(device)
+    else:
+        _require_device_access(db, user, device)
 
     device.manufacturer    = body.manufacturer
     device.model           = body.model
@@ -326,6 +365,7 @@ async def heartbeat(
     ).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    _require_device_access(db, user, device)
 
     device.last_seen_at = datetime.now(timezone.utc)
     device.is_online    = body.is_online
@@ -384,7 +424,7 @@ async def heartbeat(
 async def reconnect_device(
     device_id: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("TEAM_LEAD")),
 ):
     """Manager clicks 'Connect' → sets reconnect_requested_at so next heartbeat returns sync_now=True."""
     device = db.query(Device).filter(
@@ -417,6 +457,7 @@ async def sync_sims(
     ).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    _require_device_access(db, user, device)
 
     changes = _upsert_sims(db, device, sims, user.organization_id)
     db.commit()
@@ -454,7 +495,12 @@ def list_devices(
         .options(joinedload(Device.employee))
         .filter(Device.organization_id == user.organization_id)
     )
-    if employee_id:
+    if (user.role or "").upper() == "EMPLOYEE":
+        employee = _active_employee(db, user)
+        if not employee:
+            return []
+        query = query.filter(Device.employee_id == employee.id)
+    elif employee_id:
         query = query.filter(Device.employee_id == employee_id)
 
     # Deduplicate: one entry per employee, keeping the most recently seen device.
@@ -474,74 +520,113 @@ def list_devices(
     return result
 
 
+# ── WebSocket / SSE authorization ────────────────────────────────────────────
+
+def _load_authorized_stream_snapshot(token: str, org_id: str) -> list[dict] | None:
+    """Authenticate against current DB state and close the DB before streaming."""
+    from ..auth.jwt import decode_token
+    from ..models import Organization
+
+    payload = decode_token(token)
+    if (
+        not payload
+        or payload.get("type") != "access"
+        or payload.get("org") != org_id
+        or not payload.get("sub")
+    ):
+        return None
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(
+            User.id == payload["sub"],
+            User.organization_id == org_id,
+            User.status == "active",
+        ).first()
+        organization = db.query(Organization).filter(
+            Organization.id == org_id,
+            Organization.status == "active",
+        ).first()
+        if not user or not organization:
+            return None
+        # Device streams expose organization-wide health, SIM, and location data.
+        if (user.role or "").upper() not in {"TEAM_LEAD", "MANAGER", "ADMIN", "SUPER_ADMIN"}:
+            return None
+
+        devices = db.query(Device).filter(Device.organization_id == org_id).all()
+        return [_device_payload(d, d.employee.name if d.employee else None) for d in devices]
+    finally:
+        db.close()
+
+
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
 @router.websocket("/ws/{org_id}")
-async def device_ws(
-    websocket: WebSocket,
-    org_id: str,
-    token: str = Query(...),
-    db: Session = Depends(get_db),
-):
-    from ..auth.jwt import decode_token
+async def device_ws(websocket: WebSocket, org_id: str, token: str = Query(...)):
     import json
 
-    payload = decode_token(token)
-    if not payload or payload.get("type") != "access":
-        await websocket.close(code=4001)
+    snapshot = _load_authorized_stream_snapshot(token, org_id)
+    if snapshot is None:
+        await websocket.close(code=4003)
         return
-    if payload.get("org") != org_id:
+
+    origin = websocket.headers.get("origin")
+    allowed_origins = set(settings.cors_origins_list)
+    if origin and origin not in allowed_origins and not (
+        origin.startswith("https://") and origin.endswith(".tzmicha.com")
+    ):
         await websocket.close(code=4003)
         return
 
     await websocket.accept()
     manager.connect(org_id, websocket)
-
-    devices = db.query(Device).filter(Device.organization_id == org_id).all()
-    snapshot = [_device_payload(d, d.employee.name if d.employee else None) for d in devices]
-    await websocket.send_text(json.dumps({"event": "snapshot", "devices": snapshot}))
-
     try:
+        await websocket.send_text(json.dumps({"event": "snapshot", "devices": snapshot}))
         while True:
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
         manager.disconnect(org_id, websocket)
 
 
 # ── SSE fallback ──────────────────────────────────────────────────────────────
 
 @router.get("/sse/{org_id}")
-async def device_sse(
-    org_id: str,
-    token: str = Query(...),
-    db: Session = Depends(get_db),
-):
+async def device_sse(org_id: str, token: str = Query(...)):
     import json
-    from ..auth.jwt import decode_token
+    from fastapi.responses import JSONResponse
 
-    payload = decode_token(token)
-    if not payload or payload.get("org") != org_id:
-        from fastapi.responses import JSONResponse
+    devices_snap = _load_authorized_stream_snapshot(token, org_id)
+    if devices_snap is None:
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
-    queue: asyncio.Queue = asyncio.Queue()
+    # Bounded queue: a slow/disconnected client cannot consume unbounded memory.
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
 
     class QueueAdapter:
         async def send_text(self, text: str):
-            await queue.put(text)
+            try:
+                queue.put_nowait(text)
+            except asyncio.QueueFull:
+                # Drop the oldest event; clients also reconcile through HTTP polling.
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                queue.put_nowait(text)
+
         async def close(self, code=None):
-            await queue.put(None)
+            try:
+                queue.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
 
     adapter = QueueAdapter()
     manager.connect(org_id, adapter)
-
-    devices_snap = db.query(Device).filter(Device.organization_id == org_id).all()
-    snapshot_data = json.dumps({"event": "snapshot", "devices": [
-        _device_payload(d, d.employee.name if d.employee else None)
-        for d in devices_snap
-    ]})
+    snapshot_data = json.dumps({"event": "snapshot", "devices": devices_snap})
 
     async def event_stream():
         yield f"data: {snapshot_data}\n\n"

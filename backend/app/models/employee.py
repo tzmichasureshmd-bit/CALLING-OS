@@ -14,7 +14,7 @@ class Employee(Base):
     name            = Column(String(200), nullable=False)
     email           = Column(String(200))
     phone           = Column(String(30))
-    employee_code   = Column(String(50))
+    employee_code   = Column(String(50), nullable=False)
     status          = Column(String(20), default="active")
     joining_date    = Column(DateTime, nullable=True)
     last_active_at  = Column(DateTime, nullable=True)
@@ -31,4 +31,6 @@ class Employee(Base):
 
     __table_args__ = (
         Index("ix_employees_org_code", "organization_id", "employee_code", unique=True),
+        Index("ix_employees_one_profile_per_user", "user_id", unique=True,
+              postgresql_where=text("user_id IS NOT NULL")),
     )

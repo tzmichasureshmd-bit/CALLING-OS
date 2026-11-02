@@ -1,4 +1,4 @@
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { readCallLog, readSimInfo, findRecordingsForCall as nativeFindRecordings } from "./nativeModules";
 import { findSimForCall, buildCallSource } from "./simInventoryService";
@@ -84,6 +84,9 @@ async function _findRecordingFileJS(startMs, phoneNumber, durationSec) {
     const digits = phoneNumber && phoneNumber !== "unknown"
       ? phoneNumber.replace(/\D/g, "").slice(-7)
       : null;
+    // The JS fallback has no reliable duration metadata. Require both a phone
+    // hint and the call time window rather than uploading the first nearby file.
+    if (!digits || digits.length < 7) return null;
 
     for (const dir of RECORDING_SEARCH_DIRS) {
       try {
@@ -99,12 +102,9 @@ async function _findRecordingFileJS(startMs, phoneNumber, durationSec) {
             if (!fileInfo.size || fileInfo.size < MIN_RECORDING_BYTES) continue;
             if (fileInfo.modificationTime) {
               const fileSec = Math.floor(fileInfo.modificationTime);
-              if (fileSec >= windowStart && fileSec <= endSec) {
+              if (fileSec >= windowStart && fileSec <= endSec && filename.includes(digits)) {
                 return { path: dir + filename, mimeType: RECORDING_MIME_MAP[ext] || "audio/mp4", fileSize: fileInfo.size };
               }
-            }
-            if (digits && digits.length >= 7 && filename.includes(digits)) {
-              return { path: dir + filename, mimeType: RECORDING_MIME_MAP[ext] || "audio/mp4", fileSize: fileInfo.size };
             }
           } catch { /* skip unreadable file */ }
         }
@@ -298,11 +298,14 @@ export async function findRecordingForCall(c) {
     // Check for ambiguity: if top two candidates share the same score, do not upload
     const top = recordings[0];
     const second = recordings[1];
+    if (!top || top.confidence_score < 3) {
+      console.warn(`[RECORDING_WEAK_MATCH_REJECTED] client_event_id=${c.client_event_id} score=${top?.confidence_score ?? 0} ts=${Date.now()}`);
+      return null;
+    }
     if (second && second.confidence_score === top.confidence_score) {
       console.warn(
         `[RECORDING_AMBIGUOUS] client_event_id=${c.client_event_id} ` +
-        `top_score=${top.confidence_score} candidates=${recordings.length} ` +
-        `files=[${top.display_name},${second.display_name}] ts=${Date.now()}`
+        `top_score=${top.confidence_score} candidates=${recordings.length} ts=${Date.now()}`
       );
       // Return null — do not upload an ambiguous match
       return null;
@@ -355,29 +358,60 @@ export async function findRecordingForCall(c) {
   return null;
 }
 
-export async function uploadRecording(callId, filePath, token) {
+export async function uploadRecording(callId, filePath, token, mimeType = "audio/mp4") {
   if (!filePath || !callId) return null;
-  const info = await FileSystem.getInfoAsync(filePath);
-  if (!info.exists) throw new Error("Recording file no longer exists at path: " + filePath);
-  if (!info.size || info.size < 1024) throw new Error("Recording file is empty or too small: " + info.size + " bytes");
 
-  const result = await FileSystem.uploadAsync(
-    `${BASE_URL}/calls/${callId}/recording`,
-    filePath,
-    {
-      httpMethod:  "POST",
-      uploadType:  FileSystem.FileSystemUploadType.MULTIPART,
-      fieldName:   "file",
-      headers:     { Authorization: `Bearer ${token}` },
+  // uploadAsync cannot read content:// URIs (MediaStore paths on Android 10+).
+  // Copy into the app cache first — copyAsync supports content:// sources.
+  let uploadPath = filePath;
+  let tempPath   = null;
+  if (filePath.startsWith("content://")) {
+    const extension = {
+      "audio/mpeg": "mp3", "audio/ogg": "ogg", "audio/wav": "wav",
+      "audio/aac": "aac", "audio/webm": "webm", "audio/x-m4a": "m4a",
+      "audio/3gpp": "3gp", "audio/amr": "amr", "video/mp4": "mp4",
+    }[mimeType] || "mp4";
+    tempPath = `${FileSystem.cacheDirectory}rec-upload-${Date.now()}.${extension}`;
+    try {
+      await FileSystem.copyAsync({ from: filePath, to: tempPath });
+      uploadPath = tempPath;
+    } catch (e) {
+      throw new Error("Could not read recording from MediaStore: " + (e?.message || "copy failed"));
     }
-  );
-  if (result.status === 200 || result.status === 201) {
-    try { return result.body ? JSON.parse(result.body) : { status: "uploaded" }; }
-    catch { return { status: "uploaded" }; }
   }
-  let detail = "Upload failed";
-  try { detail = JSON.parse(result.body)?.detail || detail; } catch {}
-  throw new Error(`HTTP ${result.status}: ${detail}`);
+
+  try {
+    const info = await FileSystem.getInfoAsync(uploadPath);
+    if (!info.exists) throw new Error("Recording file no longer exists at path: " + filePath);
+    if (!info.size || info.size < 1024) throw new Error("Recording file is empty or too small: " + info.size + " bytes");
+
+    const result = await FileSystem.uploadAsync(
+      `${BASE_URL}/calls/${callId}/recording`,
+      uploadPath,
+      {
+        httpMethod:  "POST",
+        uploadType:  FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName:   "file",
+        headers:     { Authorization: `Bearer ${token}` },
+      }
+    );
+
+    if (result.status === 200 || result.status === 201) {
+      // Strict confirmation: the backend returns {"status":"uploaded","recording_available":true,...}.
+      // Anything else — unparseable body, missing flag — is NOT a confirmed upload.
+      let parsed = null;
+      try { parsed = result.body ? JSON.parse(result.body) : null; } catch { parsed = null; }
+      if (!parsed || parsed.status !== "uploaded" || parsed.recording_available !== true) {
+        throw new Error("Upload not confirmed by backend (invalid response body)");
+      }
+      return parsed;
+    }
+    let detail = "Upload failed";
+    try { detail = JSON.parse(result.body)?.detail || detail; } catch {}
+    throw new Error(`HTTP ${result.status}: ${detail}`);
+  } finally {
+    if (tempPath) FileSystem.deleteAsync(tempPath, { idempotent: true }).catch(() => {});
+  }
 }
 
 // ── SIM helpers ───────────────────────────────────────────────────────────────

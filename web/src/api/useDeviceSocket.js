@@ -9,8 +9,9 @@ function normalizeDevice(d) {
   const callLog    = perms.callLog    ?? perms.call_log    ?? null;
   const phoneState = perms.phoneState ?? perms.phone_state ?? null;
   const contacts   = perms.contacts   ?? null;
-  const recording  = perms.recording  ?? null;
-  const allOk = !!(callLog && phoneState && contacts && recording);
+  const storage     = perms.storage ?? perms.recording ?? null;
+  const recording   = storage;
+  const allOk = !!(callLog && phoneState && contacts && storage);
   // Online/stale/offline based on heartbeat freshness
   const lastSeen = d.last_seen_at ? new Date(d.last_seen_at) : null;
   const ageMs = lastSeen ? Date.now() - lastSeen.getTime() : Infinity;
@@ -30,7 +31,7 @@ function normalizeDevice(d) {
     appVersion:          d.app_version || "—",
     battery:             d.battery_level ?? 0,
     lastSeenAt:          d.last_seen_at || null,
-    permissions:         { callLog, phoneState, contacts, recording },
+    permissions:         { callLog, phoneState, contacts, storage, recording },
     sim:                 d.sims?.[0]?.carrier || d.sims?.[0]?.phone_number || "SIM 1",
     backgroundStatus:    bgStatus,   // "limited" | "restricted" | null
     network_type:        d.network_type || null,
@@ -47,9 +48,10 @@ function getCredentials() {
   const userRaw = localStorage.getItem("callos_user");
   if (!token || !userRaw) return null;
   try {
-    const orgId = JSON.parse(userRaw).organization_id;
+    const user = JSON.parse(userRaw);
+    const orgId = user.organization_id;
     if (!orgId) return null;
-    return { token, orgId };
+    return { token, orgId, role: (user.role || "").toUpperCase() };
   } catch { return null; }
 }
 
@@ -66,7 +68,7 @@ function applyMessage(msg, setDevices, setNewCallEvent) {
       next[idx] = updated;
       return next;
     });
-  } else if (msg.event === "calls_synced" || msg.event === "call_created" || msg.event === "call_updated" || msg.event === "recording_uploaded" || msg.event === "transcript_updated") {
+  } else if (msg.event === "calls_synced" || msg.event === "call_created" || msg.event === "call_updated" || msg.event === "recording_uploaded" || msg.event === "transcript_updated" || msg.event === "summary_updated") {
     setNewCallEvent({ event: msg.event, ts: Date.now(), ...msg });
   }
 }
@@ -168,9 +170,9 @@ export function useDeviceSocket(onCallsUpdated) {
     };
 
     ws.onmessage = (e) => {
+      if (e.data === "pong") return;
       try {
         const msg = JSON.parse(e.data);
-        if (msg === "pong") return;
         applyMessage(msg, setDevices, setNewCallEvent);
       } catch { /* ignore */ }
     };
@@ -206,8 +208,15 @@ export function useDeviceSocket(onCallsUpdated) {
   // ── Mount ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     mountedRef.current = true;
-    refetch();          // immediate HTTP load while connection handshakes
-    connectWS();        // try WS first, auto-falls to SSE on failure
+    const credentials = getCredentials();
+    refetch();
+    if (credentials?.role === "EMPLOYEE") {
+      // Organization-wide streams contain other employees' device details.
+      // Employee pages use scoped HTTP polling instead.
+      startPollFallback();
+    } else {
+      connectWS();
+    }
 
     return () => {
       mountedRef.current = false;
