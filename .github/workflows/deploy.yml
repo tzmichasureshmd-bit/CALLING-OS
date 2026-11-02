@@ -41,12 +41,17 @@ jobs:
             set -eu
             cd /opt/callingos
 
-            # Authenticate the pull with the Actions token (existing setup).
-            git config --global credential.helper store
-            echo "https://${{ secrets.GITHUB_TOKEN }}:x-oauth-basic@github.com" > ~/.git-credentials
+            # Remove stale credential storage that used the now-rejected
+            # token-in-URL method, and normalize the remote to plain HTTPS.
+            git config --global --unset credential.helper || true
+            rm -f ~/.git-credentials || true
+            git remote set-url origin https://github.com/tzmichasureshmd-bit/CALLING-OS.git
 
+            # Pull using the Actions token as an HTTP auth header (current GitHub method).
             git stash || true
-            git pull origin main
+            git -c http.extraHeader="AUTHORIZATION: bearer ${{ secrets.GITHUB_TOKEN }}" \
+              fetch origin main
+            git reset --hard origin/main
 
             # Backend runtime secrets (required).
             printf '%s' '${{ secrets.BACKEND_ENV }}' > /opt/callingos/backend/.env
