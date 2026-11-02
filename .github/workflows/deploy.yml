@@ -32,18 +32,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Copy backend files to VPS
+      - name: Copy changed backend source to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
-          source: "backend/,web/,migrations/"
+          source: "backend/app/,backend/migrations/,backend/migration_runner.py,backend/Dockerfile,backend/docker-compose.yml,web/"
           target: "/opt/callingos/"
           strip_components: 0
           overwrite: true
 
-      - name: Deploy on VPS
+      - name: Restart containers with new code
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -54,22 +54,23 @@ jobs:
           script: |
             set -eu
 
-            # Write secrets
+            # Write runtime secrets
             printf '%s' '${{ secrets.BACKEND_ENV }}' > /opt/callingos/backend/.env
             printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /opt/callingos/backend/firebase-service-account.json
             chmod 600 /opt/callingos/backend/.env /opt/callingos/backend/firebase-service-account.json
 
             cd /opt/callingos/backend
 
-            # Apply pending migrations
-            docker compose run --rm callingos-backend python migration_runner.py
+            # Rebuild backend image only (web is static, no rebuild needed unless changed)
+            docker compose build callingos-backend
 
-            # Rebuild and restart
-            docker compose build --no-cache
-            docker compose up -d --remove-orphans
+            # Restart with zero-downtime swap
+            docker compose up -d --remove-orphans callingos-backend
+
+            # Clean up old images
             docker image prune -f
 
-            # Health check
+            # Confirm backend is healthy
             curl --fail --silent --show-error --retry 15 --retry-delay 4 \
               https://api.callingos.tzmicha.com/health/db > /dev/null
             echo "Deploy verified: backend healthy"
