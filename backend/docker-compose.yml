@@ -5,8 +5,11 @@ services:
       dockerfile: Dockerfile
     container_name: callingos-backend
     restart: unless-stopped
-    env_file:
-      - .env
+    # Mount .env as a file — avoids ARG_MAX limit that hits when passing
+    # long secret values (Supabase key, DB URL, JWT key) as env vars.
+    volumes:
+      - /opt/callingos/backend/.env:/app/.env:ro
+      - /opt/callingos/backend/firebase-service-account.json:/app/firebase-service-account.json:ro
     environment:
       APP_ENV: production
       APP_DEBUG: "false"
