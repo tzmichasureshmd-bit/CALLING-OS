@@ -65,8 +65,8 @@ jobs:
             docker compose build callingos-backend
 
             # Stop old container first, then start new one
-            docker compose stop callingos-backend
-            docker compose rm -f callingos-backend
+            docker compose down callingos-backend --remove-orphans || true
+            docker rm -f callingos-backend 2>/dev/null || true
             docker compose up -d callingos-backend
 
             # Clean up old images
