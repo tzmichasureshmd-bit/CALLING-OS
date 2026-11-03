@@ -57,7 +57,9 @@ jobs:
             # Write runtime secrets
             printf '%s' '${{ secrets.BACKEND_ENV }}' > /opt/callingos/backend/.env
             printf '%s' '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /opt/callingos/backend/firebase-service-account.json
-            chmod 600 /opt/callingos/backend/.env /opt/callingos/backend/firebase-service-account.json
+            chmod 644 /opt/callingos/backend/.env
+            chmod 640 /opt/callingos/backend/firebase-service-account.json
+            chown root:10001 /opt/callingos/backend/.env /opt/callingos/backend/firebase-service-account.json
 
             cd /opt/callingos/backend
 
