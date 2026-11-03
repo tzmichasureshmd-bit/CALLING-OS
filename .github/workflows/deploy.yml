@@ -80,10 +80,10 @@ jobs:
             docker image prune -f
 
             # Give the container time to fully start before health check
-            sleep 20
+            sleep 40
 
             # Confirm backend is healthy
-            curl --fail --silent --show-error --retry 20 --retry-delay 6 \
+            curl --fail --silent --show-error --retry 10 --retry-delay 10 \
               https://api.callingos.tzmicha.com/health/db > /dev/null || \
             (docker logs callingos-backend --tail 50 && exit 1)
             echo "Deploy verified: backend healthy"
