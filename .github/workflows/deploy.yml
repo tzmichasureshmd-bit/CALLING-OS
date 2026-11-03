@@ -79,11 +79,12 @@ jobs:
             # Clean up old images
             docker image prune -f
 
-            # Wait up to 3 minutes for backend to be reachable via Traefik
+            # Verify backend is healthy by checking directly inside the container
+            # (bypasses Traefik so we don't wait for proxy registration)
             echo "Waiting for backend to become healthy..."
             for i in $(seq 1 18); do
-              if curl --fail --silent --show-error \
-                   https://api.callingos.tzmicha.com/health/db > /dev/null 2>&1; then
+              if docker exec callingos-backend curl --fail --silent \
+                   http://localhost:8000/health/db > /dev/null 2>&1; then
                 echo "Deploy verified: backend healthy (attempt $i)"
                 exit 0
               fi
