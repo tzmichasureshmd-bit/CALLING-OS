@@ -23,12 +23,16 @@ _SA_PATH = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "firebase-service-account.json")
 )
 if not firebase_admin._apps:
+    import logging as _log
+    _logger = _log.getLogger("callnexa")
     if os.path.exists(_SA_PATH):
-        cred = credentials.Certificate(_SA_PATH)
-        firebase_admin.initialize_app(cred)
+        try:
+            cred = credentials.Certificate(_SA_PATH)
+            firebase_admin.initialize_app(cred)
+        except Exception as _e:
+            _logger.warning("Firebase init failed (%s) — Google/OTP login disabled", _e)
     else:
-        import logging as _log
-        _log.getLogger("callnexa").warning("firebase-service-account.json not found — Google/OTP login disabled")
+        _logger.warning("firebase-service-account.json not found — Google/OTP login disabled")
 
 
 class GoogleAuthRequest(BaseModel):
