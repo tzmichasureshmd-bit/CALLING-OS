@@ -45,23 +45,23 @@ jobs:
 
       - name: Restart containers with new code
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          SECRET_BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
+          SECRET_FIREBASE: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
+          envs: SECRET_BACKEND_ENV,SECRET_FIREBASE
           script_stop: true
           command_timeout: 25m
           script: |
             set -eu
 
-            # Write runtime secrets
-            # BACKEND_ENV secret is stored as-is (key=value lines, no quotes needed)
-            cat > /opt/callingos/backend/.env << 'ENDSECRET'
-            ${{ secrets.BACKEND_ENV }}
-            ENDSECRET
-            # FIREBASE_SERVICE_ACCOUNT_B64 secret must be stored as base64 in GitHub
-            # to avoid shell quoting issues with JSON special characters.
-            echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}' | base64 -d > /opt/callingos/backend/firebase-service-account.json
+            # Write runtime secrets using env vars passed via appleboy/ssh-action
+            # to avoid shell quoting issues with special characters in JSON/values.
+            echo "$SECRET_BACKEND_ENV" > /opt/callingos/backend/.env
+            echo "$SECRET_FIREBASE" > /opt/callingos/backend/firebase-service-account.json
             chmod 644 /opt/callingos/backend/.env
             chmod 640 /opt/callingos/backend/firebase-service-account.json
             chown root:10001 /opt/callingos/backend/.env /opt/callingos/backend/firebase-service-account.json
