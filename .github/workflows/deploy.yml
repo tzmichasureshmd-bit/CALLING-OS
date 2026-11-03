@@ -64,8 +64,10 @@ jobs:
             # Rebuild backend image only (web is static, no rebuild needed unless changed)
             docker compose build callingos-backend
 
-            # Restart with zero-downtime swap
-            docker compose up -d --remove-orphans callingos-backend
+            # Stop old container first, then start new one
+            docker compose stop callingos-backend
+            docker compose rm -f callingos-backend
+            docker compose up -d callingos-backend
 
             # Clean up old images
             docker image prune -f
