@@ -79,11 +79,17 @@ jobs:
             # Clean up old images
             docker image prune -f
 
-            # Give the container time to fully start before health check
-            sleep 40
-
-            # Confirm backend is healthy
-            curl --fail --silent --show-error --retry 10 --retry-delay 10 \
-              https://api.callingos.tzmicha.com/health/db > /dev/null || \
-            (docker logs callingos-backend --tail 50 && exit 1)
-            echo "Deploy verified: backend healthy"
+            # Wait up to 3 minutes for backend to be reachable via Traefik
+            echo "Waiting for backend to become healthy..."
+            for i in $(seq 1 18); do
+              if curl --fail --silent --show-error \
+                   https://api.callingos.tzmicha.com/health/db > /dev/null 2>&1; then
+                echo "Deploy verified: backend healthy (attempt $i)"
+                exit 0
+              fi
+              echo "Attempt $i/18 failed, retrying in 10s..."
+              sleep 10
+            done
+            echo "Health check failed after 3 minutes"
+            docker logs callingos-backend --tail 50
+            exit 1
