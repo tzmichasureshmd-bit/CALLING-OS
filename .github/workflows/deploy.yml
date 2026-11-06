@@ -48,12 +48,11 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           SECRET_BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
-          SECRET_FIREBASE: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
-          envs: SECRET_BACKEND_ENV,SECRET_FIREBASE
+          envs: SECRET_BACKEND_ENV
           script_stop: true
           command_timeout: 25m
           script: |
@@ -62,10 +61,8 @@ jobs:
             # Write runtime secrets using env vars passed via appleboy/ssh-action
             # to avoid shell quoting issues with special characters in JSON/values.
             echo "$SECRET_BACKEND_ENV" > /opt/callingos/backend/.env
-            echo "$SECRET_FIREBASE" > /opt/callingos/backend/firebase-service-account.json
             chmod 644 /opt/callingos/backend/.env
-            chmod 640 /opt/callingos/backend/firebase-service-account.json
-            chown root:10001 /opt/callingos/backend/.env /opt/callingos/backend/firebase-service-account.json
+            chown root:10001 /opt/callingos/backend/.env
 
             cd /opt/callingos/backend
 
