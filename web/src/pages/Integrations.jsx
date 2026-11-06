@@ -10,9 +10,9 @@ import { PageContainer, Card, CardHeader, Badge, Button } from "../components/ui
 
 const INTEGRATIONS = [
   {
-    id: "crm3",
-    name: "CRM 3.0",
-    description: "Sync leads, contacts and opportunities between CallNexa and CRM 3.0. Calls automatically create or update CRM records.",
+    id: "tzmicha",
+    name: "TzMicha CRM",
+    description: "Sync leads, contacts and opportunities between CallNexa and TzMicha CRM. Calls automatically create or update CRM records.",
     icon: "🗂️",
     color: "var(--accent)",
     status: "available",

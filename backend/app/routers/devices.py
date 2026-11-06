@@ -435,6 +435,17 @@ async def reconnect_device(
         raise HTTPException(status_code=404, detail="Device not found")
     device.reconnect_requested_at = datetime.now(timezone.utc)
     db.commit()
+    
+    # Send push notification to device
+    from ..push_notifications import notify_device_connection_request
+    org = db.query(User).filter(User.id == user.id).first()
+    org_name = org.email.split('@')[0] if org else "Dashboard"
+    
+    try:
+        await notify_device_connection_request(device_id, org_name)
+    except Exception as e:
+        logger.warning(f"Failed to send push notification: {e}")
+    
     return {"status": "ok", "message": "Reconnect signal queued — device will sync on next heartbeat"}
 
 

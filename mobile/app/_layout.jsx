@@ -5,6 +5,8 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Notifications from "expo-notifications";
 import { ThemeProvider, useTheme } from "../src/theme";
 import { AuthProvider, useAuth } from "../src/AuthContext";
+import { startPhoneStateMonitoring, stopPhoneStateMonitoring } from "../src/phoneStateMonitor";
+import { setupNotificationChannels } from "../src/notificationManager";
 
 // ── Notification tap handler ──────────────────────────────────────────────────
 function NotificationHandler() {
@@ -58,6 +60,25 @@ function AuthGate() {
 // ── Shell ─────────────────────────────────────────────────────────────────────
 function Shell() {
   const { theme, mode } = useTheme();
+  
+  // Initialize call recording monitoring
+  useEffect(() => {
+    let cleanup = () => {};
+    
+    async function init() {
+      // Setup notification channels
+      await setupNotificationChannels();
+      
+      // Start phone state monitoring for auto-recording
+      startPhoneStateMonitoring();
+      
+      cleanup = () => stopPhoneStateMonitoring();
+    }
+    
+    init();
+    return cleanup;
+  }, []);
+  
   return (
     <>
       <StatusBar style={mode === "dark" ? "light" : "dark"} />

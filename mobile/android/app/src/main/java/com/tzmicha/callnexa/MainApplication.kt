@@ -21,6 +21,8 @@ import expo.modules.ReactNativeHostWrapper
 
 class MainApplication : Application(), ReactApplication {
 
+  private var callStateListener: CallStateListener? = null
+
   override val reactNativeHost: ReactNativeHost = ReactNativeHostWrapper(
       this,
       object : DefaultReactNativeHost(this) {
@@ -52,6 +54,15 @@ class MainApplication : Application(), ReactApplication {
     }
     loadReactNative(this)
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
+    
+    // Initialize call state listener for auto-recording
+    // Delayed to allow React Native context to initialize
+    android.os.Handler(mainLooper).postDelayed({
+      reactNativeHost.reactInstanceManager.currentReactContext?.let { context ->
+        callStateListener = CallStateListener(context as com.facebook.react.bridge.ReactApplicationContext)
+        callStateListener?.startListening()
+      }
+    }, 2000)
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {
