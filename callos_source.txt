@@ -13,9 +13,9 @@
 
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CallOS - Never Miss a Sales Call - Convert Every Sales Call into Revenue - CallOS</title>
+    <title>CallNexa - Never Miss a Sales Call - Convert Every Sales Call into Revenue - CallNexa</title>
 
-    <link rel="icon" href="/assets/callos-logo-icon.png?v=gnniCCj2qj2WDAWGnj9JSIq_bqfrfzFp22qL8tAxpLI" type="image/png" />
+    <link rel="icon" href="/assets/callnexa-logo-icon.png?v=gnniCCj2qj2WDAWGnj9JSIq_bqfrfzFp22qL8tAxpLI" type="image/png" />
     <!-- Font Awesome CDN -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     
@@ -135,8 +135,8 @@
         transform: scale(1.03);
     }
 
-    /* CallOS videos middle section */
-    .callos-videos-section {
+    /* CallNexa videos middle section */
+    .callnexa-videos-section {
         padding: 4rem 0 5rem;
         background: transparent;
     }
@@ -1320,14 +1320,14 @@
     <div class="navbar-container">
         <div class="navbar-content">
             <a href="/" class="navbar-brand">
-                <img src="/assets/callos-logo-wordmark.png" alt="CallOS" class="navbar-logo-img" />
+                <img src="/assets/callnexa-logo-wordmark.png" alt="CallNexa" class="navbar-logo-img" />
             </a>
 
             <!-- Desktop Links -->
             <div class="navbar-links">
                 <a href="/#features" class="navbar-link">Feature</a>
                 <a href="/#supported-devices" class="navbar-link">Devices</a>
-                <a href="/#how-it-works" class="navbar-link">How CallOS Works?</a>
+                <a href="/#how-it-works" class="navbar-link">How CallNexa Works?</a>
                 <a href="/#industries" class="navbar-link">Industries</a>
                 <a href="/#pricing" class="navbar-link">Pricing</a>
                 <a href="/#faq" class="navbar-link">FAQ</a>
@@ -1356,7 +1356,7 @@
         <nav class="mobile-menu-content">
             <a href="/#features" class="mobile-link">Feature</a>
             <a href="/#supported-devices" class="mobile-link">Devices</a>
-            <a href="/#how-it-works" class="mobile-link">How CallOS Works?</a>
+            <a href="/#how-it-works" class="mobile-link">How CallNexa Works?</a>
             <a href="/#industries" class="mobile-link">Industries</a>
             <a href="/#pricing" class="mobile-link">Pricing</a>
             <a href="/#faq" class="mobile-link">FAQ</a>
@@ -1403,7 +1403,7 @@
 
                 <div class="hero-subheadline">
                     <p class="hero-subtitle-2">
-                        CallOS brings together call tracking, call recording, call logs, AI Transcript, Transcribe, and Dashboard Analytics - so your team closes more deals with full visibility.
+                        CallNexa brings together call tracking, call recording, call logs, AI Transcript, Transcribe, and Dashboard Analytics - so your team closes more deals with full visibility.
                     </p>
                 </div>
 
@@ -1413,7 +1413,7 @@
                         Signup - Its free
                     </a>
                     <a href="#how-it-works" class="btn-hero-outline-new" style="text-decoration: none; display: inline-flex; align-items: center; justify-content: center;">
-                        How CallOS Works?
+                        How CallNexa Works?
                     </a>
                 </div>
             </div>
@@ -1511,7 +1511,7 @@
                 <div class="callos-videos-panel">
                     <div class="callos-videos-copy">
                         <h2 id="callos-videos-heading" class="callos-videos-title">Where sales meets clarity</h2>
-                        <p class="callos-videos-subtitle">CallOS makes it easy to review real conversations, coach teams faster, and improve outcomes from every call.</p>
+                        <p class="callos-videos-subtitle">CallNexa makes it easy to review real conversations, coach teams faster, and improve outcomes from every call.</p>
                     </div>
 
                     <div class="callos-videos-carousel" data-callos-video-carousel>

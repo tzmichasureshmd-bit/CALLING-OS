@@ -273,6 +273,47 @@ function DeviceDetail({ d, connected }) {
         </div>
       </div>
 
+      {/* SIM Configuration */}
+      {d.sims && d.sims.length > 0 && (
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "18px 20px", marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+            <Smartphone size={15} color="var(--text-muted)" />
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>SIM Configuration</span>
+            <span style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: "auto" }}>{d.sims.length} {d.sims.length === 1 ? 'SIM' : 'SIMs'} detected</span>
+          </div>
+          {d.sims.map((sim, idx) => (
+            <div key={sim.id || idx} style={{
+              padding: "10px 12px",
+              borderRadius: 8,
+              background: sim.is_selected ? "var(--success-soft)" : "var(--bg-subtle)",
+              border: `1px solid ${sim.is_selected ? "var(--success)" : "var(--border)"}`,
+              marginBottom: idx < d.sims.length - 1 ? 8 : 0,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                {sim.is_selected && <CheckCircle2 size={14} color="var(--success)" />}
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+                  {sim.display_name || sim.carrier || `SIM ${sim.slot + 1}`}
+                </span>
+                {sim.is_selected && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--success)", background: "var(--success-soft)", padding: "1px 6px", borderRadius: 4, marginLeft: "auto" }}>ACTIVE</span>
+                )}
+                {!sim.is_active && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-dim)", background: "var(--bg-subtle)", padding: "1px 6px", borderRadius: 4, marginLeft: "auto" }}>INACTIVE</span>
+                )}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4 }}>
+                {sim.phone_number && <div>📱 {sim.phone_number}</div>}
+                {sim.subscription_id && <div style={{ opacity: 0.7 }}>ID: {sim.subscription_id} • Slot {sim.slot + 1}</div>}
+                {!sim.phone_number && !sim.subscription_id && <div style={{ opacity: 0.7 }}>Slot {sim.slot + 1}</div>}
+              </div>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 12, lineHeight: 1.5 }}>
+            💡 Employee selects which SIM to use for business calls in mobile app Settings → SIM Configuration
+          </div>
+        </div>
+      )}
+
       {/* Device info */}
       <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: "18px 20px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
@@ -283,7 +324,6 @@ function DeviceDetail({ d, connected }) {
           ["Model",           d.device],
           ["Android version", d.android],
           ["App version",     d.appVersion],
-          ["SIM / Carrier",   d.sim],
           ...(d.wifi_ssid ? [["WiFi", d.wifi_ssid]] : []),
           ...(d.latitude  ? [["Last location", `${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`]] : []),
           ["Device ID",       d.id],

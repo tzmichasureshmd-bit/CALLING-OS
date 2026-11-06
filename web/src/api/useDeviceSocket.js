@@ -23,6 +23,12 @@ function normalizeDevice(d) {
     : "healthy";
   // background_sync_status is NOT a runtime permission — never derive from perms bool
   const bgStatus = d.background_sync_status || perms.backgroundSync || null;
+  // Find the selected SIM (is_selected=true), fallback to first SIM
+  const selectedSim = (d.sims || []).find(s => s.is_selected) || (d.sims || [])[0];
+  const simDisplay = selectedSim 
+    ? (selectedSim.display_name || selectedSim.carrier || selectedSim.phone_number || `SIM ${selectedSim.slot + 1}`)
+    : "No SIM";
+  
   return {
     id:                  d.id,
     employee:            d.employee_name || d.employee_id,
@@ -32,7 +38,9 @@ function normalizeDevice(d) {
     battery:             d.battery_level ?? 0,
     lastSeenAt:          d.last_seen_at || null,
     permissions:         { callLog, phoneState, contacts, storage, recording },
-    sim:                 d.sims?.[0]?.carrier || d.sims?.[0]?.phone_number || "SIM 1",
+    sim:                 simDisplay,
+    sims:                d.sims || [],  // Include full SIM array for detailed views
+    selectedSim:         selectedSim || null,
     backgroundStatus:    bgStatus,   // "limited" | "restricted" | null
     network_type:        d.network_type || null,
     is_online:           !!d.is_online,

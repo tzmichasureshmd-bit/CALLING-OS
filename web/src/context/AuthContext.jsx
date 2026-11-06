@@ -1,7 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { authApi } from "../api/resources.js";
 import { setAccessToken } from "../api/client.js";
-import { signInWithGoogle, firebaseSignOut, sendOtp } from "../lib/firebase.js";
 
 const AuthContext = createContext(null);
 
@@ -41,21 +40,8 @@ export function AuthProvider({ children }) {
     return _saveSession(data);
   }, [_saveSession]);
 
-  const loginWithGoogle = useCallback(async () => {
-    const idToken = await signInWithGoogle();
-    const data = await authApi.google(idToken);
-    return _saveSession(data);
-  }, [_saveSession]);
-
-  const loginWithOtp = useCallback(async (confirmationResult, otp) => {
-    const result = await confirmationResult.confirm(otp);
-    const idToken = await result.user.getIdToken();
-    const data = await authApi.otp(idToken);  // dedicated OTP endpoint
-    return _saveSession(data);
-  }, [_saveSession]);
-
   const logout = useCallback(async () => {
-    await Promise.allSettled([authApi.logout(), firebaseSignOut()]);
+    await authApi.logout().catch(() => {});
     setAccessToken(null);
     localStorage.removeItem("callos_token");
     localStorage.removeItem("callos_refresh_token");
@@ -70,7 +56,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, setUser, login, register, loginWithGoogle, loginWithOtp, logout, isAuthed: !!user }}>
+    <AuthContext.Provider value={{ user, setUser, login, register, logout, isAuthed: !!user }}>
       {children}
     </AuthContext.Provider>
   );

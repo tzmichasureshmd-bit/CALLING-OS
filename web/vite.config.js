@@ -4,6 +4,10 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  define: {
+    'process.env': {},
+    global: 'globalThis',
+  },
   plugins: [
     react(),
     tailwindcss(),
@@ -58,6 +62,12 @@ export default defineConfig({
       // Allow Google OAuth popup to communicate back to the opener
       "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
       "Cross-Origin-Embedder-Policy": "unsafe-none",
+    },
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+      },
     },
   },
 })

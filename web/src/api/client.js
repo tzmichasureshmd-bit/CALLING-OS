@@ -1,7 +1,9 @@
 import axios from "axios";
 
 // Centralized axios instance. Base URL from env; no hardcoded server.
-const baseURL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
+// In local dev (no VITE_API_URL), use a relative path so Vite's proxy
+// forwards /api/v1/* to the backend — no CORS issues.
+const baseURL = import.meta.env.VITE_API_URL || "/api/v1";
 
 export const client = axios.create({
   baseURL,
