@@ -38,7 +38,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
-          source: "backend/app/,backend/migrations/,backend/migration_runner.py,backend/Dockerfile,backend/docker-compose.yml,web/"
+          source: "backend/app/,backend/migrations/,backend/migration_runner.py,backend/Dockerfile,backend/docker-compose.yml,backend/requirements.txt,web/"
           target: "/opt/callingos/"
           strip_components: 0
           overwrite: true
