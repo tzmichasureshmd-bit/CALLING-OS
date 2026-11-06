@@ -18,12 +18,13 @@ const CallLogs     = lazy(() => import("./pages/CallLogs.jsx"));
 const Leads        = lazy(() => import("./pages/Leads.jsx"));
 const Opportunities      = lazy(() => import("./pages/Opportunities.jsx"));
 const DeviceHealth = lazy(() => import("./pages/DeviceHealth.jsx"));
-const Transcribe   = lazy(() => import("./pages/Transcribe.jsx"));
+const Integrations  = lazy(() => import("./pages/Integrations.jsx"));
 const OpportunitiesClosed = lazy(() => import("./pages/OpportunitiesClosed.jsx"));
 const Reports      = lazy(() => import("./pages/Reports.jsx"));
 const Subscription = lazy(() => import("./pages/Subscription.jsx"));
 const Invoices     = lazy(() => import("./pages/Invoices.jsx"));
 const SettingsPage = lazy(() => import("./pages/Settings.jsx"));
+const Transcribe   = lazy(() => import("./pages/Transcribe.jsx"));
 const FollowUps    = lazy(() => import("./pages/FollowUps.jsx"));
 const LandingPage  = lazy(() => import("./pages/LandingPage.jsx"));
 const FeaturesPage = lazy(() => import("./pages/FeaturesPage.jsx"));
@@ -33,7 +34,7 @@ const ORG_TITLES = {
   "/dashboard": "Dashboard", "/analytics": "Analytics", "/call-logs": "Calls",
   "/manage/employees": "Employees", "/manage/excluded": "Excluded Numbers",
   "/leads": "Leads", "/opportunities": "Opportunities",
-  "/device-health": "Device Health", "/transcribe": "Transcribe",
+  "/integrations": "Integrations",
   "/opportunities-closed": "Closed Deals", "/reports": "Reports",
   "/subscription": "Subscription", "/invoices": "Invoices", "/settings": "Settings",
   "/follow-ups": "Follow-ups",
@@ -51,7 +52,7 @@ function SuperAdminTopbar() {
         </div>
         <div>
           <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>Super Admin</div>
-          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>CALL OS Platform</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)" }}>CallNexa Platform</div>
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -85,7 +86,7 @@ function SuperAdminShell() {
 function OrgShell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
-  const title = ORG_TITLES[location.pathname] || "CALL OS";
+  const title = ORG_TITLES[location.pathname] || "CallNexa";
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)" }}>
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
@@ -105,6 +106,7 @@ function OrgShell() {
               <Route path="/opportunities" element={<Opportunities />} />
               <Route path="/device-health" element={<DeviceHealth />} />
               <Route path="/transcribe" element={<Transcribe />} />
+              <Route path="/integrations" element={<Integrations />} />
               <Route path="/opportunities-closed" element={<OpportunitiesClosed />} />
               <Route path="/follow-ups" element={<FollowUps />} />
               <Route path="/reports" element={<Reports />} />

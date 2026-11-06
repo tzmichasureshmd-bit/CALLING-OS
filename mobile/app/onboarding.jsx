@@ -169,8 +169,10 @@ function CompanyCodeStep({ onDone }) {
           placeholderTextColor={theme.dim}
           autoCapitalize="characters"
           autoCorrect={false}
-          style={{ flex: 1, fontSize: 20, fontWeight: "800", color: palette.teal, letterSpacing: 2, paddingVertical: 14 }}
+          style={{ flex: 1, fontSize: 20, fontWeight: "800", color: palette.teal, letterSpacing: 2, paddingVertical: 14, minHeight: 44 }}
           onSubmitEditing={verify}
+          editable={true}
+          selectTextOnFocus={true}
         />
       </View>
 
@@ -254,16 +256,46 @@ function SignUpStep({ companyCode, onDone }) {
       ) : null}
       <View style={{ gap: 4 }}>
         <Text style={{ fontSize: 12, fontWeight: "600", color: theme.muted }}>FULL NAME</Text>
-        <TextInput value={f.name} onChangeText={set("name")} placeholder="Rahul Sharma" placeholderTextColor={theme.dim} style={inp} />
+        <TextInput 
+          value={f.name} 
+          onChangeText={set("name")} 
+          placeholder="Rahul Sharma" 
+          placeholderTextColor={theme.dim} 
+          style={inp} 
+          editable={true}
+          selectTextOnFocus={true}
+          textContentType="name"
+        />
       </View>
       <View style={{ gap: 4 }}>
         <Text style={{ fontSize: 12, fontWeight: "600", color: theme.muted }}>EMAIL</Text>
-        <TextInput value={f.email} onChangeText={set("email")} placeholder="rahul@company.com" placeholderTextColor={theme.dim} keyboardType="email-address" autoCapitalize="none" style={inp} />
+        <TextInput 
+          value={f.email} 
+          onChangeText={set("email")} 
+          placeholder="rahul@company.com" 
+          placeholderTextColor={theme.dim} 
+          keyboardType="email-address" 
+          autoCapitalize="none" 
+          style={inp} 
+          editable={true}
+          selectTextOnFocus={true}
+          textContentType="emailAddress"
+        />
       </View>
       <View style={{ gap: 4 }}>
         <Text style={{ fontSize: 12, fontWeight: "600", color: theme.muted }}>PASSWORD</Text>
         <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: theme.bg, borderRadius: 11, borderWidth: 1, borderColor: theme.border, paddingHorizontal: 13 }}>
-          <TextInput value={f.password} onChangeText={set("password")} placeholder="Min 8 characters" placeholderTextColor={theme.dim} secureTextEntry={!showPw} style={{ flex: 1, paddingVertical: 13, fontSize: 14, color: theme.primary }} />
+          <TextInput 
+            value={f.password} 
+            onChangeText={set("password")} 
+            placeholder="Min 8 characters" 
+            placeholderTextColor={theme.dim} 
+            secureTextEntry={!showPw} 
+            style={{ flex: 1, paddingVertical: 13, fontSize: 14, color: theme.primary, minHeight: 44 }} 
+            editable={true}
+            selectTextOnFocus={true}
+            textContentType="password"
+          />
           <Pressable onPress={() => setShowPw((s) => !s)} style={{ padding: 4 }}>
             <Ionicons name={showPw ? "eye-off-outline" : "eye-outline"} size={18} color={theme.dim} />
           </Pressable>
@@ -291,11 +323,46 @@ function PermissionsStep({ onDone }) {
   const scaleAnim = useRef(new Animated.Value(0)).current;
 
   const LIST = [
-    { key: "callLog",    icon: "call-outline",           title: "Read Call Log",    sub: "Sync your call history to dashboard",     critical: true },
-    { key: "phoneState", icon: "phone-portrait-outline", title: "Phone State",      sub: "Detect active calls & SIM info",          critical: true },
-    { key: "contacts",   icon: "people-outline",         title: "Contacts",         sub: "Match caller names automatically",        critical: false },
-    { key: "storage",    icon: "folder-outline",         title: "Storage",          sub: "Access call recordings",                  critical: false },
-    { key: "recording",  icon: "mic-outline",            title: "Microphone",       sub: "Record calls for transcription",          critical: false },
+    { 
+      key: "callLog", 
+      icon: "call", 
+      title: "Call History", 
+      sub: "Read your call logs to track customer conversations",
+      critical: true,
+      color: "#0ea5e9",
+    },
+    { 
+      key: "phoneState", 
+      icon: "phone-portrait", 
+      title: "Phone Information", 
+      sub: "Detect active calls and identify your SIM cards",
+      critical: true,
+      color: "#8b5cf6",
+    },
+    { 
+      key: "contacts", 
+      icon: "people", 
+      title: "Contacts", 
+      sub: "Match phone numbers with customer names",
+      critical: false,
+      color: "#10b981",
+    },
+    { 
+      key: "storage", 
+      icon: "folder-open", 
+      title: "Storage", 
+      sub: "Access call recordings saved on your device",
+      critical: false,
+      color: "#f59e0b",
+    },
+    { 
+      key: "recording", 
+      icon: "mic", 
+      title: "Microphone", 
+      sub: "Enable call recording for later review",
+      critical: false,
+      color: "#ec4899",
+    },
   ];
 
   async function request() {
@@ -309,11 +376,11 @@ function PermissionsStep({ onDone }) {
         setTimeout(() => onDone({}), 1800);
       } else {
         Alert.alert(
-          "⚠️ Required Permissions Missing",
-          "Call Log and Phone State are required for CallNexa to sync your calls.",
+          "Permissions Needed",
+          "CallNexa needs Call History and Phone Information to sync your calls to the dashboard.",
           [
-            { text: "Try Again", onPress: request },
-            { text: "Open Settings", onPress: () => Linking.openSettings() },
+            { text: "Try Again", onPress: request, style: "default" },
+            { text: "Open Settings", onPress: () => Linking.openSettings(), style: "cancel" },
           ]
         );
       }
@@ -321,55 +388,274 @@ function PermissionsStep({ onDone }) {
   }
 
   const checked = Object.keys(perms).length > 0;
+  const allGranted = checked && LIST.every(p => perms[p.key]);
 
   return (
-    <View style={{ gap: 10 }}>
-      <Text style={{ fontSize: 17, fontWeight: "800", color: theme.primary, marginBottom: 2 }}>App Permissions</Text>
-      <Text style={{ fontSize: 13, color: theme.muted, lineHeight: 19, marginBottom: 4 }}>
-        CallNexa needs these to read your call logs and sync them — just like other call tracking apps.
-      </Text>
+    <View style={{ gap: 16 }}>
+      {/* Header - Clear & Friendly */}
+      <View style={{ marginBottom: 8 }}>
+        <Text style={{ fontSize: 24, fontWeight: "700", color: theme.primary, marginBottom: 8, lineHeight: 30 }}>
+          Grant Permissions
+        </Text>
+        <Text style={{ fontSize: 15, color: theme.muted, lineHeight: 22 }}>
+          CallNexa needs a few permissions to sync your calls and help you track customer conversations.
+        </Text>
+      </View>
+
+      {/* Permission Cards - Clean & Scannable */}
       {LIST.map((p) => {
         const granted = perms[p.key];
         const denied  = checked && !granted;
+        const borderColor = granted ? "#10b981" : denied && p.critical ? "#ef4444" : theme.border;
+        
         return (
-          <View key={p.key} style={{ flexDirection: "row", alignItems: "center", gap: 11, backgroundColor: granted ? palette.emerald + "0f" : denied && p.critical ? palette.red + "0f" : theme.bg, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: granted ? palette.emerald + "44" : denied && p.critical ? palette.red + "44" : theme.border }}>
-            <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: (granted ? palette.emerald : p.critical ? palette.red : palette.teal) + "1a", alignItems: "center", justifyContent: "center" }}>
-              <Ionicons name={p.icon} size={18} color={granted ? palette.emerald : p.critical ? palette.red : theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <Text style={{ fontSize: 13.5, fontWeight: "600", color: theme.primary }}>{p.title}</Text>
-                {p.critical && <View style={{ backgroundColor: palette.red + "22", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}><Text style={{ fontSize: 9, fontWeight: "700", color: palette.red }}>REQUIRED</Text></View>}
+          <View 
+            key={p.key} 
+            style={{ 
+              backgroundColor: theme.surface,
+              borderRadius: 16, 
+              padding: 16,
+              borderWidth: 2,
+              borderColor: borderColor,
+              shadowColor: granted ? "#10b981" : "#000",
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: granted ? 0.15 : 0.05,
+              shadowRadius: 4,
+              elevation: granted ? 3 : 1,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+              {/* Icon */}
+              <View style={{ 
+                width: 48, 
+                height: 48, 
+                borderRadius: 12,
+                backgroundColor: granted ? "#10b98115" : p.color + "15",
+                alignItems: "center",
+                justifyContent: "center",
+              }}>
+                <Ionicons 
+                  name={granted ? "checkmark-circle" : p.icon} 
+                  size={24} 
+                  color={granted ? "#10b981" : p.color} 
+                />
               </View>
-              <Text style={{ fontSize: 11, color: theme.dim, marginTop: 1 }}>{p.sub}</Text>
+
+              {/* Content */}
+              <View style={{ flex: 1, paddingTop: 2 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <Text style={{ 
+                    fontSize: 16, 
+                    fontWeight: "600", 
+                    color: theme.primary,
+                    flex: 1,
+                  }}>
+                    {p.title}
+                  </Text>
+                  {p.critical && (
+                    <View style={{ 
+                      backgroundColor: "#ef444415", 
+                      paddingHorizontal: 8, 
+                      paddingVertical: 3,
+                      borderRadius: 6,
+                    }}>
+                      <Text style={{ 
+                        fontSize: 10, 
+                        fontWeight: "700", 
+                        color: "#ef4444",
+                        letterSpacing: 0.5,
+                      }}>
+                        REQUIRED
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={{ 
+                  fontSize: 14, 
+                  color: theme.dim, 
+                  lineHeight: 20,
+                }}>
+                  {p.sub}
+                </Text>
+              </View>
+
+              {/* Status */}
+              <View style={{ paddingTop: 4 }}>
+                {granted ? (
+                  <View style={{ 
+                    width: 28, 
+                    height: 28, 
+                    borderRadius: 14,
+                    backgroundColor: "#10b98120",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}>
+                    <Ionicons name="checkmark" size={18} color="#10b981" />
+                  </View>
+                ) : checked ? (
+                  <View style={{ 
+                    width: 28, 
+                    height: 28, 
+                    borderRadius: 14,
+                    backgroundColor: p.critical ? "#ef444420" : theme.border,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}>
+                    <Ionicons 
+                      name="close" 
+                      size={18} 
+                      color={p.critical ? "#ef4444" : theme.dim} 
+                    />
+                  </View>
+                ) : null}
+              </View>
             </View>
-            <Ionicons name={granted ? "checkmark-circle" : checked ? "close-circle" : "ellipse-outline"} size={20} color={granted ? palette.emerald : checked ? (p.critical ? palette.red : theme.dim) : theme.dim} />
           </View>
         );
       })}
-      <View style={{ backgroundColor: palette.amber + "15", borderRadius: 12, padding: 12, borderWidth: 1, borderColor: palette.amber + "33", flexDirection: "row", gap: 10 }}>
-        <Ionicons name="layers-outline" size={18} color={palette.amber} style={{ marginTop: 1 }} />
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 12.5, fontWeight: "700", color: theme.primary }}>Display Over Other Apps</Text>
-          <Text style={{ fontSize: 11.5, color: theme.muted, marginTop: 2, lineHeight: 17 }}>Allows CallNexa to show sync status during calls.{"\n"}Go to <Text style={{ fontWeight: "700", color: palette.amber }}>Settings → Apps → CallNexa → Display over other apps</Text> and enable it.</Text>
-          <Pressable onPress={() => Linking.openSettings()} style={{ marginTop: 8, backgroundColor: palette.amber + "22", borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10, alignSelf: "flex-start" }}>
-            <Text style={{ fontSize: 12, fontWeight: "700", color: palette.amber }}>Open Settings →</Text>
-          </Pressable>
+
+      {/* Helper Info - Supportive & Transparent */}
+      <View style={{ 
+        backgroundColor: "#f59e0b10", 
+        borderRadius: 14, 
+        padding: 16,
+        borderWidth: 1,
+        borderColor: "#f59e0b30",
+      }}>
+        <View style={{ flexDirection: "row", gap: 12 }}>
+          <Ionicons name="information-circle" size={22} color="#f59e0b" style={{ marginTop: 1 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ 
+              fontSize: 14, 
+              fontWeight: "600", 
+              color: theme.primary, 
+              marginBottom: 6,
+            }}>
+              Why do we need these?
+            </Text>
+            <Text style={{ fontSize: 13, color: theme.muted, lineHeight: 19 }}>
+              CallNexa reads your call logs to automatically sync customer conversations to your dashboard. We never share your data with third parties.
+            </Text>
+          </View>
         </View>
       </View>
-      <Pressable onPress={request} disabled={requesting || success}>
-        <LinearGradient colors={gradientBrand} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ height: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 }}>
-          {requesting ? <ActivityIndicator color="#fff" size="small" /> : <><Ionicons name="shield-checkmark" size={18} color="#fff" /><Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>Grant All Permissions</Text></>}
-        </LinearGradient>
+
+      {/* Optional: Display Over Apps - Secondary Action */}
+      <Pressable 
+        onPress={() => Linking.openSettings()}
+        style={{ 
+          backgroundColor: theme.bg,
+          borderRadius: 12, 
+          padding: 14,
+          borderWidth: 1,
+          borderColor: theme.border,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 12,
+        }}
+      >
+        <Ionicons name="layers-outline" size={20} color={theme.muted} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 13, fontWeight: "600", color: theme.primary }}>
+            Display over other apps
+          </Text>
+          <Text style={{ fontSize: 12, color: theme.dim }}>
+            Optional · Shows sync status during calls
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={theme.dim} />
       </Pressable>
-      {success && (
-        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.78)", borderRadius: 16, alignItems: "center", justifyContent: "center", zIndex: 99 }}>
-          <Animated.View style={{ transform: [{ scale: scaleAnim }], alignItems: "center" }}>
-            <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: palette.emerald, alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-              <Ionicons name="checkmark" size={44} color="#fff" />
+
+      {/* Primary Action - Clear & Confident */}
+      <Pressable 
+        onPress={request} 
+        disabled={requesting || success}
+        style={{ marginTop: 8 }}
+      >
+        <View style={{ 
+          height: 56, 
+          borderRadius: 14,
+          backgroundColor: requesting || success ? theme.border : palette.teal,
+          alignItems: "center",
+          justifyContent: "center",
+          shadowColor: palette.teal,
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: requesting || success ? 0 : 0.25,
+          shadowRadius: 8,
+          elevation: requesting || success ? 0 : 4,
+        }}>
+          {requesting ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <ActivityIndicator color="#fff" size="small" />
+              <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
+                Requesting...
+              </Text>
             </View>
-            <Text style={{ fontSize: 20, fontWeight: "800", color: "#fff" }}>All Permissions Granted!</Text>
-            <Text style={{ fontSize: 13, color: "rgba(255,255,255,0.8)", marginTop: 8, textAlign: "center", lineHeight: 20 }}>Call logs will sync automatically.{"\n"}Recordings and contacts are accessible.</Text>
+          ) : (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Ionicons name="shield-checkmark" size={20} color="#fff" />
+              <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
+                {allGranted ? "All Granted · Continue" : "Grant Permissions"}
+              </Text>
+            </View>
+          )}
+        </View>
+      </Pressable>
+
+      {/* Success State - Delightful Feedback */}
+      {success && (
+        <View style={{ 
+          position: "absolute", 
+          top: -40, 
+          left: -20, 
+          right: -20, 
+          bottom: -40,
+          backgroundColor: "rgba(16, 24, 39, 0.95)",
+          borderRadius: 20,
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 999,
+        }}>
+          <Animated.View style={{ 
+            transform: [{ scale: scaleAnim }], 
+            alignItems: "center",
+          }}>
+            {/* Success Icon */}
+            <View style={{ 
+              width: 88, 
+              height: 88, 
+              borderRadius: 44,
+              backgroundColor: "#10b981",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 20,
+              shadowColor: "#10b981",
+              shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.5,
+              shadowRadius: 20,
+              elevation: 10,
+            }}>
+              <Ionicons name="checkmark" size={52} color="#fff" />
+            </View>
+            
+            {/* Success Message */}
+            <Text style={{ 
+              fontSize: 26, 
+              fontWeight: "700", 
+              color: "#fff", 
+              marginBottom: 8,
+            }}>
+              All Set!
+            </Text>
+            <Text style={{ 
+              fontSize: 15, 
+              color: "rgba(255,255,255,0.7)", 
+              textAlign: "center",
+              lineHeight: 22,
+              paddingHorizontal: 40,
+            }}>
+              Permissions granted{"\n"}Your calls will sync automatically
+            </Text>
           </Animated.View>
         </View>
       )}
@@ -522,7 +808,18 @@ function SimVerifyStep({ simData, onDone }) {
             <Text style={{ fontSize: 12, fontWeight: "600", color: theme.muted }}>PHONE NUMBER</Text>
             <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: theme.bg, borderRadius: 11, borderWidth: 1, borderColor: theme.border, paddingHorizontal: 13 }}>
               <Text style={{ fontSize: 14, color: theme.muted, paddingVertical: 13, paddingRight: 8 }}>+91</Text>
-              <TextInput value={phone} onChangeText={(t) => { setPhone(t.replace(/\D/g,"")); setError(""); }} placeholder="98765 43210" placeholderTextColor={theme.dim} keyboardType="phone-pad" maxLength={10} style={{ flex: 1, fontSize: 16, fontWeight: "600", color: theme.primary, paddingVertical: 13 }} />
+              <TextInput 
+                value={phone} 
+                onChangeText={(t) => { setPhone(t.replace(/\D/g,"")); setError(""); }} 
+                placeholder="98765 43210" 
+                placeholderTextColor={theme.dim} 
+                keyboardType="phone-pad" 
+                maxLength={10} 
+                style={{ flex: 1, fontSize: 16, fontWeight: "600", color: theme.primary, paddingVertical: 13, minHeight: 44 }} 
+                editable={true}
+                selectTextOnFocus={true}
+                textContentType="telephoneNumber"
+              />
             </View>
           </View>
           <Pressable nativeID="otp-btn" onPress={sendOtp} disabled={sending}>
@@ -539,7 +836,18 @@ function SimVerifyStep({ simData, onDone }) {
           </View>
           <View style={{ gap: 4 }}>
             <Text style={{ fontSize: 12, fontWeight: "600", color: theme.muted }}>ENTER OTP</Text>
-            <TextInput value={otp} onChangeText={(t) => { setOtp(t.replace(/\D/g,"")); setError(""); }} placeholder="• • • • • •" placeholderTextColor={theme.dim} keyboardType="number-pad" maxLength={6} style={{ ...inp, fontSize: 28, fontWeight: "800", letterSpacing: 14, textAlign: "center" }} />
+            <TextInput 
+              value={otp} 
+              onChangeText={(t) => { setOtp(t.replace(/\D/g,"")); setError(""); }} 
+              placeholder="• • • • • •" 
+              placeholderTextColor={theme.dim} 
+              keyboardType="number-pad" 
+              maxLength={6} 
+              style={{ ...inp, fontSize: 28, fontWeight: "800", letterSpacing: 14, textAlign: "center", minHeight: 52 }} 
+              editable={true}
+              selectTextOnFocus={true}
+              textContentType="oneTimeCode"
+            />
           </View>
           <Pressable onPress={verifyOtp} disabled={verifying || otp.length !== 6}>
             <LinearGradient colors={otp.length === 6 ? gradientBrand : [theme.border, theme.border]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ height: 52, borderRadius: 14, alignItems: "center", justifyContent: "center" }}>

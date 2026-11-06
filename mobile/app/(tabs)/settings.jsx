@@ -451,7 +451,50 @@ export default function Profile() {
       <SimConfigModal visible={simOpen} onClose={() => setSimOpen(false)} sims={sims} selectedSim={selectedSim} onSelectSim={async (sim) => {
           setSelectedSim(sim);
           const { saveSimSelection, clearSimSelection } = require('../../src/simSelectionService');
-          if (sim) { await saveSimSelection(sim); } else { await clearSimSelection(); }
+          const { runSyncCycle } = require('../../src/syncService');
+          
+          // 1. Save selection locally
+          if (sim) { 
+            await saveSimSelection(sim); 
+          } else { 
+            await clearSimSelection(); 
+          }
+          
+          // 2. Sync to backend (update is_selected flag in database)
+          try {
+            const deviceId = await AsyncStorage.getItem("callos_device_id");
+            if (deviceId && sims.length > 0) {
+              // Map all SIMs with updated is_selected flag
+              const updatedSims = sims.map(s => ({
+                slot: s.slot,
+                carrier: s.carrierName || null,
+                display_name: s.display_name || `SIM ${s.slot + 1}`,
+                phone_number: s.phoneNumber || null,
+                mcc: s.mcc || null,
+                mnc: s.mnc || null,
+                country_iso: s.countryIso || null,
+                subscription_id: s.subscriptionId || null,
+                network_type: s.networkType || null,
+                is_active: true,
+                is_selected: sim 
+                  ? (sim.subscriptionId ? s.subscriptionId === sim.subscriptionId : s.slot === sim.slot)
+                  : false  // "All SIMs" mode = no SIM selected
+              }));
+              
+              await api.syncSims(deviceId, updatedSims);
+              console.log("[SIM_SELECTION_SYNCED] device=" + deviceId + " selected=" + (sim ? `slot ${sim.slot}` : "all"));
+              
+              // 3. Trigger immediate re-sync with new SIM filter
+              runSyncCycle(deviceId, "reconcile").catch(e => 
+                console.warn("[SIM_CHANGE_RESYNC_FAILED]", e)
+              );
+            }
+          } catch (err) {
+            console.error("[SIM_SYNC_TO_BACKEND_FAILED]", err);
+            Alert.alert("Warning", "SIM selection saved locally, but could not sync to dashboard. Changes will sync on next heartbeat.");
+          }
+          
+          setSimOpen(false);
         }} theme={theme} />
     </SafeAreaView>
   );

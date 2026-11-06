@@ -4,50 +4,61 @@ import { motion } from "framer-motion";
 import { PageHeader, Footer } from "./LandingPage.jsx";
 import { ArrowUpRight, Check, ChevronDown } from "lucide-react";
 
+const PRICING_TABLE = [
+  { users: "5 Members", validity: "1 Year", regular: "₹17,500", offer: "60% off", diwali: "₹6,999 + GST*" },
+  { users: "10 Members", validity: "1 Year", regular: "₹25,000", offer: "60% off", diwali: "₹9,999 + GST" },
+  { users: "15 Members", validity: "1 Year", regular: "₹42,500", offer: "60% off", diwali: "₹16,999 + GST" },
+  { users: "20 Members", validity: "1 Year", regular: "₹50,000", offer: "Special offer", diwali: "₹19,999 + GST" },
+];
+
 const PLANS = [
   {
     kicker: "STARTER",
-    name: "Get started free.",
-    desc: "For small teams exploring CALL OS.",
-    price: "Free",
+    name: "5-10 Members",
+    desc: "Perfect for small sales teams getting started.",
+    price: "₹6,999 - ₹9,999",
+    period: "per year + GST",
     features: [
-      "Up to 3 employees",
-      "Call log sync",
-      "Basic dashboard",
-      "7-day call history",
-      "Email support",
+      "Desktop + Mobile App",
+      "Call log sync & recordings",
+      "AI call summaries",
+      "Basic analytics dashboard",
+      "1 Year validity",
+      "60% Diwali discount",
     ],
     cta: "Get Started",
     dark: false,
   },
   {
     kicker: "GROWTH",
-    name: "Scale with your team.",
-    desc: "For growing sales teams that need more.",
-    price: "Contact Us",
+    name: "15-20 Members",
+    desc: "For growing teams that need full analytics.",
+    price: "₹16,999 - ₹19,999",
+    period: "per year + GST",
     features: [
-      "Unlimited employees",
-      "AI call summaries",
+      "Everything in Starter",
       "Full analytics suite",
-      "Call recordings and transcripts",
       "Opportunities pipeline",
+      "Call transcripts",
       "Priority support",
+      "Special Diwali pricing",
     ],
     cta: "Contact Sales",
     dark: true,
   },
   {
     kicker: "ENTERPRISE",
-    name: "Built around you.",
-    desc: "For large organisations with custom needs.",
-    price: "Custom",
+    name: "50+ Members",
+    desc: "Custom solutions for large organizations.",
+    price: "Custom Pricing",
+    period: "talk to us",
     features: [
       "Everything in Growth",
       "Custom integrations",
       "Dedicated account manager",
       "SLA guarantee",
       "On-premise deployment",
-      "Custom reporting",
+      "White-label options",
     ],
     cta: "Talk to Us",
     dark: false,
@@ -55,11 +66,12 @@ const PLANS = [
 ];
 
 const FAQS = [
-  { q: "How does CALL OS capture call data?", a: "The CALL OS mobile app reads the device call log and syncs data to the dashboard. Employees install the app, enter the company code, and grant the required permissions." },
+  { q: "How does CallNexa capture call data?", a: "The CallNexa mobile app reads the device call log and syncs data to the dashboard. Employees install the app, enter the company code, and grant the required permissions." },
   { q: "Does it work on all Android devices?", a: "Yes. The mobile app supports Android devices running Android 8 and above." },
   { q: "Is call recording stored securely?", a: "All recordings are encrypted in transit and at rest. Access is controlled by role-based permissions within your organisation." },
   { q: "Can managers see all employee calls?", a: "Yes. The web dashboard gives managers a complete view of all employee call activity, analytics, and AI summaries." },
   { q: "What is the company connect code?", a: "Each organisation gets a unique connect code. Employees enter this code in the mobile app to link their device to the company dashboard." },
+  { q: "How long is the Diwali offer valid?", a: "The Diwali special pricing (60% off) is valid for a limited time. Contact us to lock in your discount before the offer expires." },
 ];
 
 function PlanCard({ plan, i }) {
@@ -76,6 +88,7 @@ function PlanCard({ plan, i }) {
       <h3 className="co-plan-name">{plan.name}</h3>
       <p className="co-plan-desc">{plan.desc}</p>
       <div className="co-plan-price">{plan.price}</div>
+      <div className="co-plan-period">{plan.period}</div>
       <ul className="co-plan-features">
         {plan.features.map((f) => (
           <li key={f}><Check size={14} /><span>{f}</span></li>
@@ -102,11 +115,56 @@ export default function PricingPage() {
 
   return (
     <main className="co-site">
-      <PageHeader active="Pricing" kicker="PRICING" title={<>Clear value.<br/><em>Made for your team.</em></>} sub="Start free and scale as your team grows. Talk with us to find the right CALL OS setup." />
+      <PageHeader active="Pricing" kicker="PRICING" title={<>Clear value.<br/><em>Made for your team.</em></>} sub="Start with our Diwali special offer. Desktop + Mobile App included for all plans." />
 
       {/* Plans */}
       <section className="co-section co-pricing-page">
         <div className="co-container">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }} 
+            whileInView={{ opacity: 1, y: 0 }} 
+            viewport={{ once: true }} 
+            transition={{ duration: 0.6 }}
+            style={{ marginBottom: 32, textAlign: 'center' }}
+          >
+            <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 8 }}>
+              Desktop + Mobile App
+            </h2>
+            <p style={{ fontSize: 15, color: 'var(--co-muted)' }}>1 Year Validity • Diwali Special Offer</p>
+          </motion.div>
+
+          {/* Pricing Table */}
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }} 
+            whileInView={{ opacity: 1, y: 0 }} 
+            viewport={{ once: true }} 
+            transition={{ duration: 0.6, delay: 0.1 }}
+            style={{ marginBottom: 48 }}
+          >
+            <div className="co-pricing-table">
+              <div className="co-pricing-header">
+                <div>Plan / Users</div>
+                <div>Validity</div>
+                <div>Regular Price</div>
+                <div>Offer</div>
+                <div>Diwali Offer Price</div>
+              </div>
+              {PRICING_TABLE.map((row, i) => (
+                <div key={i} className="co-pricing-row">
+                  <div><strong>{row.users}</strong></div>
+                  <div>{row.validity}</div>
+                  <div className="co-price-strike">{row.regular}</div>
+                  <div className="co-price-offer">{row.offer}</div>
+                  <div className="co-price-final">{row.diwali}</div>
+                </div>
+              ))}
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--co-muted)', marginTop: 12, textAlign: 'center' }}>
+              * GST extra as applicable. Prices valid until stocks last.
+            </p>
+          </motion.div>
+
+          {/* Feature Cards */}
           <div className="co-plans-grid">
             {PLANS.map((plan, i) => <PlanCard key={plan.kicker} plan={plan} i={i} />)}
           </div>
@@ -177,6 +235,67 @@ export default function PricingPage() {
       <Footer />
 
       <style>{`
+        /* Pricing Table */
+        .co-pricing-table { 
+          border: 1.5px solid var(--co-border, #e5e7e6); 
+          border-radius: 16px; 
+          overflow: hidden; 
+          background: var(--co-surface, #fff);
+          box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+        }
+        .co-pricing-header, .co-pricing-row { 
+          display: grid; 
+          grid-template-columns: 1.5fr 1fr 1.2fr 1fr 1.5fr; 
+          align-items: center;
+        }
+        .co-pricing-header { 
+          background: var(--co-night, #07191c); 
+          color: #fff; 
+          font-size: 13px; 
+          font-weight: 700; 
+          letter-spacing: 0.3px; 
+          padding: 16px 20px;
+        }
+        .co-pricing-row { 
+          border-top: 1px solid var(--co-border, #e5e7e6); 
+          font-size: 14px; 
+          color: var(--co-ink, #101b1d); 
+          padding: 16px 20px;
+          transition: background 0.2s;
+        }
+        .co-pricing-row:hover { background: rgba(123, 217, 208, 0.05); }
+        .co-pricing-row:nth-child(even) { background: rgba(123, 217, 208, 0.03); }
+        .co-price-strike { 
+          text-decoration: line-through; 
+          color: var(--co-muted, #657170); 
+          font-size: 13px;
+        }
+        .co-price-offer { 
+          color: var(--co-teal, #7bd9d0); 
+          font-weight: 700; 
+          font-size: 13px;
+        }
+        .co-price-final { 
+          color: var(--co-night, #07191c); 
+          font-weight: 800; 
+          font-size: 16px;
+        }
+        @media(max-width: 900px) { 
+          .co-pricing-header, .co-pricing-row { 
+            grid-template-columns: 1fr 1fr; 
+            gap: 8px;
+          }
+          .co-pricing-header > div:nth-child(2),
+          .co-pricing-header > div:nth-child(3),
+          .co-pricing-header > div:nth-child(4),
+          .co-pricing-row > div:nth-child(2),
+          .co-pricing-row > div:nth-child(3),
+          .co-pricing-row > div:nth-child(4) { display: none; }
+          .co-pricing-header > div:first-child { grid-column: 1; }
+          .co-pricing-header > div:last-child { grid-column: 2; }
+        }
+
+        /* Plan Cards */
         .co-plans-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; align-items:start; }
         @media(max-width:900px){ .co-plans-grid{ grid-template-columns:1fr !important; max-width:480px; } }
 
@@ -191,11 +310,13 @@ export default function PricingPage() {
         .co-plan-name { font-size:22px; font-weight:800; margin:0 0 8px; color:inherit; }
         .co-plan-card-light .co-plan-name { color:var(--co-ink,#101b1d); }
         .co-plan-card-dark .co-plan-name { color:#fff; }
-        .co-plan-desc { font-size:13px; color:var(--co-muted,#657170); margin:0 0 20px; }
+        .co-plan-desc { font-size:13px; color:var(--co-muted,#657170); margin:0 0 12px; }
         .co-plan-card-dark .co-plan-desc { color:rgba(255,255,255,.5); }
-        .co-plan-price { font-size:40px; font-weight:800; letter-spacing:-1.5px; margin-bottom:24px; }
+        .co-plan-price { font-size:36px; font-weight:800; letter-spacing:-1.2px; margin-bottom:4px; line-height:1; }
         .co-plan-card-light .co-plan-price { color:var(--co-ink,#101b1d); }
         .co-plan-card-dark .co-plan-price { color:#fff; }
+        .co-plan-period { font-size:12px; color:var(--co-muted,#657170); margin-bottom:20px; }
+        .co-plan-card-dark .co-plan-period { color:rgba(255,255,255,.4); }
         .co-plan-features { list-style:none; padding:0; margin:0 0 28px; display:flex; flex-direction:column; gap:11px; }
         .co-plan-features li { display:flex; align-items:center; gap:10px; font-size:14px; }
         .co-plan-card-light .co-plan-features li { color:var(--co-ink,#101b1d); }
