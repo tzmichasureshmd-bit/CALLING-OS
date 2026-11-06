@@ -5,8 +5,8 @@ services:
       dockerfile: Dockerfile
     container_name: callingos-backend
     restart: unless-stopped
-    # Mount .env as a file — avoids ARG_MAX limit that hits when passing
-    # long secret values (Supabase key, DB URL, JWT key) as env vars.
+    ports:
+      - "8001:8000"  # Expose backend on port 8001
     volumes:
       - /opt/callingos/backend/.env:/app/.env:ro
       - /opt/callingos/backend/firebase-service-account.json:/app/firebase-service-account.json:ro
@@ -15,28 +15,16 @@ services:
       APP_DEBUG: "false"
       SEED_DEMO_DATA: "false"
       GOOGLE_APPLICATION_CREDENTIALS: /app/firebase-service-account.json
-    networks:
-      - traefik-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/db"]
       interval: 15s
       timeout: 5s
       retries: 3
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.callingos-backend.rule=Host(`api.callingos.tzmicha.com`)"
-      - "traefik.http.routers.callingos-backend.entrypoints=websecure"
-      - "traefik.http.routers.callingos-backend.tls.certresolver=letsencrypt"
-      - "traefik.http.services.callingos-backend.loadbalancer.server.port=8000"
-      - "traefik.docker.network=traefik-net"
 
   callingos-web:
     build:
       context: ../web
       dockerfile: Dockerfile
-      # Firebase client config is public (ships in the browser bundle). These
-      # read from the VPS environment / compose .env with empty fallbacks so a
-      # missing value can never abort the build and block a backend deploy.
       args:
         VITE_API_URL: ${VITE_API_URL:-https://api.callingos.tzmicha.com/api/v1}
         VITE_USE_MOCK: ${VITE_USE_MOCK:-false}
@@ -49,16 +37,5 @@ services:
         VITE_FIREBASE_MEASUREMENT_ID: ${VITE_FIREBASE_MEASUREMENT_ID:-}
     container_name: callingos-web
     restart: unless-stopped
-    networks:
-      - traefik-net
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.callingos-web.rule=Host(`callingos.tzmicha.com`)"
-      - "traefik.http.routers.callingos-web.entrypoints=websecure"
-      - "traefik.http.routers.callingos-web.tls.certresolver=letsencrypt"
-      - "traefik.http.services.callingos-web.loadbalancer.server.port=80"
-      - "traefik.docker.network=traefik-net"
-
-networks:
-  traefik-net:
-    external: true
+    ports:
+      - "3003:80"  # Keep existing web port
