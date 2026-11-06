@@ -42,6 +42,7 @@ jobs:
           target: "/opt/callingos/"
           strip_components: 0
           overwrite: true
+          rm: true
 
       - name: Restart containers with new code
         uses: appleboy/ssh-action@v1.0.3
@@ -68,13 +69,12 @@ jobs:
 
             cd /opt/callingos/backend
 
-            # Rebuild backend image only (web is static, no rebuild needed unless changed)
-            docker compose build callingos-backend
+            # Rebuild both backend and web images
+            docker compose build callingos-backend callingos-web --no-cache
 
-            # Stop old container first, then start new one
-            docker compose down callingos-backend --remove-orphans || true
-            docker rm -f callingos-backend 2>/dev/null || true
-            docker compose up -d callingos-backend
+            # Stop old containers first, then start new ones
+            docker compose down callingos-backend callingos-web --remove-orphans || true
+            docker compose up -d callingos-backend callingos-web
 
             # Clean up old images
             docker image prune -f
