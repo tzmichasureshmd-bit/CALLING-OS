@@ -30,7 +30,9 @@ class CallRecorderModule(private val reactContext: ReactApplicationContext) :
 
     companion object {
         private const val TAG = "CALLNEXA_NATIVE.CallRecorderModule"
-        private const val AUDIO_SOURCE = MediaRecorder.AudioSource.VOICE_CALL
+        // Use MIC instead of VOICE_CALL - VOICE_CALL is blocked on most devices (Vivo, Samsung, etc.)
+        // MIC records from microphone, works best with speakerphone
+        private const val AUDIO_SOURCE = MediaRecorder.AudioSource.MIC
         private const val OUTPUT_FORMAT = MediaRecorder.OutputFormat.MPEG_4
         private const val AUDIO_ENCODER = MediaRecorder.AudioEncoder.AAC
     }
