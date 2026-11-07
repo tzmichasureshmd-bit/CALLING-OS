@@ -56,13 +56,24 @@ class MainApplication : Application(), ReactApplication {
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
     
     // Initialize call state listener for auto-recording
-    // Delayed to allow React Native context to initialize
-    android.os.Handler(mainLooper).postDelayed({
-      reactNativeHost.reactInstanceManager.currentReactContext?.let { context ->
-        callStateListener = CallStateListener(context as com.facebook.react.bridge.ReactApplicationContext)
-        callStateListener?.startListening()
+    // Use ReactInstanceEventListener to ensure context is ready
+    reactNativeHost.reactInstanceManager.addReactInstanceEventListener(
+      object : com.facebook.react.ReactInstanceManager.ReactInstanceEventListener {
+        override fun onReactContextInitialized(context: com.facebook.react.bridge.ReactContext) {
+          android.os.Handler(mainLooper).post {
+            try {
+              if (context is com.facebook.react.bridge.ReactApplicationContext) {
+                callStateListener = CallStateListener(context)
+                callStateListener?.startListening()
+                android.util.Log.i("CallNexa", "✅ CallStateListener initialized successfully")
+              }
+            } catch (e: Exception) {
+              android.util.Log.e("CallNexa", "❌ Failed to initialize CallStateListener: ${e.message}")
+            }
+          }
+        }
       }
-    }, 2000)
+    )
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {
