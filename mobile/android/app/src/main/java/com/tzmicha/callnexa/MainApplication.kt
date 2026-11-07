@@ -21,13 +21,6 @@ import expo.modules.ReactNativeHostWrapper
 
 class MainApplication : Application(), ReactApplication {
 
-  private var callStateListener: CallStateListener? = null
-  
-  init {
-    android.util.Log.i("CallNexa", "INIT: MainApplication constructor called")
-    System.out.println("CallNexa INIT: MainApplication constructor called")
-  }
-
   override val reactNativeHost: ReactNativeHost = ReactNativeHostWrapper(
       this,
       object : DefaultReactNativeHost(this) {
@@ -52,8 +45,6 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    android.util.Log.i("CallNexa", "ONCREATE: MainApplication.onCreate() called")
-    System.out.println("CallNexa ONCREATE: MainApplication.onCreate() called")
     
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
@@ -63,39 +54,7 @@ class MainApplication : Application(), ReactApplication {
     loadReactNative(this)
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
     
-    android.util.Log.i("CallNexa", "SETUP: Setting up CallStateListener")
-    System.out.println("CallNexa SETUP: Setting up CallStateListener")
-    
-    // Initialize call state listener for auto-recording
-    // Use ReactInstanceEventListener to ensure context is ready
-    reactNativeHost.reactInstanceManager.addReactInstanceEventListener(
-      object : com.facebook.react.ReactInstanceManager.ReactInstanceEventListener {
-        override fun onReactContextInitialized(context: com.facebook.react.bridge.ReactContext) {
-          android.util.Log.i("CallNexa", "REACT: React context initialized, starting CallStateListener")
-          System.out.println("CallNexa REACT: React context initialized")
-          android.os.Handler(mainLooper).post {
-            try {
-              if (context is com.facebook.react.bridge.ReactApplicationContext) {
-                callStateListener = CallStateListener(context)
-                callStateListener?.startListening()
-                android.util.Log.i("CallNexa", "SUCCESS: CallStateListener initialized successfully")
-                System.out.println("CallNexa SUCCESS: CallStateListener initialized")
-              } else {
-                android.util.Log.e("CallNexa", "ERROR: Context is not ReactApplicationContext")
-                System.err.println("CallNexa ERROR: Context is not ReactApplicationContext")
-              }
-            } catch (e: Exception) {
-              android.util.Log.e("CallNexa", "ERROR: Failed to initialize CallStateListener: ${e.message}", e)
-              System.err.println("CallNexa ERROR: Failed to initialize CallStateListener: ${e.message}")
-              e.printStackTrace()
-            }
-          }
-        }
-      }
-    )
-    
-    android.util.Log.i("CallNexa", "LISTENER: ReactInstanceEventListener registered")
-    System.out.println("CallNexa LISTENER: ReactInstanceEventListener registered")
+    android.util.Log.i("CALLNEXA_NATIVE", "✅ MainApplication initialized - CallRecorderModule will handle CallStateListener")
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {

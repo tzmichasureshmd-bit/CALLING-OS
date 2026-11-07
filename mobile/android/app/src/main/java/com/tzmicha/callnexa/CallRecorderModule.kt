@@ -29,7 +29,7 @@ class CallRecorderModule(private val reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
     companion object {
-        private const val TAG = "CallNexa.CallRecorderModule"
+        private const val TAG = "CALLNEXA_NATIVE.CallRecorderModule"
         private const val AUDIO_SOURCE = MediaRecorder.AudioSource.VOICE_CALL
         private const val OUTPUT_FORMAT = MediaRecorder.OutputFormat.MPEG_4
         private const val AUDIO_ENCODER = MediaRecorder.AudioEncoder.AAC
@@ -39,8 +39,49 @@ class CallRecorderModule(private val reactContext: ReactApplicationContext) :
     private var isRecording = false
     private var currentRecordingPath: String? = null
     private var currentPhoneNumber: String? = null
+    
+    // ── CallStateListener for automatic recording ────────────────────────────
+    private var callStateListener: CallStateListener? = null
 
     override fun getName() = "CallRecorderModule"
+    
+    // ── Module Lifecycle: Initialize ──────────────────────────────────────────
+    override fun initialize() {
+        super.initialize()
+        android.util.Log.i(TAG, "Module initialized - ReactContext is ready")
+        
+        // Initialize CallStateListener with the module's ReactApplicationContext
+        try {
+            callStateListener = CallStateListener(reactContext)
+            callStateListener?.startListening()
+            android.util.Log.i(TAG, "✅ CallStateListener initialized and started successfully")
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "❌ Failed to initialize CallStateListener: ${e.message}", e)
+        }
+    }
+    
+    // ── Module Lifecycle: Cleanup ─────────────────────────────────────────────
+    override fun invalidate() {
+        android.util.Log.i(TAG, "Module invalidating - cleaning up")
+        
+        // Stop any active recording
+        if (isRecording) {
+            try {
+                mediaRecorder?.stop()
+                mediaRecorder?.release()
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Error stopping recorder during cleanup: ${e.message}")
+            }
+            mediaRecorder = null
+            isRecording = false
+        }
+        
+        // Clean up CallStateListener
+        callStateListener?.stopListening()
+        callStateListener = null
+        
+        super.invalidate()
+    }
 
     // ── Permission Check ──────────────────────────────────────────────────────
 
