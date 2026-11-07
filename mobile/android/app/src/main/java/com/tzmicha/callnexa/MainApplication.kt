@@ -47,6 +47,8 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    android.util.Log.i("CallNexa", "🚀 MainApplication.onCreate() called")
+    
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {
@@ -55,25 +57,32 @@ class MainApplication : Application(), ReactApplication {
     loadReactNative(this)
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
     
+    android.util.Log.i("CallNexa", "📞 Setting up CallStateListener...")
+    
     // Initialize call state listener for auto-recording
     // Use ReactInstanceEventListener to ensure context is ready
     reactNativeHost.reactInstanceManager.addReactInstanceEventListener(
       object : com.facebook.react.ReactInstanceManager.ReactInstanceEventListener {
         override fun onReactContextInitialized(context: com.facebook.react.bridge.ReactContext) {
+          android.util.Log.i("CallNexa", "⚡ React context initialized, starting CallStateListener...")
           android.os.Handler(mainLooper).post {
             try {
               if (context is com.facebook.react.bridge.ReactApplicationContext) {
                 callStateListener = CallStateListener(context)
                 callStateListener?.startListening()
                 android.util.Log.i("CallNexa", "✅ CallStateListener initialized successfully")
+              } else {
+                android.util.Log.e("CallNexa", "❌ Context is not ReactApplicationContext")
               }
             } catch (e: Exception) {
-              android.util.Log.e("CallNexa", "❌ Failed to initialize CallStateListener: ${e.message}")
+              android.util.Log.e("CallNexa", "❌ Failed to initialize CallStateListener: ${e.message}", e)
             }
           }
         }
       }
     )
+    
+    android.util.Log.i("CallNexa", "✅ ReactInstanceEventListener registered")
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {
