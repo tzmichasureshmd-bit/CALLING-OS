@@ -40,7 +40,8 @@
         "android.permission.FOREGROUND_SERVICE_MICROPHONE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.WAKE_LOCK"
-      ]
+      ],
+      "versionCode": 21
     },
     "plugins": [
       "expo-router",
