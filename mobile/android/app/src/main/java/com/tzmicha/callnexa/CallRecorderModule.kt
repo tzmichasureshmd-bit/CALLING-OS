@@ -131,10 +131,10 @@ class CallRecorderModule(private val reactContext: ReactApplicationContext) :
                 return
             }
 
-            // Create recordings directory
+            // Create recordings directory in public Music folder (accessible to all apps)
             val recordingsDir = File(
-                reactContext.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
-                "CallRecordings"
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+                "Call Recordings"
             )
             if (!recordingsDir.exists()) {
                 recordingsDir.mkdirs()
@@ -243,8 +243,8 @@ class CallRecorderModule(private val reactContext: ReactApplicationContext) :
     fun getRecentRecordings(maxResults: Int, promise: Promise) {
         try {
             val recordingsDir = File(
-                reactContext.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS),
-                "CallRecordings"
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
+                "Call Recordings"
             )
 
             if (!recordingsDir.exists()) {
