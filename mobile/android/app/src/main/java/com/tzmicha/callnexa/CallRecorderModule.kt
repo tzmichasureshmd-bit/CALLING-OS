@@ -1,7 +1,9 @@
 package com.tzmicha.callnexa
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Environment
@@ -30,9 +32,10 @@ class CallRecorderModule(private val reactContext: ReactApplicationContext) :
 
     companion object {
         private const val TAG = "CALLNEXA_NATIVE.CallRecorderModule"
-        // Use MIC instead of VOICE_CALL - VOICE_CALL is blocked on most devices (Vivo, Samsung, etc.)
-        // MIC records from microphone, works best with speakerphone
-        private const val AUDIO_SOURCE = MediaRecorder.AudioSource.MIC
+        // Try VOICE_CALL first (captures both sides of call)
+        // Falls back to MIC if VOICE_CALL fails (device restriction)
+        private const val AUDIO_SOURCE_PRIMARY = MediaRecorder.AudioSource.VOICE_CALL
+        private const val AUDIO_SOURCE_FALLBACK = MediaRecorder.AudioSource.MIC
         private const val OUTPUT_FORMAT = MediaRecorder.OutputFormat.MPEG_4
         private const val AUDIO_ENCODER = MediaRecorder.AudioEncoder.AAC
     }
@@ -147,16 +150,43 @@ class CallRecorderModule(private val reactContext: ReactApplicationContext) :
             val filename = "${timestamp}_$sanitizedPhone.m4a"
             val filepath = File(recordingsDir, filename).absolutePath
 
-            // Initialize MediaRecorder
-            mediaRecorder = MediaRecorder().apply {
-                setAudioSource(AUDIO_SOURCE)
-                setOutputFormat(OUTPUT_FORMAT)
-                setAudioEncoder(AUDIO_ENCODER)
-                setAudioSamplingRate(16000)
-                setAudioEncodingBitRate(128000)
-                setOutputFile(filepath)
-                prepare()
-                start()
+            // Initialize MediaRecorder - try VOICE_CALL first, fallback to MIC
+            var audioSource = AUDIO_SOURCE_PRIMARY
+            var recordingStarted = false
+            var lastError: String? = null
+            
+            for (attempt in 1..2) {
+                try {
+                    mediaRecorder = MediaRecorder().apply {
+                        setAudioSource(audioSource)
+                        setOutputFormat(OUTPUT_FORMAT)
+                        setAudioEncoder(AUDIO_ENCODER)
+                        setAudioSamplingRate(16000)
+                        setAudioEncodingBitRate(128000)
+                        setOutputFile(filepath)
+                        prepare()
+                        start()
+                    }
+                    recordingStarted = true
+                    android.util.Log.i(TAG, "✅ Recording started with audio source: ${if (audioSource == AUDIO_SOURCE_PRIMARY) "VOICE_CALL" else "MIC"}")
+                    break
+                } catch (e: Exception) {
+                    lastError = e.message
+                    android.util.Log.w(TAG, "⚠️ Audio source ${if (audioSource == AUDIO_SOURCE_PRIMARY) "VOICE_CALL" else "MIC"} failed: ${e.message}")
+                    mediaRecorder?.release()
+                    mediaRecorder = null
+                    
+                    if (attempt == 1 && audioSource == AUDIO_SOURCE_PRIMARY) {
+                        // Fallback to MIC on second attempt
+                        audioSource = AUDIO_SOURCE_FALLBACK
+                        android.util.Log.i(TAG, "🔄 Falling back to MIC audio source...")
+                    }
+                }
+            }
+            
+            if (!recordingStarted) {
+                promise.reject("RECORDING_ERROR", "Failed to start recording with both VOICE_CALL and MIC: $lastError")
+                return
             }
 
             isRecording = true
