@@ -17,3 +17,9 @@ android/app/.cxx/
 # Local temporary helpers
 .tmp-*
 *.log
+# Never include local secrets or signing material in the project archive
+.env
+.env.*
+credentials.json
+credentials/
+.git/
