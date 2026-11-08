@@ -1,0 +1,19 @@
+# Dependencies and generated output are rebuilt by EAS
+node_modules/
+.expo/
+dist/
+dist-*/
+.audit-dist/
+
+# Local Android build caches/artifacts
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/build16/
+android/app/.cxx/
+*.apk
+
+# Local temporary helpers
+.tmp-*
+*.log

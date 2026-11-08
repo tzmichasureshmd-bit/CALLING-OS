@@ -1,22 +1,25 @@
 /**
- * The single source of truth for automatic call recording.
+ * Native source of truth for automatic call recording.
  *
- * A call can be captured or uploaded only after the person using the device
- * explicitly enables this preference in Settings.  The preference defaults to
- * off so a fresh install never starts recording unexpectedly.
+ * Android SharedPreferences is readable by the foreground service even when the
+ * React Native screen is not running. A fresh install defaults to OFF.
  */
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { NativeModules, Platform } from "react-native";
 
-export const RECORDING_PREF_KEY = "callos_recording_enabled";
+const { RecordingModule } = NativeModules;
 
 export async function isRecordingEnabled() {
+  if (Platform.OS !== "android" || !RecordingModule?.getRecordingEnabled) return false;
   try {
-    return (await AsyncStorage.getItem(RECORDING_PREF_KEY)) === "true";
+    return await RecordingModule.getRecordingEnabled();
   } catch {
     return false;
   }
 }
 
 export async function setRecordingEnabled(enabled) {
-  await AsyncStorage.setItem(RECORDING_PREF_KEY, enabled ? "true" : "false");
+  if (Platform.OS !== "android" || !RecordingModule?.setRecordingEnabled) {
+    throw new Error("Native recording controls are unavailable. Install the latest APK.");
+  }
+  return RecordingModule.setRecordingEnabled(Boolean(enabled));
 }

@@ -5,7 +5,6 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Notifications from "expo-notifications";
 import { ThemeProvider, useTheme } from "../src/theme";
 import { AuthProvider, useAuth } from "../src/AuthContext";
-import { startPhoneStateMonitoring, stopPhoneStateMonitoring } from "../src/phoneStateMonitor";
 import { setupNotificationChannels } from "../src/notificationManager";
 
 // ── Notification tap handler ──────────────────────────────────────────────────
@@ -61,22 +60,10 @@ function AuthGate() {
 function Shell() {
   const { theme, mode } = useTheme();
   
-  // Initialize call recording monitoring
+  // Native CallMonitorService owns call detection and recording. JavaScript
+  // only configures notification channels and handles post-call synchronization.
   useEffect(() => {
-    let cleanup = () => {};
-    
-    async function init() {
-      // Setup notification channels
-      await setupNotificationChannels();
-      
-      // Start phone state monitoring for auto-recording
-      startPhoneStateMonitoring();
-      
-      cleanup = () => stopPhoneStateMonitoring();
-    }
-    
-    init();
-    return cleanup;
+    setupNotificationChannels();
   }, []);
   
   return (

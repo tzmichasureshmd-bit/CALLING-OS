@@ -18,10 +18,10 @@ import java.io.File
  * Music/Call Recordings folder and associates them with call-log entries.
  *
  * Strategy (in priority order):
- *   1. MediaStore.Audio.Media query after CallRecorderModule publishes the file.
+ *   1. MediaStore.Audio.Media query after CallMonitorService publishes the file.
  *   2. Direct scan of that same public folder while MediaStore indexes it.
  *
- * This module only considers the folder written by CallRecorderModule; it never
+ * This module only considers the folder written by CallMonitorService; it never
  * scans arbitrary dialer or OEM recording folders.
  *
  * What this module does NOT do:
@@ -32,6 +32,8 @@ import java.io.File
  *   - It does not upload anything — that is the JS layer's responsibility.
  *
  * Exposed React Native methods:
+ *   getRecordingEnabled() / setRecordingEnabled(enabled)
+ *       → native preference and foreground-service control
  *   checkRecordingPermission()  → { granted, api_level, manufacturer, model }
  *   findRecordingsForCall(callStartMs, callEndMs, durationSec, phoneNumber)
  *       → { success, recordings[], source, error? }
@@ -82,6 +84,55 @@ class RecordingModule(private val reactContext: ReactApplicationContext) :
     }
 
     override fun getName() = "RecordingModule"
+
+    // ── Native recording preference/service bridge ───────────────────────────
+
+    @ReactMethod
+    fun getRecordingEnabled(promise: Promise) {
+        promise.resolve(CallMonitorService.isRecordingEnabled(reactContext))
+    }
+
+    @ReactMethod
+    fun setRecordingEnabled(enabled: Boolean, promise: Promise) {
+        val preferences = reactContext.getSharedPreferences(
+            CallMonitorService.PREFS_NAME,
+            android.content.Context.MODE_PRIVATE,
+        )
+
+        if (enabled) {
+            val microphoneGranted = ContextCompat.checkSelfPermission(
+                reactContext,
+                Manifest.permission.RECORD_AUDIO,
+            ) == PackageManager.PERMISSION_GRANTED
+            val phoneGranted = ContextCompat.checkSelfPermission(
+                reactContext,
+                Manifest.permission.READ_PHONE_STATE,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!microphoneGranted || !phoneGranted) {
+                promise.reject("PERMISSION_DENIED", "Phone and Microphone permissions are required")
+                return
+            }
+        }
+
+        if (!preferences.edit().putBoolean(CallMonitorService.PREF_RECORDING_ENABLED, enabled).commit()) {
+            promise.reject("PREFERENCE_ERROR", "Could not save recording setting")
+            return
+        }
+
+        try {
+            if (enabled) {
+                CallMonitorService.startEnabledMonitor(reactContext)
+            } else {
+                CallMonitorService.disableMonitor(reactContext)
+            }
+            promise.resolve(enabled)
+        } catch (error: Exception) {
+            if (enabled) {
+                preferences.edit().putBoolean(CallMonitorService.PREF_RECORDING_ENABLED, false).commit()
+            }
+            promise.reject("SERVICE_ERROR", "Could not update automatic recording: ${error.message}")
+        }
+    }
 
     // ── Permission helpers ────────────────────────────────────────────────────
 

@@ -1,73 +1,59 @@
 package com.tzmicha.callnexa
 
-import android.content.Intent
-import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
-import android.util.Log
-
+import androidx.core.content.ContextCompat
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
-import com.facebook.react.bridge.ReactContext
-
 import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
-  
+
   override fun onCreate(savedInstanceState: Bundle?) {
-    // Set the theme to AppTheme BEFORE onCreate to support
-    // coloring the background, status bar, and navigation bar.
-    // This is required for expo-splash-screen.
-    setTheme(R.style.AppTheme);
+    setTheme(R.style.AppTheme)
     super.onCreate(null)
-    
-    // Start call monitor service
-    val svc = Intent(this, CallMonitorService::class.java)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      startForegroundService(svc)
-    } else {
-      startService(svc)
+
+    // Android 14+ permits a microphone foreground service to start while this
+    // activity is visible. Only start after explicit opt-in and permissions.
+    val permissionsReady =
+      ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED &&
+      ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+    if (permissionsReady && CallMonitorService.isRecordingEnabled(this)) {
+      CallMonitorService.startEnabledMonitor(this)
     }
   }
 
-  /**
-   * Returns the name of the main component registered from JavaScript. This is used to schedule
-   * rendering of the component.
-   */
-  override fun getMainComponentName(): String = "main"
-
-  /**
-   * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]
-   * which allows you to enable New Architecture with a single boolean flags [fabricEnabled]
-   */
-  override fun createReactActivityDelegate(): ReactActivityDelegate {
-    return ReactActivityDelegateWrapper(
-          this,
-          BuildConfig.IS_NEW_ARCHITECTURE_ENABLED,
-          object : DefaultReactActivityDelegate(
-              this,
-              mainComponentName,
-              fabricEnabled
-          ){})
+  override fun onResume() {
+    super.onResume()
+    // Reconcile a stored ON preference after Android permission changes or
+    // process recreation. This runs while the activity is visible, satisfying
+    // microphone foreground-service start restrictions on current Android.
+    val permissionsReady =
+      ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED &&
+      ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+    if (permissionsReady && CallMonitorService.isRecordingEnabled(this)) {
+      CallMonitorService.startEnabledMonitor(this)
+    }
   }
 
-  /**
-    * Align the back button behavior with Android S
-    * where moving root activities to background instead of finishing activities.
-    * @see <a href="https://developer.android.com/reference/android/app/Activity#onBackPressed()">onBackPressed</a>
-    */
-  override fun invokeDefaultOnBackPressed() {
-      if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.R) {
-          if (!moveTaskToBack(false)) {
-              // For non-root activities, use the default implementation to finish them.
-              super.invokeDefaultOnBackPressed()
-          }
-          return
-      }
+  override fun getMainComponentName(): String = "main"
 
-      // Use the default back button implementation on Android S
-      // because it's doing more than [Activity.moveTaskToBack] in fact.
-      super.invokeDefaultOnBackPressed()
+  override fun createReactActivityDelegate(): ReactActivityDelegate {
+    return ReactActivityDelegateWrapper(
+      this,
+      BuildConfig.IS_NEW_ARCHITECTURE_ENABLED,
+      object : DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled) {},
+    )
+  }
+
+  override fun invokeDefaultOnBackPressed() {
+    if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.R) {
+      if (!moveTaskToBack(false)) super.invokeDefaultOnBackPressed()
+      return
+    }
+    super.invokeDefaultOnBackPressed()
   }
 }

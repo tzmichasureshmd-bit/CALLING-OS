@@ -8,6 +8,7 @@ import {
 import { getDeviceInfo, requestAllPermissions, checkPermissions, readSimInfo } from "./nativeModules";
 import { syncSimInventory } from "./simInventoryService";
 import { runSyncCycle } from "./syncService";
+import { setRecordingEnabled } from "./recordingPreferences";
 
 const AuthContext = createContext(null);
 
@@ -267,6 +268,9 @@ export function AuthProvider({ children }) {
   }, [_afterAuth]);
 
   const logout = useCallback(async () => {
+    // Match the previous account-scoped behavior: signing out immediately stops
+    // native monitoring and discards an in-progress partial recording.
+    await setRecordingEnabled(false).catch(() => {});
     await api.logout().catch(() => {});
     await clearSession();
     setUser(null);

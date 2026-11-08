@@ -22,8 +22,7 @@ import {
 import {
   isRecordingEnabled as getRecordingEnabled,
   setRecordingEnabled as persistRecordingEnabled,
-  stopAndDiscardActiveRecording,
-} from "../../src/callRecorder";
+} from "../../src/recordingPreferences";
 
 const LAST_SYNC_KEY = "callos_last_sync_ts";
 
@@ -184,14 +183,13 @@ export default function Profile() {
       }
     }
 
-    // Persist first so no upload can race with an OFF transition.
-    await persistRecordingEnabled(enabled);
-    setRecordingEnabled(enabled);
-
-    if (!enabled) {
-      // A recording already in progress is not retained when the user turns
-      // the sole recording switch off mid-call.
-      await stopAndDiscardActiveRecording();
+    try {
+      // The native service commits the preference, starts monitoring on ON,
+      // and stops/deletes an active partial recording on OFF.
+      await persistRecordingEnabled(enabled);
+      setRecordingEnabled(enabled);
+    } catch (error) {
+      Alert.alert("Recording Setting Failed", error?.message || "Could not update automatic recording.");
     }
   }
 

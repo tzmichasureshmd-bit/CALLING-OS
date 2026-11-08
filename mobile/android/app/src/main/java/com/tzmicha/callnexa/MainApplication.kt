@@ -1,7 +1,6 @@
 package com.tzmicha.callnexa
 
 import com.tzmicha.callnexa.CallLogPackage
-import com.tzmicha.callnexa.CallRecorderPackage
 
 import android.app.Application
 import android.content.res.Configuration
@@ -29,7 +28,6 @@ class MainApplication : Application(), ReactApplication {
               // Packages that cannot be autolinked yet can be added manually here, for example:
               // add(MyReactNativePackage())
                           add(CallLogPackage())
-                          add(CallRecorderPackage())
             }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
@@ -54,7 +52,7 @@ class MainApplication : Application(), ReactApplication {
     loadReactNative(this)
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
     
-    android.util.Log.i("CALLNEXA_NATIVE", "✅ MainApplication initialized - CallRecorderModule will handle CallStateListener")
+    android.util.Log.i("CALLNEXA_NATIVE", "MainApplication initialized - native CallMonitorService owns recording")
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {
