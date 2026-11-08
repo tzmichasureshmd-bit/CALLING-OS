@@ -5,3 +5,8 @@ web-build/
 *.log
 .DS_Store
 .env
+# Local Android signing material and temporary release helpers
+credentials.json
+credentials/
+.tmp-download-eas-credentials.cjs
+.tmp-local-release.gradle
