@@ -334,10 +334,15 @@ const PERM_DEFS = (androidVersion) => {
   const defs = [
     { key: "callLog",    perm: P.READ_CALL_LOG,    title: "Call Log",    msg: "CallNexa needs to read your call history to sync calls to the dashboard." },
     { key: "phoneState", perm: P.READ_PHONE_STATE, title: "Phone State", msg: "CallNexa needs phone state access to detect active calls and read SIM info." },
+    { key: "recording",  perm: P.RECORD_AUDIO,     title: "Microphone",  msg: "CallNexa needs microphone access to record connected calls when Call Recording is enabled." },
     { key: "phoneNumbers", perm: P.READ_PHONE_NUMBERS, title: "Phone Numbers", msg: "CallNexa needs this to read your SIM phone number." },
     { key: "contacts",   perm: P.READ_CONTACTS,    title: "Contacts",    msg: "CallNexa needs contacts access to match caller names automatically." },
-    { key: "storage",    perm: androidVersion >= 33 ? P.READ_MEDIA_AUDIO : P.READ_EXTERNAL_STORAGE, title: "Audio Files", msg: "CallNexa needs audio-file access to discover permitted call recordings." },
+    { key: "storage",    perm: androidVersion >= 33 ? P.READ_MEDIA_AUDIO : P.READ_EXTERNAL_STORAGE, title: "Audio Files", msg: "CallNexa needs audio-file access to find its saved call recordings." },
   ];
+  // Android 9 and below requires a separate write grant for a public folder.
+  if (androidVersion <= 28 && P.WRITE_EXTERNAL_STORAGE) {
+    defs.push({ key: "writeStorage", perm: P.WRITE_EXTERNAL_STORAGE, title: "Save Audio Files", msg: "CallNexa needs storage access to save recordings in Music/Call Recordings." });
+  }
   if (androidVersion >= 33 && P.POST_NOTIFICATIONS) {
     defs.push({ key: "notifications", perm: P.POST_NOTIFICATIONS, title: "Notifications", msg: "CallNexa needs notification permission to show call sync status." });
   }
@@ -346,7 +351,7 @@ const PERM_DEFS = (androidVersion) => {
 
 export async function requestAllPermissions() {
   if (Platform.OS !== "android") {
-    return { callLog: true, phoneState: true, contacts: true, storage: true, recording: true, allGranted: true };
+    return { callLog: true, phoneState: true, contacts: true, storage: true, writeStorage: true, recording: true, allGranted: true };
   }
   try {
     const androidVersion = parseInt(Platform.Version, 10);
@@ -365,7 +370,7 @@ export async function requestAllPermissions() {
         result[def.key] = false;
       }
     }
-    result.allGranted = !!(result.callLog && result.phoneState);
+    result.allGranted = !!(result.callLog && result.phoneState && result.storage && result.recording && result.writeStorage !== false);
     return result;
   } catch {
     return { allGranted: false };
@@ -374,20 +379,33 @@ export async function requestAllPermissions() {
 
 export async function checkPermissions() {
   if (Platform.OS !== "android") {
-    return { callLog: true, phoneState: true, contacts: true, storage: true, recording: true, allGranted: true };
+    return { callLog: true, phoneState: true, contacts: true, storage: true, writeStorage: true, recording: true, allGranted: true };
   }
   try {
     const P = PermissionsAndroid.PERMISSIONS;
     const androidVersion = parseInt(Platform.Version, 10);
     const storagePermission = androidVersion >= 33 ? P.READ_MEDIA_AUDIO : P.READ_EXTERNAL_STORAGE;
-    const [callLog, phoneState, phoneNumbers, contacts, storage] = await Promise.all([
+    const [callLog, phoneState, phoneNumbers, contacts, storage, recording, writeStorage] = await Promise.all([
       PermissionsAndroid.check(P.READ_CALL_LOG),
       PermissionsAndroid.check(P.READ_PHONE_STATE),
       androidVersion >= 26 ? PermissionsAndroid.check(P.READ_PHONE_NUMBERS) : Promise.resolve(false),
       PermissionsAndroid.check(P.READ_CONTACTS),
       PermissionsAndroid.check(storagePermission),
+      PermissionsAndroid.check(P.RECORD_AUDIO),
+      androidVersion <= 28 && P.WRITE_EXTERNAL_STORAGE
+        ? PermissionsAndroid.check(P.WRITE_EXTERNAL_STORAGE)
+        : Promise.resolve(true),
     ]);
-    return { callLog, phoneState, phoneNumbers, contacts, storage, recording: storage, allGranted: callLog && phoneState };
+    return {
+      callLog,
+      phoneState,
+      phoneNumbers,
+      contacts,
+      storage,
+      recording,
+      writeStorage,
+      allGranted: callLog && phoneState && storage && recording && writeStorage,
+    };
   } catch {
     return { allGranted: false };
   }

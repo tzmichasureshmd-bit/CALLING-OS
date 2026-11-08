@@ -619,10 +619,6 @@ function CallIntelligenceDrawer({ call, onClose, reload }) {
       })()
     : call.summaryData;
 
-  const isPersonal      = privacy === "personal";
-  const isUnclassified  = privacy === "unclassified";
-  const isBusiness      = privacy === "business";
-
   const PRIVACY_OPTIONS = [
     { value: "business",      label: "Business",      color: "var(--success)" },
     { value: "personal",      label: "Personal",      color: "var(--danger)" },
@@ -631,22 +627,20 @@ function CallIntelligenceDrawer({ call, onClose, reload }) {
   const privacyMeta = PRIVACY_OPTIONS.find(p => p.value === privacy) || PRIVACY_OPTIONS[2];
 
   const PIPELINE = [
-    { label: "Synced",      done: true,
-      color: "var(--success)" },
-    { label: "Recording",   done: recStatus === "uploaded" && !isPersonal,
-      color: isPersonal ? "var(--danger)" : recStatus === "uploaded" ? "var(--success)" : recStatus === "not_available" ? "var(--text-dim)" : "var(--warning)" },
-    { label: "Transcribed", done: txStatus === "completed" && !isPersonal,
-      color: isPersonal ? "var(--text-dim)" : txStatus === "completed" ? "var(--success)" : txStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
-    { label: "Summarized",  done: sumStatus === "completed" && !isPersonal,
-      color: isPersonal ? "var(--text-dim)" : sumStatus === "completed" ? "var(--success)" : sumStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
+    { label: "Synced",      done: true, color: "var(--success)" },
+    { label: "Recording",   done: recStatus === "uploaded",
+      color: recStatus === "uploaded" ? "var(--success)" : recStatus === "not_available" ? "var(--text-dim)" : "var(--warning)" },
+    { label: "Transcribed", done: txStatus === "completed",
+      color: txStatus === "completed" ? "var(--success)" : txStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
+    { label: "Summarized",  done: sumStatus === "completed",
+      color: sumStatus === "completed" ? "var(--success)" : sumStatus === "processing" ? "var(--accent)" : "var(--text-dim)" },
   ];
 
-  // sub-label shown under each step
   const PIPELINE_SUB = [
     "Done",
-    isPersonal ? "Excluded" : recStatus === "uploaded" ? "Uploaded" : recStatus === "not_available" ? "N/A" : recStatus || "Pending",
-    isPersonal ? "Excluded" : txStatus === "completed" ? "Done" : txStatus === "processing" ? "In progress" : txStatus || "Pending",
-    isPersonal ? "Excluded" : sumStatus === "completed" ? "Done" : sumStatus === "processing" ? "In progress" : sumStatus || "Pending",
+    recStatus === "uploaded" ? "Uploaded" : recStatus === "not_available" ? "N/A" : recStatus || "Pending",
+    txStatus === "completed" ? "Done" : txStatus === "processing" ? "In progress" : txStatus || "Pending",
+    sumStatus === "completed" ? "Done" : sumStatus === "processing" ? "In progress" : sumStatus || "Pending",
   ];
 
   const waNumber = localStorage.getItem("callos_wa_number") || "";
@@ -692,9 +686,9 @@ function CallIntelligenceDrawer({ call, onClose, reload }) {
         )}
       </div>
 
-      {/* Privacy classifier */}
+      {/* Optional call label */}
       <div style={{ marginBottom:18, background:"var(--bg-hover)", borderRadius:12, padding:14, border:`1px solid ${privacyMeta.color}44` }}>
-        <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:10 }}>Call Privacy</div>
+        <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:10 }}>Call Label</div>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           {PRIVACY_OPTIONS.map(opt => (
             <button
@@ -711,22 +705,15 @@ function CallIntelligenceDrawer({ call, onClose, reload }) {
             >{opt.label}</button>
           ))}
         </div>
-        {isPersonal && (
-          <div style={{ marginTop:10, fontSize:12, color:"var(--danger)", lineHeight:1.5 }}>
-            ⛔ Personal call — recording, upload, transcription and AI analysis are blocked.
-            {call.hasRecording && (
-              <button
-                onClick={handleDeleteRecording}
-                style={{ marginLeft:10, fontSize:11, color:"var(--danger)", background:"none", border:"1px solid var(--danger)", borderRadius:6, padding:"2px 8px", cursor:"pointer" }}
-              >Delete recording</button>
-            )}
-          </div>
-        )}
-        {isUnclassified && (
-          <div style={{ marginTop:10, fontSize:12, color:"var(--text-muted)", lineHeight:1.5 }}>
-            ⚠️ Unclassified — classify as <strong>Business</strong> to enable recording upload and transcription.
-          </div>
-        )}
+        <div style={{ marginTop:10, fontSize:12, color:"var(--text-muted)", lineHeight:1.5 }}>
+          The mobile Call Recording switch controls every connected call. This label does not block recording, playback, transcription, or AI processing.
+          {call.hasRecording && (
+            <button
+              onClick={handleDeleteRecording}
+              style={{ marginLeft:10, fontSize:11, color:"var(--danger)", background:"none", border:"1px solid var(--danger)", borderRadius:6, padding:"2px 8px", cursor:"pointer" }}
+            >Delete recording</button>
+          )}
+        </div>
       </div>
 
       {/* Pipeline progress */}
@@ -747,7 +734,6 @@ function CallIntelligenceDrawer({ call, onClose, reload }) {
       </div>
 
       {/* Recording player */}
-      {!isPersonal && (
       <div style={{ background:"var(--bg-hover)", borderRadius:12, padding:14, marginBottom:18 }}>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           <button onClick={handlePlay} disabled={!call.hasRecording || loadingUrl}
@@ -774,10 +760,9 @@ function CallIntelligenceDrawer({ call, onClose, reload }) {
           </div>
         </div>
       </div>
-      )}
 
       {/* Transcript */}
-      {!isPersonal && (txStatus || loadingTx) && (
+      {(txStatus || loadingTx) && (
         <div style={{ marginBottom:18 }}>
           <div style={{ fontSize:11, fontWeight:700, color:"var(--text-muted)", textTransform:"uppercase", letterSpacing:"0.05em", marginBottom:10, display:"flex", alignItems:"center", gap:8 }}>
             <Sparkles size={13} color="var(--accent-2)"/> Transcript
@@ -798,7 +783,6 @@ function CallIntelligenceDrawer({ call, onClose, reload }) {
       )}
 
       {/* AI Summary */}
-      {!isPersonal && (
       <div style={{ marginBottom:18 }}>
         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
           <Sparkles size={15} color="var(--accent-2)"/>
@@ -850,7 +834,6 @@ function CallIntelligenceDrawer({ call, onClose, reload }) {
           </p>
         )}
       </div>
-      )}
 
       {/* Salesperson Progress — read from backend */}
       {(call.callStatus || call.notes) && (() => {

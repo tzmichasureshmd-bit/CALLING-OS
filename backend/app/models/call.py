@@ -75,10 +75,9 @@ class Call(Base):
     updated_at                  = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                                          onupdate=lambda: datetime.now(timezone.utc))
 
-    # Privacy classification — set by the employee or manager
+    # Optional dashboard label only. It does not affect recording, upload,
+    # transcription, or AI processing; the mobile recording switch controls those.
     # Values: unclassified | business | personal
-    # personal calls are excluded from recording, upload, transcription, and AI analysis.
-    # unclassified calls are NOT automatically recorded or uploaded.
     call_privacy                = Column(String(20), default="unclassified", nullable=False,
                                          server_default="unclassified")
 

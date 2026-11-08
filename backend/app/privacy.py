@@ -1,22 +1,26 @@
-"""Authoritative recording/transcription eligibility checks."""
+"""Recording eligibility for CallNexa.
+
+The explicit Call Recording switch on the mobile device controls whether new
+call audio is captured and submitted. Once an authenticated device submits a
+valid recording for one of its own calls, every classification and number is
+eligible for storage, playback, transcription, and summaries.
+
+Authorization, organization/device ownership, content validation, file-size
+limits, and private-object access remain enforced by the corresponding routes.
+"""
 
 from sqlalchemy.orm import Session
 
-from .models import Call, ExcludedNumber
-from .phone import normalize_phone
+from .models import Call
 
 
 def recording_denial_reason(db: Session, call: Call) -> str | None:
-    """Return a stable denial code, or None when processing is allowed."""
-    privacy = (getattr(call, "call_privacy", None) or "unclassified").lower()
-    if privacy != "business":
-        return "personal_call" if privacy == "personal" else "not_business"
+    """Return no product-policy denial for a valid authenticated upload.
 
-    normalized = call.phone_number_normalized or normalize_phone(call.phone_number)
-    values = {value for value in (normalized, call.phone_number) if value}
-    if values and db.query(ExcludedNumber).filter(
-        ExcludedNumber.organization_id == call.organization_id,
-        ExcludedNumber.number.in_(values),
-    ).first():
-        return "excluded_number"
+    Retaining this small compatibility function keeps older route imports
+    stable while deliberately removing business, personal, and excluded-number
+    recording gates. The database/session arguments are part of that existing
+    interface and are intentionally unused.
+    """
+    del db, call
     return None

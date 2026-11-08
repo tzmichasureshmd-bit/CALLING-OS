@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.MediaRecorder
+import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
 import android.telephony.TelephonyManager
@@ -23,7 +24,7 @@ import java.util.*
  *
  * Features:
  *   - Auto-record all calls (no user interaction needed)
- *   - Save as .m4a files in app-specific directory
+ *   - Save .m4a files in the public Music/Call Recordings folder
  *   - Emit recording start/stop events to JS layer
  *   - Return recording file path for upload to Supabase
  */
@@ -134,13 +135,19 @@ class CallRecorderModule(private val reactContext: ReactApplicationContext) :
                 return
             }
 
-            // Create recordings directory in public Music folder (accessible to all apps)
+            // Create the fixed public folder, visible to the user and other apps.
+            // It must match RecordingModule.kt's discovery directory exactly.
             val recordingsDir = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC),
                 "Call Recordings"
             )
-            if (!recordingsDir.exists()) {
-                recordingsDir.mkdirs()
+            if (!recordingsDir.exists() && !recordingsDir.mkdirs()) {
+                promise.reject("STORAGE_ERROR", "Could not create Music/Call Recordings")
+                return
+            }
+            if (!recordingsDir.isDirectory) {
+                promise.reject("STORAGE_ERROR", "Music/Call Recordings is not a directory")
+                return
             }
 
             // Generate filename: YYYYMMDD_HHMMSS_phoneNumber.m4a
@@ -231,7 +238,22 @@ class CallRecorderModule(private val reactContext: ReactApplicationContext) :
             mediaRecorder = null
             isRecording = false
 
+            // Publish the just-written public file to MediaStore. The finder
+            // still has a direct filesystem fallback if an OEM indexes slowly.
             val filepath = currentRecordingPath
+            if (filepath != null) {
+                try {
+                    MediaScannerConnection.scanFile(
+                        reactContext,
+                        arrayOf(filepath),
+                        arrayOf("audio/mp4"),
+                        null,
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.w(TAG, "Media scan failed: ${e.message}")
+                }
+            }
+
             val phoneNumber = currentPhoneNumber
 
             // Emit event to JS layer

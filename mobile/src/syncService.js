@@ -8,7 +8,6 @@ import {
   getRealCallLog,
   getRecentCalls,
   getCallsLastDays,
-  applySimFilter,
   findRecordingForCall,
   uploadRecording,
 } from "./callLogService";
@@ -28,6 +27,7 @@ import {
 } from "./notificationManager";
 import { checkPermissions, startCallLogObserver, stopCallLogObserver } from "./nativeModules";
 import { api, BASE_URL } from "./api";
+import { isRecordingEnabled as getRecordingEnabledPreference } from "./recordingPreferences";
 
 const BG_TASK_NAME   = "CALLNEXA_BG_SYNC";
 const BATCH_SIZE     = 50;
@@ -35,59 +35,10 @@ const BATCH_DELAY_MS = 600;
 const FALLBACK_POLL_MS = 15_000;
 
 const INSTALL_DATE_KEY   = "callos_install_date";
-const RECORDING_PREF_KEY = "callos_recording_enabled";
 
-// ── Recording enabled check ───────────────────────────────────────────────────
-// Returns true only when the user has explicitly enabled recording in Settings.
-export async function isRecordingEnabled() {
-  try {
-    const val = await AsyncStorage.getItem(RECORDING_PREF_KEY);
-    return val === "true";
-  } catch {
-    return false;
-  }
-}
-
-// ── Excluded-number check (local cache, refreshed per sync cycle) ─────────────
-const EXCLUDED_CACHE_KEY = "callos_excluded_numbers_cache";
-const EXCLUDED_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-async function getExcludedNumbers() {
-  try {
-    const raw = await AsyncStorage.getItem(EXCLUDED_CACHE_KEY);
-    if (raw) {
-      const { numbers, ts } = JSON.parse(raw);
-      if (Date.now() - ts < EXCLUDED_CACHE_TTL) return numbers;
-    }
-  } catch {}
-  // Fetch from backend
-  try {
-    const res = await api.getExcludedNumbers();
-    const numbers = (res?.items || []).map((n) => n.number);
-    await AsyncStorage.setItem(EXCLUDED_CACHE_KEY, JSON.stringify({ numbers, ts: Date.now() }));
-    return numbers;
-  } catch {
-    // Privacy policy must fail closed. Do not treat an unavailable exclusion
-    // service as an empty exclusion list.
-    throw new Error("Excluded-number policy could not be verified");
-  }
-}
-
-function _normalizePhone(phone) {
-  if (!phone || phone === "unknown") return phone;
-  const digits = phone.replace(/\D/g, "");
-  if (digits.length === 10) return `+91${digits}`;
-  if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
-  if (digits.length === 11 && digits.startsWith("0")) return `+91${digits.slice(1)}`;
-  return phone.startsWith("+") ? phone : `+${digits}`;
-}
-
-async function isExcludedNumber(phoneNumber) {
-  if (!phoneNumber || phoneNumber === "unknown") return false;
-  const excluded = await getExcludedNumbers();
-  const normalized = _normalizePhone(phoneNumber);
-  return excluded.some((n) => n === phoneNumber || n === normalized);
-}
+// The mobile setting is the sole product-level decision for automatic recording.
+// Re-export it for callers that used syncService as the setting entry point.
+export const isRecordingEnabled = getRecordingEnabledPreference;
 
 // ── Install-time cutoff ───────────────────────────────────────────────────────
 // Returns the ms timestamp of app installation.
@@ -107,9 +58,9 @@ export async function getInstallCutoffMs() {
 const RECORDING_RECHECK_MS = 5 * 60 * 1000;
 const LAST_SYNC_KEY = "callos_last_sync_ts";
 
-// Session cache of backend-confirmed metadata. Backend uniqueness remains the
-// cross-restart authority; this map also enables bounded privacy rechecks for
-// recordings after a manager classifies a call as Business.
+// Session cache of backend-confirmed metadata. The backend uniqueness key is
+// still the cross-restart authority; this map enables bounded retries while a
+// just-stopped recording becomes readable from the public folder.
 const _sessionConfirmed = new Map();
 
 // ── Battery ───────────────────────────────────────────────────────────────────
@@ -236,12 +187,11 @@ async function directSync(deviceId, calls) {
 
 // ── Recording upload (with one auto-retry) ───────────────────────────────────
 /**
- * PRIVACY RULES enforced before any file is touched:
- *   1. Recording must be explicitly enabled by the user (callos_recording_enabled=true).
- *   2. The call's phone number must not be on the excluded list.
- *   3. The backend also enforces: call must be classified 'business' (HTTP 403 otherwise).
+ * The single Settings switch gates discovery and upload. When it is ON, each
+ * connected call that has a file in CallNexa's fixed public recording folder
+ * is queued and uploaded. When OFF, no file is discovered or uploaded.
  *
- * Call-log sync is NEVER blocked by these checks — only recording upload is.
+ * Call-log sync itself always continues so the dashboard retains call metadata.
  */
 async function _checkAndUploadRecording(call, attempt = 0) {
   if (!call.call_id) return;
@@ -254,31 +204,12 @@ async function _checkAndUploadRecording(call, attempt = 0) {
     return;
   }
 
-  // Step 0a: recording must be enabled by the user
+  // Step 0: the explicit Settings switch controls every automatic upload.
   const recEnabled = await isRecordingEnabled();
   if (!recEnabled) {
     console.log(`[RECORDING_SKIPPED] client_event_id=${call.client_event_id} reason=recording_disabled ts=${Date.now()}`);
     updateRecordingStatus(call.client_event_id, STATUS.RECORDING_NOT_AVAILABLE, {
-      recording_error: "Recording is disabled in Settings. Enable it to upload recordings.",
-    });
-    return;
-  }
-
-  // Step 0b: excluded-number check (fail closed when policy cannot be loaded)
-  let excluded;
-  try {
-    excluded = await isExcludedNumber(call.phone_number || call._raw_number);
-  } catch (e) {
-    console.warn(`[RECORDING_SKIPPED] client_event_id=${call.client_event_id} reason=exclusion_policy_unavailable ts=${Date.now()}`);
-    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_FAILED, {
-      recording_error: e?.message || "Could not verify excluded-number policy.",
-    });
-    return;
-  }
-  if (excluded) {
-    console.log(`[RECORDING_SKIPPED] client_event_id=${call.client_event_id} reason=excluded_number ts=${Date.now()}`);
-    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_NOT_AVAILABLE, {
-      recording_error: "This number is on the excluded list — recording not uploaded.",
+      recording_error: "Recording is disabled in Settings.",
     });
     return;
   }
@@ -322,24 +253,19 @@ async function _checkAndUploadRecording(call, attempt = 0) {
     uploadResult = await uploadRecording(call.call_id, found.path, token, found.mimeType);
   } catch (e) {
     const errMsg = e?.message || "unknown upload error";
-    // HTTP 403 = privacy/excluded block from backend — never retry these
-    const isPrivacyBlock = errMsg.includes("403") || errMsg.includes("personal") ||
-                           errMsg.includes("unclassified") || errMsg.includes("excluded");
-    // Bounded retries with backoff: 60s, 5min, 15min. After the 3rd failure the
-    // status is RECORDING_FAILED — a later app restart re-triggers discovery via
-    // the duplicate re-sync path, so the upload is never permanently lost.
+    // Do not keep retrying requests the server has rejected as invalid or
+    // unauthorized. Network, storage, and transient server failures retry.
+    const isPermanentFailure = /HTTP (400|401|403|404|413):/.test(errMsg);
     const RETRY_DELAYS_MS = [60_000, 300_000, 900_000];
-    const canRetry = !isPrivacyBlock && attempt < RETRY_DELAYS_MS.length;
-    console.warn(`[RECORDING_UPLOAD_FAILED] client_event_id=${call.client_event_id} call_id=${call.call_id} error=${errMsg} attempt=${attempt} will_retry=${canRetry} privacy_block=${isPrivacyBlock} ts=${Date.now()}`);
+    const canRetry = !isPermanentFailure && attempt < RETRY_DELAYS_MS.length;
+    console.warn(`[RECORDING_UPLOAD_FAILED] client_event_id=${call.client_event_id} call_id=${call.call_id} error=${errMsg} attempt=${attempt} will_retry=${canRetry} permanent=${isPermanentFailure} ts=${Date.now()}`);
     if (canRetry) {
       const delayMs = RETRY_DELAYS_MS[attempt];
       console.log(`[RECORDING_UPLOAD_RETRY_SCHEDULED] client_event_id=${call.client_event_id} attempt=${attempt + 1} delay=${delayMs}ms ts=${Date.now()}`);
       setTimeout(() => _checkAndUploadRecording(call, attempt + 1).catch(() => {}), delayMs);
     } else {
       updateRecordingStatus(call.client_event_id, STATUS.RECORDING_FAILED, {
-        recording_error: isPrivacyBlock
-          ? "Upload blocked by privacy policy. Classify this call as Business on the dashboard first."
-          : errMsg,
+        recording_error: errMsg,
       });
     }
     return;
@@ -382,12 +308,15 @@ async function _runSyncCycle(deviceId, mode) {
       console.log(`[CALL_SYNC_CUTOFF] mode=${mode} cutoff=${new Date(cutoffMs).toISOString()} filtered_out=${filteredOut} eligible=${afterCutoff.length} ts=${Date.now()}`);
     }
 
-    const simFiltered = await applySimFilter(afterCutoff);
+    // The recording switch applies to every SIM. A SIM selection can still be
+    // used for display/configuration, but it never suppresses a call or its
+    // recording from sync.
+    const eligibleCalls = afterCutoff;
     const now = Date.now();
 
     // Calls already acknowledged do not need metadata re-upload. They may need
-    // a bounded eligibility recheck after a dashboard Business classification.
-    for (const call of simFiltered) {
+    // a bounded retry while the recording file finishes indexing on the device.
+    for (const call of eligibleCalls) {
       const state = _sessionConfirmed.get(call.client_event_id);
       if (
         state
@@ -403,7 +332,7 @@ async function _runSyncCycle(deviceId, mode) {
       }
     }
 
-    const newCalls = simFiltered.filter(c => !_sessionConfirmed.has(c.client_event_id));
+    const newCalls = eligibleCalls.filter(c => !_sessionConfirmed.has(c.client_event_id));
     if (!newCalls.length) return { accepted: 0, duplicates: 0, failed: 0, total: 0 };
 
     console.log(`[CALL_SYNC_ELIGIBLE] mode=${mode} new_calls=${newCalls.length} ts=${Date.now()}`);
@@ -475,7 +404,7 @@ TaskManager.defineTask(BG_TASK_NAME, async () => {
       const level = await getBatteryLevel();
       const res = await api.heartbeat(deviceId, {
         is_online: true, battery_level: level,
-        permissions_status: { callLog: perms.callLog ?? false, phoneState: perms.phoneState ?? false, contacts: perms.contacts ?? false, storage: perms.storage ?? false, recording: perms.storage ?? false },
+        permissions_status: { callLog: perms.callLog ?? false, phoneState: perms.phoneState ?? false, contacts: perms.contacts ?? false, storage: perms.storage ?? false, recording: perms.recording ?? false },
         background_sync_status: "active",
       });
       if (res?.sync_now) {
@@ -532,7 +461,7 @@ export function useAutoSync() {
         const [perms, battery] = await Promise.all([checkPermissions(), getBatteryLevel()]);
         const res = await api.heartbeat(dId, {
           is_online: true, battery_level: battery,
-          permissions_status: { callLog: perms.callLog ?? false, phoneState: perms.phoneState ?? false, contacts: perms.contacts ?? false, storage: perms.storage ?? false, recording: perms.storage ?? false },
+          permissions_status: { callLog: perms.callLog ?? false, phoneState: perms.phoneState ?? false, contacts: perms.contacts ?? false, storage: perms.storage ?? false, recording: perms.recording ?? false },
           background_sync_status: "active", app_version: "1.1.0",
         });
         if (res?.sync_now) {

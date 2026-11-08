@@ -65,7 +65,7 @@ class CallSyncValidationTests(unittest.TestCase):
             CallSyncRequest(device_id="device-1", calls=[self.valid_item()] * 101)
 
 
-class RecordingPrivacyTests(unittest.TestCase):
+class RecordingEligibilityTests(unittest.TestCase):
     def call(self, privacy="business"):
         return SimpleNamespace(
             call_privacy=privacy,
@@ -74,22 +74,17 @@ class RecordingPrivacyTests(unittest.TestCase):
             phone_number_normalized="+919876543210",
         )
 
-    def test_only_explicit_business_can_continue(self):
+    def test_every_call_label_is_eligible(self):
         db = MagicMock()
-        self.assertEqual(recording_denial_reason(db, self.call("personal")), "personal_call")
-        self.assertEqual(recording_denial_reason(db, self.call("unclassified")), "not_business")
-        self.assertEqual(recording_denial_reason(db, self.call(None)), "not_business")
+        for label in ("business", "personal", "unclassified", None):
+            self.assertIsNone(recording_denial_reason(db, self.call(label)))
         db.query.assert_not_called()
 
-    def test_excluded_business_number_is_denied(self):
+    def test_excluded_number_does_not_override_recording_switch(self):
         db = MagicMock()
         db.query.return_value.filter.return_value.first.return_value = object()
-        self.assertEqual(recording_denial_reason(db, self.call()), "excluded_number")
-
-    def test_nonexcluded_business_number_is_allowed(self):
-        db = MagicMock()
-        db.query.return_value.filter.return_value.first.return_value = None
         self.assertIsNone(recording_denial_reason(db, self.call()))
+        db.query.assert_not_called()
 
 
 class RecordingFileValidationTests(unittest.TestCase):
@@ -131,11 +126,15 @@ class MobilePipelineContractTests(unittest.TestCase):
         source = (ROOT / "mobile" / "src" / "callLogService.js").read_text(encoding="utf-8")
         self.assertIn('from "expo-file-system/legacy"', source)
 
-    def test_recording_matching_is_privacy_strict(self):
+    def test_recording_uses_fixed_path_and_explicit_toggle(self):
         native = (ROOT / "mobile" / "android" / "app" / "src" / "main" / "java" / "com" / "tzmicha" / "callnexa" / "RecordingModule.kt").read_text(encoding="utf-8")
+        recorder = (ROOT / "mobile" / "src" / "callRecorder.js").read_text(encoding="utf-8")
         sync = (ROOT / "mobile" / "src" / "syncService.js").read_text(encoding="utf-8")
-        self.assertIn("MIN_CONFIDENCE_SCORE = 3", native)
-        self.assertIn('serverCall?.call_privacy !== "business"', sync)
+        self.assertIn('RECORDINGS_DIRECTORY = "/storage/emulated/0/Music/Call Recordings"', native)
+        self.assertIn('"./recordingPreferences"', recorder)
+        self.assertIn('"./recordingPreferences"', sync)
+        self.assertNotIn("callos_recorder_enabled", recorder)
+        self.assertNotIn("isExcludedNumber", sync)
 
 
 class TrackedSecretTests(unittest.TestCase):

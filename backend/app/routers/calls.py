@@ -18,7 +18,6 @@ from ..ws_manager import manager
 from .. import audit
 from ..models.call import RECORDING_STATUS_NOT_AVAILABLE, RECORDING_STATUS_UPLOADED
 from ..phone import normalize_phone
-from ..privacy import recording_denial_reason
 
 logger = logging.getLogger("callnexa.calls")
 
@@ -456,22 +455,6 @@ async def upload_recording(
         if not emp or call.employee_id != emp.id:
             raise HTTPException(status_code=403, detail="Not authorized to upload recording for this call")
 
-    # ── Privacy guard ─────────────────────────────────────────────────────────
-    # Fail closed for every value other than explicit "business", then enforce
-    # the normalized excluded-number list. This remains authoritative even if a
-    # modified/old mobile client bypasses its local checks.
-    denial = recording_denial_reason(db, call)
-    if denial:
-        logger.warning(
-            "[RECORDING_UPLOAD_BLOCKED] call_id=%s reason=%s org=%s",
-            call_id, denial, user.organization_id,
-        )
-        detail = {
-            "personal_call": "Recording upload blocked: personal call",
-            "excluded_number": "Recording upload blocked: excluded phone number",
-        }.get(denial, "Recording upload blocked: call must be classified as business")
-        raise HTTPException(status_code=403, detail=detail)
-
     # ── File validation ───────────────────────────────────────────────────────
     content_type = (file.content_type or "").lower().split(";")[0].strip()
     if content_type and content_type not in ALLOWED_AUDIO_MIME:
@@ -541,8 +524,7 @@ async def upload_recording(
         raise HTTPException(status_code=502, detail="Storage upload failed")
 
     # Re-read and lock only for the short DB state transition. This prevents two
-    # concurrent uploads from both scheduling transcription, and rechecks policy
-    # after the storage request in case classification changed mid-upload.
+    # concurrent uploads from both scheduling transcription.
     db.expire_all()
     call = db.query(Call).filter(
         Call.id == call_id,
@@ -551,13 +533,6 @@ async def upload_recording(
     if not call:
         await _delete_recording_object(storage_path)
         raise HTTPException(status_code=404, detail="Call not found")
-
-    denial = recording_denial_reason(db, call)
-    if denial:
-        deleted = await _delete_recording_object(storage_path)
-        if not deleted:
-            logger.error("Privacy cleanup required after rejected upload for call_id=%s", call_id)
-        raise HTTPException(status_code=403, detail="Recording upload blocked by privacy policy")
 
     old_storage_path = call.recording_url
     already_uploaded = call.recording_available
@@ -688,14 +663,11 @@ async def set_call_privacy(
     user: User = Depends(get_current_user),
 ):
     """
-    Set the privacy classification for a call.
-    - personal: excluded from recording, upload, transcription, and AI analysis.
-    - business: eligible for recording and processing.
-    - unclassified: not automatically recorded or uploaded.
+    Set an optional dashboard label for a call.
 
-    Changing a call to ``personal`` immediately revokes application access to
-    any recording and clears transcript/summary data. Storage deletion is
-    attempted in the same request; failures are reported as cleanup pending.
+    Labels are informational only. The explicit mobile Call Recording setting
+    controls capture; changing a label never removes an uploaded recording,
+    transcript, or summary.
     """
     if body.call_privacy not in VALID_PRIVACY_VALUES:
         raise HTTPException(status_code=422, detail=f"call_privacy must be one of: {', '.join(sorted(VALID_PRIVACY_VALUES))}")
@@ -716,20 +688,7 @@ async def set_call_privacy(
     old_privacy = call.call_privacy
     call.call_privacy = body.call_privacy
     call.updated_at = datetime.now(timezone.utc)
-
-    cleanup_state = "not_required"
-    if body.call_privacy == "personal":
-        storage_path = call.recording_url
-        deleted = not storage_path or await _delete_recording_object(storage_path)
-        _clear_recording_and_ai(call, clear_storage_path=deleted)
-        if deleted:
-            cleanup_state = "completed"
-        else:
-            # Fail closed in the application while retaining the private pointer
-            # so an administrator can retry physical storage deletion.
-            call.recording_status = "failed"
-            call.recording_error = "Privacy cleanup pending"
-            cleanup_state = "pending"
+    cleanup_state = "not_applicable"
 
     audit.log(
         db,
@@ -750,7 +709,7 @@ async def set_call_privacy(
     }
 
 
-# ── delete recording (authorized, personal-call cleanup) ─────────────────────
+# ── delete recording (authorized, user-requested removal) ───────────────────
 
 @router.delete("/{call_id}/recording", status_code=204)
 async def delete_recording(
@@ -762,7 +721,6 @@ async def delete_recording(
     """
     Delete a recording from storage and clear all associated transcript/summary data.
     Only ADMINs of the owning organization may delete.
-    Required when a personal call was accidentally uploaded.
     """
     call = db.query(Call).filter(
         Call.id == call_id,

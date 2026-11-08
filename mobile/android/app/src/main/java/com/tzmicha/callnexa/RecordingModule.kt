@@ -14,14 +14,15 @@ import java.io.File
 /**
  * RecordingModule.kt
  *
- * Discovers audio files saved by the device's native phone dialer and
- * associates them with call-log entries using timestamp + duration heuristics.
+ * Discovers CallNexa recordings stored in the fixed public
+ * Music/Call Recordings folder and associates them with call-log entries.
  *
  * Strategy (in priority order):
- *   1. MediaStore.Audio.Media query — works on Android 10+ regardless of OEM
- *      directory choice. Returns stable _ID, duration, MIME type, file path.
- *   2. Filesystem scan of known OEM directories — fallback for devices where
- *      the dialer does not add recordings to MediaStore (older OEMs).
+ *   1. MediaStore.Audio.Media query after CallRecorderModule publishes the file.
+ *   2. Direct scan of that same public folder while MediaStore indexes it.
+ *
+ * This module only considers the folder written by CallRecorderModule; it never
+ * scans arbitrary dialer or OEM recording folders.
  *
  * What this module does NOT do:
  *   - It does not initiate or intercept calls.
@@ -52,31 +53,18 @@ class RecordingModule(private val reactContext: ReactApplicationContext) :
         // Minimum file size to be considered a real recording (not a 0-byte placeholder)
         private const val MIN_FILE_BYTES = 1024L
 
-        // Privacy-first threshold. A broad time-window match alone scores 1 and
-        // must never be considered enough to upload a customer's audio.
+        // A candidate needs at least the fixed CallNexa-directory score. Time
+        // proximity alone is never accepted from an arbitrary device folder.
         private const val MIN_CONFIDENCE_SCORE = 3
 
         // Maximum number of recordings returned per query (prevents runaway scans)
         private const val MAX_RESULTS = 50
 
-        // Known OEM recording directories for filesystem fallback.
-        // These are the same paths the JS layer scans, but accessed via Java File API
-        // which has the same scoped-storage restrictions — this is a fallback only.
-        private val OEM_DIRS = listOf(
-            "/storage/emulated/0/Recordings/Call",
-            "/storage/emulated/0/Recordings",
-            "/storage/emulated/0/CallRecordings",
-            "/storage/emulated/0/Call",
-            "/storage/emulated/0/Record/Call",
-            "/storage/emulated/0/PhoneRecord",
-            "/storage/emulated/0/MIUI/sound_recorder/call_rec",
-            "/storage/emulated/0/Xiaomi/sound_recorder/call_rec",
-            "/storage/emulated/0/Sounds/CallRecord",
-            "/storage/emulated/0/Vivo/CallRecord",
-            "/storage/emulated/0/ColorOS/Recording",
-            "/storage/emulated/0/DCIM/Call Recordings",
-            "/storage/emulated/0/OnePlus/CallRecord",
-        )
+        // CallNexa always writes recordings into this public directory. Keeping
+        // discovery scoped here avoids ever selecting an unrelated audio file.
+        private const val RECORDINGS_DIRECTORY = "/storage/emulated/0/Music/Call Recordings"
+        private const val RECORDINGS_RELATIVE_PATH = "Music/Call Recordings"
+        private val OEM_DIRS = listOf(RECORDINGS_DIRECTORY)
 
         private val AUDIO_EXTENSIONS = setOf("mp3", "mp4", "m4a", "aac", "wav", "3gp", "amr", "ogg", "webm")
 
@@ -108,6 +96,16 @@ class RecordingModule(private val reactContext: ReactApplicationContext) :
                 PackageManager.PERMISSION_GRANTED
     }
 
+    private fun isCallNexaRecordingPath(filePath: String?, relativePath: String?): Boolean {
+        val normalizedRelative = relativePath
+            ?.replace('\\', '/')
+            ?.trim('/')
+        if (normalizedRelative == RECORDINGS_RELATIVE_PATH) return true
+
+        val normalizedFilePath = filePath?.replace('\\', '/') ?: return false
+        return normalizedFilePath.startsWith("$RECORDINGS_DIRECTORY/")
+    }
+
     // ── checkRecordingPermission ──────────────────────────────────────────────
 
     @ReactMethod
@@ -128,11 +126,8 @@ class RecordingModule(private val reactContext: ReactApplicationContext) :
     // ── MediaStore query ──────────────────────────────────────────────────────
 
     /**
-     * Query MediaStore.Audio.Media for audio files modified within [windowStartMs, windowEndMs].
-     * Returns a list of WritableMap entries, each representing one audio file.
-     *
-     * MediaStore is the correct API for Android 10+ (API 29+). It works regardless
-     * of which directory the OEM dialer chose to save recordings in.
+     * Query MediaStore for CallNexa files in the fixed Music/Call Recordings
+     * directory that were modified within [windowStartMs, windowEndMs].
      */
     private fun queryMediaStore(
         windowStartMs: Long,
@@ -202,6 +197,7 @@ class RecordingModule(private val reactContext: ReactApplicationContext) :
                     val relPath      = if (relPathIdx >= 0) c.getString(relPathIdx) else null
 
                     if (size < MIN_FILE_BYTES) continue
+                    if (!isCallNexaRecordingPath(dataPath, relPath)) continue
 
                     // Build content URI for this item (preferred over DATA path on API 29+)
                     val contentUri = Uri.withAppendedPath(collection, mediaId.toString()).toString()
@@ -239,8 +235,8 @@ class RecordingModule(private val reactContext: ReactApplicationContext) :
     // ── Filesystem fallback scan ──────────────────────────────────────────────
 
     /**
-     * Scan known OEM directories for audio files modified within the window.
-     * Used only when MediaStore returns nothing (older OEMs that don't index recordings).
+     * Scan CallNexa's fixed public recording directory when MediaStore has not
+     * indexed the just-written file yet.
      *
      * Note: On Android 10+ with scoped storage, File.listFiles() may return null
      * for directories the app cannot access. This is handled gracefully.
@@ -388,6 +384,12 @@ class RecordingModule(private val reactContext: ReactApplicationContext) :
 
                 var score = 0
 
+                // The scanner only returns CallNexa's dedicated directory, so
+                // this is reliable proof the file was created by this recorder.
+                if (isCallNexaRecordingPath(rec.getString("file_path"), rec.getString("relative_path"))) {
+                    score += 3
+                }
+
                 // Filename contains phone digits
                 if (digits != null && name.contains(digits)) score += 3
 
@@ -408,8 +410,18 @@ class RecordingModule(private val reactContext: ReactApplicationContext) :
                     if (ratio in 0.8..1.2) score += 1   // within 20%
                 }
 
-                if (score < MIN_CONFIDENCE_SCORE) null else Pair(score, rec)
-            }.sortedByDescending { it.first }
+                if (score < MIN_CONFIDENCE_SCORE) {
+                    null
+                } else {
+                    // Preserve a deterministic tie-breaker for two CallNexa
+                    // files in the same broad call window.
+                    rec.putDouble("match_delta_ms", deltaMs.toDouble())
+                    Pair(score, rec)
+                }
+            }.sortedWith(
+                compareByDescending<Pair<Int, WritableMap>> { it.first }
+                    .thenBy { it.second.getDouble("match_delta_ms") }
+            )
 
             val recordingsArray = Arguments.createArray()
             for ((score, rec) in scored) {

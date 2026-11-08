@@ -19,9 +19,13 @@ import {
   setNotificationPreference,
   getNotificationPermissionStatus,
 } from "../../src/notificationManager";
+import {
+  isRecordingEnabled as getRecordingEnabled,
+  setRecordingEnabled as persistRecordingEnabled,
+  stopAndDiscardActiveRecording,
+} from "../../src/callRecorder";
 
-const LAST_SYNC_KEY      = "callos_last_sync_ts";
-const RECORDING_PREF_KEY = "callos_recording_enabled";
+const LAST_SYNC_KEY = "callos_last_sync_ts";
 
 export default function Profile() {
   const { theme, mode, toggle, shadowSoft } = useTheme();
@@ -46,11 +50,11 @@ export default function Profile() {
 
   const loadAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
-    const [perms, simList, ts, recPref, health, np, nprefs] = await Promise.all([
+    const [perms, simList, ts, recEnabled, health, np, nprefs] = await Promise.all([
       checkPermissions(),
       readSimInfo(),
       AsyncStorage.getItem(LAST_SYNC_KEY),
-      AsyncStorage.getItem(RECORDING_PREF_KEY),
+      getRecordingEnabled(),
       getSyncHealthSummary(),
       getNotificationPermissionStatus(),
       getNotificationPreferences(),
@@ -73,7 +77,7 @@ export default function Profile() {
       }
     }
     setDeviceInfo(getDeviceInfo());
-    setRecordingEnabled(recPref === "true");
+    setRecordingEnabled(recEnabled);
     setSyncHealth(health);
     setNotifPerms(np);
     setNotifPrefs(nprefs);
@@ -163,21 +167,32 @@ export default function Profile() {
     }
   }
 
-  async function toggleRecording(val) {
-    if (val && !permissions.storage) {
-      const result = await requestAllPermissions();
+  async function toggleRecording(enabled) {
+    if (enabled) {
+      const current = await checkPermissions();
+      const requiredReady = current.callLog && current.phoneState && current.storage && current.recording && current.writeStorage !== false;
+      const result = requiredReady ? current : await requestAllPermissions();
       setPermissions(result);
-      if (!result.storage) {
+
+      if (!(result.callLog && result.phoneState && result.storage && result.recording && result.writeStorage !== false)) {
         Alert.alert(
-          "Audio Permission Required",
-          "Go to Settings → Apps → CallNexa → Permissions and allow music/audio file access.",
-          [{ text: "Open Settings", onPress: () => Linking.openSettings() }, { text: "Cancel", style: "cancel" }]
+          "Permissions Required",
+          "Allow Call Log, Phone State, Microphone, and Music & Audio access so CallNexa can record, find, and upload every connected call.",
+          [{ text: "Open Settings", onPress: () => Linking.openSettings() }, { text: "Cancel", style: "cancel" }],
         );
         return;
       }
     }
-    setRecordingEnabled(val);
-    await AsyncStorage.setItem(RECORDING_PREF_KEY, String(val));
+
+    // Persist first so no upload can race with an OFF transition.
+    await persistRecordingEnabled(enabled);
+    setRecordingEnabled(enabled);
+
+    if (!enabled) {
+      // A recording already in progress is not retained when the user turns
+      // the sole recording switch off mid-call.
+      await stopAndDiscardActiveRecording();
+    }
   }
 
   async function handleSignOut() {
@@ -205,13 +220,14 @@ export default function Profile() {
   const sectionLabel = { ...TYPE.micro, color: theme.muted, textTransform: "uppercase", letterSpacing: 0.8, paddingHorizontal: 4, paddingBottom: SPACE.sm, paddingTop: SPACE.xl };
 
   const PERM_LIST = [
-    { key: "callLog",    icon: "call-outline",           label: "Call Log",    desc: "Read call history",          required: true },
-    { key: "phoneState", icon: "phone-portrait-outline", label: "Phone State", desc: "Detect active calls & SIM",   required: true },
-    { key: "contacts",   icon: "people-outline",         label: "Contacts",    desc: "Match caller names",         required: true },
-    { key: "storage",    icon: "folder-outline",         label: "Audio Files", desc: "Access permitted call recordings", required: true },
+    { key: "callLog",    icon: "call-outline",           label: "Call Log",    desc: "Read call history",              required: true },
+    { key: "phoneState", icon: "phone-portrait-outline", label: "Phone State", desc: "Detect active calls & SIM",         required: true },
+    { key: "recording",  icon: "mic-outline",            label: "Microphone",  desc: "Capture call audio with speaker", required: true },
+    { key: "contacts",   icon: "people-outline",         label: "Contacts",    desc: "Match caller names",              required: true },
+    { key: "storage",    icon: "folder-outline",         label: "Audio Files", desc: "Find saved call recordings",       required: true },
   ];
 
-  const requiredGranted = PERM_LIST.filter((p) => p.required).every((p) => permissions[p.key]);
+  const requiredGranted = PERM_LIST.filter((p) => p.required).every((p) => permissions[p.key]) && permissions.writeStorage !== false;
   const allGranted      = PERM_LIST.every((p) => permissions[p.key]);
 
   return (
@@ -287,7 +303,9 @@ export default function Profile() {
               <View style={{ flex: 1, marginLeft: SPACE.md }}>
                 <Text style={{ ...TYPE.title, color: theme.primary }}>Call Recording</Text>
                 <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>
-                  {recordingEnabled ? "Enabled · saves to dashboard" : "Off · calls not recorded"}
+                  {recordingEnabled
+                    ? "Enabled · records every connected call and uploads it"
+                    : "Off · no new calls are recorded"}
                 </Text>
               </View>
               <Switch value={recordingEnabled} onValueChange={toggleRecording} trackColor={{ false: theme.border, true: palette.violet + "88" }} thumbColor={recordingEnabled ? palette.violet : theme.muted} />

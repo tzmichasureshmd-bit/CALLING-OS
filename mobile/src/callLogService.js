@@ -48,22 +48,10 @@ function _deriveCallStatus(callType, durationSec) {
 }
 
 // ── Recording file search ─────────────────────────────────────────────────────
+// CallNexa records only into this public directory. Restricting discovery to it
+// prevents an unrelated audio file elsewhere on the device from being uploaded.
 const RECORDING_SEARCH_DIRS = [
-  "file:///storage/emulated/0/Recordings/Call/",
-  "file:///storage/emulated/0/Recordings/",
-  "file:///storage/emulated/0/CallRecordings/",
-  "file:///storage/emulated/0/Call/",
-  "file:///storage/emulated/0/Record/Call/",
-  "file:///storage/emulated/0/PhoneRecord/",
-  "file:///storage/emulated/0/MIUI/sound_recorder/call_rec/",
-  "file:///storage/emulated/0/Xiaomi/sound_recorder/call_rec/",
-  "file:///storage/emulated/0/Sounds/CallRecord/",
-  "file:///storage/emulated/0/Vivo/CallRecord/",
-  "file:///storage/emulated/0/ColorOS/Recording/",
-  "file:///storage/emulated/0/DCIM/Call Recordings/",
-  "file:///storage/emulated/0/Sounds/",
-  "file:///storage/emulated/0/OnePlus/CallRecord/",
-  "file:///storage/emulated/0/Android/data/com.android.phone/files/",
+  "file:///storage/emulated/0/Music/Call%20Recordings/",
 ];
 const RECORDING_EXTENSIONS = ["mp3", "mp4", "m4a", "aac", "wav", "3gp", "amr", "ogg"];
 const RECORDING_MIME_MAP = {
@@ -72,21 +60,20 @@ const RECORDING_MIME_MAP = {
   amr: "audio/amr", ogg: "audio/ogg",
 };
 const MIN_RECORDING_BYTES = 1024;
-const MATCH_WINDOW_SEC    = 60;  // extra buffer after call end; total window = duration + 60s
+const MATCH_WINDOW_SEC    = 90;  // MediaRecorder finalization and indexing buffer after call end
 
 async function _findRecordingFileJS(startMs, phoneNumber, durationSec) {
   try {
     const startSec = Math.floor(startMs / 1000);
-    // Window: from 30s before call start to duration + 60s after — covers OEMs that
-    // save the file before the call ends or up to 1 min after.
-    const endSec = startSec + Math.max(durationSec || 0, 0) + MATCH_WINDOW_SEC;
+    const callEndSec = startSec + Math.max(durationSec || 0, 0);
+    // The native recorder stops at call end and writes into the fixed folder.
+    // Keep enough time for MediaRecorder finalization and file indexing.
     const windowStart = startSec - 30;
+    const windowEnd = callEndSec + MATCH_WINDOW_SEC;
     const digits = phoneNumber && phoneNumber !== "unknown"
       ? phoneNumber.replace(/\D/g, "").slice(-7)
       : null;
-    // The JS fallback has no reliable duration metadata. Require both a phone
-    // hint and the call time window rather than uploading the first nearby file.
-    if (!digits || digits.length < 7) return null;
+    const candidates = [];
 
     for (const dir of RECORDING_SEARCH_DIRS) {
       try {
@@ -97,19 +84,29 @@ async function _findRecordingFileJS(startMs, phoneNumber, durationSec) {
           const ext = filename.split(".").pop()?.toLowerCase();
           if (!RECORDING_EXTENSIONS.includes(ext)) continue;
           try {
-            const fileInfo = await FileSystem.getInfoAsync(dir + filename, { md5: false });
-            if (!fileInfo.exists) continue;
-            if (!fileInfo.size || fileInfo.size < MIN_RECORDING_BYTES) continue;
-            if (fileInfo.modificationTime) {
-              const fileSec = Math.floor(fileInfo.modificationTime);
-              if (fileSec >= windowStart && fileSec <= endSec && filename.includes(digits)) {
-                return { path: dir + filename, mimeType: RECORDING_MIME_MAP[ext] || "audio/mp4", fileSize: fileInfo.size };
-              }
-            }
+            const path = dir + filename;
+            const fileInfo = await FileSystem.getInfoAsync(path, { md5: false });
+            if (!fileInfo.exists || !fileInfo.size || fileInfo.size < MIN_RECORDING_BYTES) continue;
+            const fileSec = Math.floor(fileInfo.modificationTime || 0);
+            if (fileSec < windowStart || fileSec > windowEnd) continue;
+
+            candidates.push({
+              path,
+              mimeType: RECORDING_MIME_MAP[ext] || "audio/mp4",
+              fileSize: fileInfo.size,
+              // A number match helps when it is available, but Android 12+
+              // deliberately withholds it from third-party call-state events.
+              numberMatched: Boolean(digits && filename.includes(digits)),
+              delta: Math.abs(fileSec - callEndSec),
+            });
           } catch { /* skip unreadable file */ }
         }
       } catch { /* dir not accessible */ }
     }
+
+    candidates.sort((a, b) => Number(b.numberMatched) - Number(a.numberMatched) || a.delta - b.delta);
+    const match = candidates[0];
+    return match ? { path: match.path, mimeType: match.mimeType, fileSize: match.fileSize } : null;
   } catch { /* silent */ }
   return null;
 }
@@ -253,8 +250,9 @@ export async function applySimFilter(calls) {
  * findRecordingForCall
  *
  * Strategy (in priority order):
- *   1. Native RecordingModule (Kotlin) — queries MediaStore then OEM filesystem.
- *      Returns a confidence-scored list. We take the highest-scoring match.
+ *   1. Native RecordingModule (Kotlin) — queries MediaStore then CallNexa's
+ *      fixed public folder. Returns a confidence-scored list. We take the
+ *      highest-scoring match.
  *      If two candidates share the top score, we return null (ambiguous) rather
  *      than uploading the wrong file.
  *   2. JS filesystem fallback — used only when RecordingModule is unavailable
@@ -295,19 +293,23 @@ export async function findRecordingForCall(c) {
       continue; // try again after delay
     }
 
-    // Check for ambiguity: if top two candidates share the same score, do not upload
     const top = recordings[0];
     const second = recordings[1];
     if (!top || top.confidence_score < 3) {
       console.warn(`[RECORDING_WEAK_MATCH_REJECTED] client_event_id=${c.client_event_id} score=${top?.confidence_score ?? 0} ts=${Date.now()}`);
       return null;
     }
-    if (second && second.confidence_score === top.confidence_score) {
+
+    // The native finder returns only CallNexa's dedicated folder and sorts
+    // equal-confidence files by their exact distance from the call end.
+    // Reject only a genuinely indistinguishable tie.
+    const sameScore = second && second.confidence_score === top.confidence_score;
+    const sameDistance = sameScore && Number(second.match_delta_ms) === Number(top.match_delta_ms);
+    if (sameDistance) {
       console.warn(
         `[RECORDING_AMBIGUOUS] client_event_id=${c.client_event_id} ` +
         `top_score=${top.confidence_score} candidates=${recordings.length} ts=${Date.now()}`
       );
-      // Return null — do not upload an ambiguous match
       return null;
     }
 
@@ -361,9 +363,11 @@ export async function findRecordingForCall(c) {
 export async function uploadRecording(callId, filePath, token, mimeType = "audio/mp4") {
   if (!filePath || !callId) return null;
 
-  // uploadAsync cannot read content:// URIs (MediaStore paths on Android 10+).
-  // Copy into the app cache first — copyAsync supports content:// sources.
-  let uploadPath = filePath;
+  // Expo's upload API requires a file:// URI for a local path. Native Android
+  // discovery returns an absolute path, while MediaStore returns content://.
+  let uploadPath = filePath.startsWith("content://") || filePath.startsWith("file://")
+    ? filePath
+    : `file://${filePath}`;
   let tempPath   = null;
   if (filePath.startsWith("content://")) {
     const extension = {
@@ -392,6 +396,7 @@ export async function uploadRecording(callId, filePath, token, mimeType = "audio
         httpMethod:  "POST",
         uploadType:  FileSystem.FileSystemUploadType.MULTIPART,
         fieldName:   "file",
+        mimeType,
         headers:     { Authorization: `Bearer ${token}` },
       }
     );

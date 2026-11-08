@@ -6,11 +6,12 @@
  */
 
 import { NativeModules, NativeEventEmitter, Platform } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  isRecordingEnabled as getRecordingEnabledPreference,
+  setRecordingEnabled as setRecordingEnabledPreference,
+} from "./recordingPreferences";
 
 const { CallRecorderModule } = NativeModules;
-
-const RECORDER_ENABLED_KEY = "callos_recorder_enabled";
 
 let recordingEmitter = null;
 if (CallRecorderModule && Platform.OS === "android") {
@@ -37,23 +38,11 @@ export async function isRecorderAvailable() {
 }
 
 /**
- * Check if recording is enabled in settings
+ * Read and write the same explicit setting used by Settings and the upload flow.
+ * A missing value is intentionally OFF.
  */
-export async function isRecordingEnabled() {
-  try {
-    const enabled = await AsyncStorage.getItem(RECORDER_ENABLED_KEY);
-    return enabled !== "false"; // default ON
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Set recording enabled/disabled
- */
-export async function setRecordingEnabled(enabled) {
-  await AsyncStorage.setItem(RECORDER_ENABLED_KEY, String(enabled));
-}
+export const isRecordingEnabled = getRecordingEnabledPreference;
+export const setRecordingEnabled = setRecordingEnabledPreference;
 
 /**
  * Start recording a call
@@ -121,6 +110,21 @@ export async function stopCallRecording() {
     currentRecording = null;
     return { success: false, error: error.message };
   }
+}
+
+/**
+ * Immediately stop and delete a partial recording when the setting is turned
+ * off during an active call. Future calls remain blocked by the shared setting.
+ */
+export async function stopAndDiscardActiveRecording() {
+  const status = await getRecordingStatus();
+  if (!status?.isRecording) return { success: true, stopped: false };
+
+  const result = await stopCallRecording();
+  if (result.success && result.filepath) {
+    await deleteRecording(result.filepath);
+  }
+  return { ...result, stopped: Boolean(result.success) };
 }
 
 /**
@@ -203,6 +207,7 @@ export default {
   setRecordingEnabled,
   startCallRecording,
   stopCallRecording,
+  stopAndDiscardActiveRecording,
   getRecordingStatus,
   getRecentRecordings,
   deleteRecording,
