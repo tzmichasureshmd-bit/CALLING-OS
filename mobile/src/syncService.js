@@ -39,7 +39,7 @@ const RECORDING_PREF_KEY = "callos_recording_enabled";
 
 // ── Recording enabled check ───────────────────────────────────────────────────
 // Returns true only when the user has explicitly enabled recording in Settings.
-async function isRecordingEnabled() {
+export async function isRecordingEnabled() {
   try {
     const val = await AsyncStorage.getItem(RECORDING_PREF_KEY);
     return val === "true";
@@ -264,27 +264,7 @@ async function _checkAndUploadRecording(call, attempt = 0) {
     return;
   }
 
-  // Step 0b: authoritative classification check before recording discovery or
-  // file access. Backend remains the source of truth across dashboard changes.
-  let serverCall;
-  try {
-    serverCall = await api.getCall(call.call_id);
-  } catch (e) {
-    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_FAILED, {
-      recording_error: "Could not verify recording privacy eligibility.",
-    });
-    console.warn(`[RECORDING_ELIGIBILITY_CHECK_FAILED] client_event_id=${call.client_event_id} error=${e?.message || "unknown"} ts=${Date.now()}`);
-    return;
-  }
-  if (serverCall?.call_privacy !== "business") {
-    console.log(`[RECORDING_SKIPPED] client_event_id=${call.client_event_id} reason=not_business ts=${Date.now()}`);
-    updateRecordingStatus(call.client_event_id, STATUS.RECORDING_NOT_AVAILABLE, {
-      recording_error: "Classify this call as Business before recording upload.",
-    });
-    return;
-  }
-
-  // Step 0c: excluded-number check (fail closed when policy cannot be loaded)
+  // Step 0b: excluded-number check (fail closed when policy cannot be loaded)
   let excluded;
   try {
     excluded = await isExcludedNumber(call.phone_number || call._raw_number);
