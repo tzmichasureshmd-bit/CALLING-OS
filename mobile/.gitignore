@@ -10,3 +10,9 @@ credentials.json
 credentials/
 .tmp-download-eas-credentials.cjs
 .tmp-local-release.gradle
+android/app/build16/
+android/app/build/
+android/app/.cxx/
+android/build/
+android/.gradle/
+android/.kotlin/
