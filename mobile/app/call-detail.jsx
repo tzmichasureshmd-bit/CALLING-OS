@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  View, Text, ScrollView, Pressable, ActivityIndicator, Linking, Alert,
+  View, Text, ScrollView, Pressable, ActivityIndicator, Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -9,7 +9,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import { palette, gradientBrand, useTheme, TYPE, SPACE, RADIUS } from "../src/theme";
 import { api } from "../src/api";
 import { getCallStatus, STATUS, STATUS_LABEL } from "../src/callStatusStore";
-import { pickAndUploadRecording } from "../src/manualRecordingUpload";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtDur(s) {
@@ -252,7 +251,6 @@ export default function CallDetail() {
   const [serverCall, setServerCall]   = useState(null);
   const [transcript, setTranscript]   = useState(null);
   const [loading, setLoading]         = useState(true);
-  const [uploading, setUploading]     = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -276,36 +274,6 @@ export default function CallDetail() {
   }, [clientEventId, callId]);
 
   useEffect(() => { load(); }, [load]);
-
-  // Manual recording upload handler
-  const handleManualUpload = async () => {
-    if (!serverCall?.id) {
-      Alert.alert("Error", "Call must be synced to server before uploading recording");
-      return;
-    }
-
-    if (uploading) return;
-
-    setUploading(true);
-    try {
-      const result = await pickAndUploadRecording(serverCall.id, (progress) => {
-        // Progress callback if needed in the future
-        console.log('Upload progress:', progress);
-      });
-
-      if (result.success) {
-        Alert.alert("Success", "Recording uploaded successfully!");
-        // Reload call data to show updated recording status
-        await load();
-      } else {
-        Alert.alert("Upload Failed", result.error || "Failed to upload recording");
-      }
-    } catch (error) {
-      Alert.alert("Error", error.message || "Failed to upload recording");
-    } finally {
-      setUploading(false);
-    }
-  };
 
   // Merge local + server data
   const call = {
@@ -443,42 +411,6 @@ export default function CallDetail() {
             <View style={{ marginTop: SPACE.md, backgroundColor: palette.red + "12", borderRadius: RADIUS.md, padding: SPACE.md, borderWidth: 1, borderColor: palette.red + "33" }}>
               <Text style={{ ...TYPE.caption, color: palette.red }}>{call.last_error}</Text>
             </View>
-          )}
-          
-          {/* Manual Recording Upload Button */}
-          {call.sync_status === STATUS.SYNCED && 
-           call.recording_status !== STATUS.RECORDING_UPLOADED && 
-           call.recording_status !== STATUS.RECORDING_UPLOADING && (
-            <Pressable
-              onPress={handleManualUpload}
-              disabled={uploading}
-              style={({ pressed }) => ({
-                marginTop: SPACE.md,
-                backgroundColor: pressed ? palette.violet + "22" : palette.violet + "14",
-                borderRadius: RADIUS.lg,
-                padding: SPACE.md,
-                borderWidth: 1,
-                borderColor: palette.violet + "44",
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: SPACE.sm,
-                opacity: uploading ? 0.5 : 1,
-              })}
-            >
-              {uploading ? (
-                <>
-                  <ActivityIndicator size="small" color={palette.violet} />
-                  <Text style={{ ...TYPE.bodyBold, color: palette.violet }}>Uploading...</Text>
-                </>
-              ) : (
-                <>
-                  <Ionicons name="cloud-upload-outline" size={20} color={palette.violet} />
-                  <Text style={{ ...TYPE.bodyBold, color: palette.violet }}>Upload Recording</Text>
-                  <Text style={{ ...TYPE.micro, color: theme.muted }}>(from device storage)</Text>
-                </>
-              )}
-            </Pressable>
           )}
         </View>
 
