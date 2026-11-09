@@ -30,7 +30,7 @@ ALLOWED_AUDIO_MIME = {
     "audio/amr", "video/mp4",   # some recorders save as video/mp4
 }
 ALLOWED_AUDIO_EXT = {"mp4", "mp3", "ogg", "wav", "aac", "webm", "m4a", "3gp", "amr"}
-MAX_RECORDING_BYTES = 200 * 1024 * 1024   # 200 MB hard limit
+# No size limit — users can upload recordings of any size
 
 VALID_CALL_TYPES = {"incoming", "outgoing", "missed", "rejected"}
 
@@ -478,8 +478,6 @@ async def upload_recording(
         if len(header) < 16:
             header = (header + chunk)[:16]
         file_size += len(chunk)
-        if file_size > MAX_RECORDING_BYTES:
-            raise HTTPException(status_code=413, detail="Recording file exceeds 200 MB limit")
     if file_size == 0:
         raise HTTPException(status_code=400, detail="Recording file is empty")
     if not _has_supported_audio_signature(header, ext):

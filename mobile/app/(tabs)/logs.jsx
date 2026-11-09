@@ -410,7 +410,7 @@ function DetailsSheet({ visible, onClose, call, allCalls, syncedIds, theme }) {
                 val:   call.synced ? "Synced ✓" : "Pending",
                 color: call.synced ? palette.emerald : palette.amber },
               { label:"Recording",
-                val:   call.recordingStatus === "RECORDING_UPLOADED"      ? "Uploaded ✓"
+                val:   call.recordingStatus === "RECORDING_UPLOADED"      ? ("Uploaded ✓ · " + (call.recordingSize ? (call.recordingSize / 1024 / 1024).toFixed(1) + " MB" : "—"))
                      : call.recordingStatus === "RECORDING_UPLOADING"     ? "Uploading…"
                      : call.recordingStatus === "RECORDING_QUEUED"        ? "Queued"
                      : call.recordingStatus === "RECORDING_FAILED"        ? "Upload failed"
@@ -561,7 +561,7 @@ function ManualUploadSheet({ visible, onClose, call, theme }) {
           {/* Max file size info */}
           <View style={{ backgroundColor:palette.blue+"0f", borderRadius:10, borderWidth:1, borderColor:palette.blue+"33", padding:10, marginBottom:16, flexDirection:"row", gap:8 }}>
             <Ionicons name="information-circle" size={16} color={palette.blue} style={{ marginTop:1 }}/>
-            <Text style={{ fontSize:12, color:palette.blue, flex:1, lineHeight:16 }}>Maximum file size: <Text style={{ fontWeight:"700" }}>200 MB</Text></Text>
+            <Text style={{ fontSize:12, color:palette.blue, flex:1, lineHeight:16 }}>Upload any recording size · will be saved to dashboard</Text>
           </View>
 
           {/* Call not synced warning */}

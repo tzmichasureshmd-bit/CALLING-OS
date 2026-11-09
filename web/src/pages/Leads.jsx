@@ -153,7 +153,7 @@ function BulkUploadModal({ onClose, onAdded }) {
             {err && <div style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 12, padding: 12, borderRadius: 8, background: "var(--danger-soft)" }}>{err}</div>}
 
             <div style={{ fontSize: 12, color: "var(--accent)", marginBottom: 16, padding: 12, borderRadius: 8, background: "var(--accent-soft)", border: "1px solid var(--accent)" }}>
-              <strong>ℹ️ Maximum file size: 100 MB</strong>
+              <strong>ℹ️ Upload recordings of any size</strong> — they'll be saved to the dashboard automatically
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
