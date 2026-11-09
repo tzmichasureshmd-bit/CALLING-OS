@@ -60,11 +60,12 @@ function clientFilterByRange(calls, range) {
 }
 
 function exportCallsCSV(calls) {
-  const rows = [["Date", "Type", "Customer", "Phone", "Employee", "Duration (s)", "SIM", "Recording", "Transcript"]];
+  const rows = [["Date", "Type", "Customer", "Phone", "Employee", "Duration (s)", "SIM", "Recording", "Recording Size (MB)", "Transcript"]];
   calls.forEach((c) => rows.push([
     formatDateTime(c.date), c.type, c.contact, c.phone,
     c.employee, c.durationSeconds, c.source,
     c.hasRecording ? (c.recordingStatus || "available") : "none",
+    c.hasRecording && c.recordingSizeBytes ? (c.recordingSizeBytes / 1024 / 1024).toFixed(1) : "",
     c.transcriptStatus || "—",
   ]));
   const csv = rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -675,7 +676,9 @@ function CallIntelligenceDrawer({ call, onClose, reload }) {
         <Detail label="SIM"      value={call.source} />
         <Detail label="Recording" value={
           <span style={{ fontWeight:600, color: call.hasRecording ? "var(--success)" : "var(--text-dim)" }}>
-            {call.hasRecording ? (call.recordingStatus || "Available") : "Not available"}
+            {call.hasRecording 
+              ? `${call.recordingStatus || "Available"}${call.recordingSizeBytes ? ` · ${(call.recordingSizeBytes / 1024 / 1024).toFixed(1)} MB` : ""}` 
+              : "Not available"}
           </span>
         } />
         {call.updatedAt && (
