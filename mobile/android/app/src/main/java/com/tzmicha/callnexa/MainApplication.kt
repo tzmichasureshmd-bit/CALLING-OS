@@ -1,6 +1,7 @@
 package com.tzmicha.callnexa
 
 import com.tzmicha.callnexa.CallLogPackage
+import com.tzmicha.callnexa.CallRecorderPackage
 
 import android.app.Application
 import android.content.res.Configuration
