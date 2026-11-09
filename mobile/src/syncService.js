@@ -153,7 +153,9 @@ async function directSync(deviceId, calls) {
         _sessionConfirmed.set(r.client_event_id, {
           call_id: r.call_id,
           recording_status: r.recording_status,
-          last_recording_check_at: Date.now(),
+          // Zero so the recheck loop retries recording upload immediately on
+          // the next pass rather than waiting a full RECORDING_RECHECK_MS.
+          last_recording_check_at: r.recording_status === "uploaded" ? Date.now() : 0,
         });
         totals.duplicates += 1;
         updateSyncStatus(r.client_event_id, STATUS.SYNCED, { call_id: r.call_id });
@@ -314,8 +316,10 @@ async function _runSyncCycle(deviceId, mode) {
     const eligibleCalls = afterCutoff;
     const now = Date.now();
 
-    // Calls already acknowledged do not need metadata re-upload. They may need
-    // a bounded retry while the recording file finishes indexing on the device.
+    // For calls already in the session map, retry upload if recording still
+    // pending and the recheck window has elapsed. The recheck_at is set to 0
+    // for fresh duplicate entries so they are picked up on the very first pass
+    // after a restart, not after a 5-minute wait.
     for (const call of eligibleCalls) {
       const state = _sessionConfirmed.get(call.client_event_id);
       if (
