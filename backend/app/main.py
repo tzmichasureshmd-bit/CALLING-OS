@@ -37,6 +37,7 @@ except ImportError:
     logger.warning("slowapi not installed — rate limiting disabled. Run: pip install slowapi")
 
 # ── App ────────────────────────────────────────────────────────────────────────
+# Increase max request body size for file uploads (default 16MB, set to 100MB)
 app = FastAPI(
     title="CallNexa API",
     description="Sales call monitoring & intelligence platform API.",
@@ -44,6 +45,28 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Configure max upload size via Starlette middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import MutableHeaders
+
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
+
+class MaxUploadSizeMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, max_size: int):
+        super().__init__(app)
+        self.max_size = max_size
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "POST" and "multipart/form-data" in request.headers.get("content-type", ""):
+            if int(request.headers.get("content-length", 0)) > self.max_size:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"File too large. Maximum size is {self.max_size // (1024*1024)} MB"}
+                )
+        return await call_next(request)
+
+app.add_middleware(MaxUploadSizeMiddleware, max_size=MAX_UPLOAD_SIZE)
 
 if _rate_limiting_available:
     app.state.limiter = limiter

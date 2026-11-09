@@ -558,6 +558,12 @@ function ManualUploadSheet({ visible, onClose, call, theme }) {
             Recorded the call manually? Pick the audio file and upload it to the dashboard.
           </Text>
 
+          {/* Max file size info */}
+          <View style={{ backgroundColor:palette.blue+"0f", borderRadius:10, borderWidth:1, borderColor:palette.blue+"33", padding:10, marginBottom:16, flexDirection:"row", gap:8 }}>
+            <Ionicons name="information-circle" size={16} color={palette.blue} style={{ marginTop:1 }}/>
+            <Text style={{ fontSize:12, color:palette.blue, flex:1, lineHeight:16 }}>Maximum file size: <Text style={{ fontWeight:"700" }}>200 MB</Text></Text>
+          </View>
+
           {/* Call not synced warning */}
           {notSynced && (
             <View style={{ backgroundColor:palette.amber+"18", borderRadius:10, borderWidth:1, borderColor:palette.amber+"44", padding:12, marginBottom:16, flexDirection:"row", gap:8 }}>

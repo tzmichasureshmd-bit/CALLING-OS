@@ -20,4 +20,4 @@ EXPOSE 8000
 
 # ConnectionManager and startup watchers are process-local. Keep one worker
 # until shared pub/sub and singleton background workers are introduced.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--timeout-keep-alive", "35"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--timeout-keep-alive", "35", "--limit-request-fields", "32000", "--limit-request-field-size", "0"]
