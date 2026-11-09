@@ -1,13 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  View, Text, ScrollView, Pressable, ActivityIndicator, Linking,
+  View, Text, ScrollView, Pressable, ActivityIndicator, Linking, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
+import * as SecureStore from "expo-secure-store";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { palette, gradientBrand, useTheme, TYPE, SPACE, RADIUS } from "../src/theme";
-import { api } from "../src/api";
+import { api, BASE_URL } from "../src/api";
 import { getCallStatus, STATUS, STATUS_LABEL } from "../src/callStatusStore";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -251,6 +255,67 @@ export default function CallDetail() {
   const [serverCall, setServerCall]   = useState(null);
   const [transcript, setTranscript]   = useState(null);
   const [loading, setLoading]         = useState(true);
+  const [uploading, setUploading]     = useState(false);
+
+  // ── Manual recording upload ───────────────────────────────────────────────
+  async function handleManualUpload() {
+    const id = callId || localStatus?.call_id;
+    if (!id) {
+      Alert.alert("Not Synced", "This call has not been synced to the server yet. Sync it first from the Logs screen.");
+      return;
+    }
+
+    let picked;
+    try {
+      picked = await DocumentPicker.getDocumentAsync({
+        type: ["audio/*", "video/mp4"],
+        copyToCacheDirectory: true,
+      });
+    } catch {
+      return;
+    }
+    if (picked.canceled || !picked.assets?.length) return;
+
+    const asset = picked.assets[0];
+    const mimeType = asset.mimeType || "audio/mp4";
+
+    setUploading(true);
+    try {
+      let token = null;
+      try { token = await SecureStore.getItemAsync("callos_token"); } catch {}
+      if (!token) token = await AsyncStorage.getItem("callos_token").catch(() => null);
+      if (!token) throw new Error("Not logged in");
+
+      const result = await FileSystem.uploadAsync(
+        `${BASE_URL}/calls/${id}/recording`,
+        asset.uri,
+        {
+          httpMethod:  "POST",
+          uploadType:  FileSystem.FileSystemUploadType.MULTIPART,
+          fieldName:   "file",
+          mimeType,
+          headers:     { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (result.status === 200 || result.status === 201) {
+        let parsed = null;
+        try { parsed = result.body ? JSON.parse(result.body) : null; } catch {}
+        if (parsed?.recording_available === true) {
+          Alert.alert("Upload Successful", "Recording uploaded! Transcription will begin shortly.");
+          load();
+          return;
+        }
+      }
+      let detail = "Upload failed";
+      try { detail = JSON.parse(result.body)?.detail || detail; } catch {}
+      throw new Error(`HTTP ${result.status}: ${detail}`);
+    } catch (e) {
+      Alert.alert("Upload Failed", e?.message || "Could not upload the recording. Check your connection.");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -459,17 +524,35 @@ export default function CallDetail() {
 
       </ScrollView>
 
-      {/* ── Sticky Call Back bar ── */}
+      {/* ── Sticky action bar ── */}
       <View style={{
         position: "absolute", bottom: 0, left: 0, right: 0,
         backgroundColor: theme.surface,
         borderTopWidth: 1, borderTopColor: theme.border,
         paddingHorizontal: SPACE.lg, paddingVertical: SPACE.md,
         paddingBottom: SPACE.lg,
+        flexDirection: "row", gap: SPACE.sm,
       }}>
+        {/* Manual upload — visible when recording not uploaded */}
+        {(call.recording_status === STATUS.RECORDING_NOT_AVAILABLE ||
+          call.recording_status === STATUS.RECORDING_FAILED ||
+          !call.recording_status) && call.sync_status === STATUS.SYNCED && (
+          <Pressable
+            onPress={handleManualUpload}
+            disabled={uploading}
+            style={{ flex: 1, overflow: "hidden", borderRadius: RADIUS.lg, borderWidth: 1.5, borderColor: palette.violet + "88", backgroundColor: palette.violet + "18", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SPACE.sm, height: 52 }}
+          >
+            {uploading
+              ? <ActivityIndicator color={palette.violet} size="small" />
+              : <Ionicons name="cloud-upload-outline" size={20} color={palette.violet} />}
+            <Text style={{ ...TYPE.bodyBold, color: palette.violet }}>
+              {uploading ? "Uploading…" : "Upload Recording"}
+            </Text>
+          </Pressable>
+        )}
         <Pressable
           onPress={() => Linking.openURL(`tel:${call.phone_number.replace(/\s/g, "")}`)}
-          style={{ overflow: "hidden", borderRadius: RADIUS.lg }}
+          style={{ flex: 1, overflow: "hidden", borderRadius: RADIUS.lg }}
         >
           <LinearGradient
             colors={["#22c55e", "#16a34a"]}
