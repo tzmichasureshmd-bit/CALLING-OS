@@ -235,6 +235,17 @@ export function AuthProvider({ children }) {
 
     if (Platform.OS === "android") {
       await requestAllPermissions().catch(() => {});
+      // Start native call monitor if recording is enabled
+      try {
+        const { NativeModules } = require("react-native");
+        const CallMonitorService = NativeModules.CallMonitorService;
+        if (CallMonitorService?.startEnabledMonitor) {
+          await CallMonitorService.startEnabledMonitor();
+          console.log("[AUTH] native CallMonitorService started");
+        }
+      } catch (e) {
+        console.warn("[AUTH] could not start CallMonitorService: " + e?.message);
+      }
     }
 
     // Register device — MUST succeed before any sync
