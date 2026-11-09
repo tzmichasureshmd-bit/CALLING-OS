@@ -2,8 +2,12 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   View, Text, TextInput, Pressable, Linking,
   ToastAndroid, Platform, Clipboard, Modal,
-  FlatList, ActivityIndicator, ScrollView, KeyboardAvoidingView,
+  FlatList, ActivityIndicator, ScrollView, KeyboardAvoidingView, Alert,
 } from "react-native";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
+import * as SecureStore from "expo-secure-store";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -11,8 +15,7 @@ import { palette, gradientBrand, useTheme, TYPE, SPACE, RADIUS } from "../../src
 import { AppHeader } from "../../src/components";
 import { getRealCallLog } from "../../src/callLogService";
 import { getAllCallStatuses, STATUS } from "../../src/callStatusStore";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { api } from "../../src/api";
+import { api, BASE_URL } from "../../src/api";
 
 const STATUSES = [
   { key: "interested",     label: "Interested",     color: palette.emerald, icon: "checkmark-circle"  },
@@ -468,8 +471,150 @@ function DetailsSheet({ visible, onClose, call, allCalls, syncedIds, theme }) {
   );
 }
 
+// ── Manual Upload Sheet ──────────────────────────────────────────────────────
+function ManualUploadSheet({ visible, onClose, call, theme }) {
+  const [file,       setFile]       = useState(null);   // { name, uri, size, mimeType }
+  const [uploading,  setUploading]  = useState(false);
+  const [done,       setDone]       = useState(false);
+  const [error,      setError]      = useState(null);
+
+  useEffect(() => {
+    if (visible) { setFile(null); setUploading(false); setDone(false); setError(null); }
+  }, [visible]);
+
+  async function pickFile() {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["audio/*", "video/mp4"],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (!asset) return;
+      setFile({ name: asset.name, uri: asset.uri, size: asset.size, mimeType: asset.mimeType || "audio/mp4" });
+      setError(null);
+    } catch (e) {
+      setError("Could not open file picker: " + (e?.message || ""));
+    }
+  }
+
+  async function upload() {
+    if (!file || !call?.callId) return;
+    setUploading(true); setError(null);
+    try {
+      let token = null;
+      try { token = await SecureStore.getItemAsync("callos_token"); } catch {}
+      if (!token) token = await AsyncStorage.getItem("callos_token").catch(() => null);
+      if (!token) { setError("Not logged in. Please sign in again."); setUploading(false); return; }
+
+      const info = await FileSystem.getInfoAsync(file.uri);
+      if (!info.exists) { setError("File not found. Please pick again."); setUploading(false); return; }
+      if (info.size < 1024) { setError("File is too small — may be empty or corrupt."); setUploading(false); return; }
+
+      const result = await FileSystem.uploadAsync(
+        `${BASE_URL}/calls/${call.callId}/recording`,
+        file.uri,
+        {
+          httpMethod:  "POST",
+          uploadType:  FileSystem.FileSystemUploadType.MULTIPART,
+          fieldName:   "file",
+          mimeType:    file.mimeType,
+          headers:     { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (result.status === 200 || result.status === 201) {
+        setDone(true);
+        setTimeout(() => onClose(), 1800);
+      } else {
+        let detail = "Upload failed";
+        try { detail = JSON.parse(result.body)?.detail || detail; } catch {}
+        setError(`Server error ${result.status}: ${detail}`);
+      }
+    } catch (e) {
+      setError(e?.message || "Upload failed. Check your connection.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const notSynced = !call?.callId;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex:1, backgroundColor:"rgba(0,0,0,0.5)" }} onPress={onClose}/>
+      <KeyboardAvoidingView behavior="padding" style={{ position:"absolute", bottom:0, left:0, right:0 }}>
+        <View style={{ backgroundColor:theme.bg, borderTopLeftRadius:24, borderTopRightRadius:24, padding:20, paddingBottom:40 }}>
+          <View style={{ width:36, height:4, borderRadius:2, backgroundColor:theme.border, alignSelf:"center", marginBottom:16 }}/>
+
+          {/* Header */}
+          <View style={{ flexDirection:"row", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
+            <Text style={{ fontSize:17, fontWeight:"800", color:theme.primary }}>Manual Recording Upload</Text>
+            <Pressable onPress={onClose} hitSlop={{top:12,bottom:12,left:12,right:12}}>
+              <Ionicons name="close" size={22} color={theme.muted}/>
+            </Pressable>
+          </View>
+          <Text style={{ fontSize:13, color:theme.muted, marginBottom:20, lineHeight:19 }}>
+            Recorded the call manually? Pick the audio file and upload it to the dashboard.
+          </Text>
+
+          {/* Call not synced warning */}
+          {notSynced && (
+            <View style={{ backgroundColor:palette.amber+"18", borderRadius:10, borderWidth:1, borderColor:palette.amber+"44", padding:12, marginBottom:16, flexDirection:"row", gap:8 }}>
+              <Ionicons name="warning-outline" size={16} color={palette.amber} style={{ marginTop:1 }}/>
+              <Text style={{ fontSize:13, color:palette.amber, flex:1, lineHeight:18 }}>This call hasn't synced to the server yet. Sync first, then upload the recording.</Text>
+            </View>
+          )}
+
+          {/* File picker area */}
+          <Pressable onPress={pickFile} disabled={uploading}
+            style={{ borderWidth:1.5, borderColor: file ? palette.teal : theme.border, borderStyle:"dashed",
+              borderRadius:14, padding:18, alignItems:"center", marginBottom:16,
+              backgroundColor: file ? palette.teal+"0a" : theme.surface }}>
+            <Ionicons name={file ? "musical-note" : "cloud-upload-outline"} size={32} color={file ? palette.teal : theme.dim}/>
+            {file ? (
+              <>
+                <Text style={{ fontSize:14, fontWeight:"700", color:palette.teal, marginTop:8 }} numberOfLines={1}>{file.name}</Text>
+                <Text style={{ fontSize:12, color:theme.muted, marginTop:3 }}>{file.size ? (file.size/1024).toFixed(0)+" KB" : ""} · {file.mimeType}</Text>
+              </>
+            ) : (
+              <>
+                <Text style={{ fontSize:14, fontWeight:"600", color:theme.secondary, marginTop:8 }}>Tap to pick audio file</Text>
+                <Text style={{ fontSize:12, color:theme.dim, marginTop:3 }}>mp3, m4a, mp4, wav, aac, ogg</Text>
+              </>
+            )}
+          </Pressable>
+
+          {/* Error */}
+          {error && (
+            <View style={{ backgroundColor:palette.red+"18", borderRadius:10, borderWidth:1, borderColor:palette.red+"44", padding:10, marginBottom:14, flexDirection:"row", gap:8 }}>
+              <Ionicons name="alert-circle" size={16} color={palette.red} style={{ marginTop:1 }}/>
+              <Text style={{ fontSize:13, color:palette.red, flex:1, lineHeight:18 }}>{error}</Text>
+            </View>
+          )}
+
+          {/* Upload button */}
+          <Pressable onPress={upload} disabled={!file || uploading || notSynced || done}>
+            <LinearGradient
+              colors={done ? [palette.emerald, palette.emerald] : gradientBrand}
+              start={{x:0,y:0}} end={{x:1,y:0}}
+              style={{ height:52, borderRadius:14, alignItems:"center", justifyContent:"center", flexDirection:"row", gap:8,
+                opacity: (!file || notSynced) ? 0.4 : 1 }}>
+              {uploading
+                ? <><ActivityIndicator color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Uploading…</Text></>
+                : done
+                  ? <><Ionicons name="checkmark-circle" size={20} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Uploaded!</Text></>
+                  : <><Ionicons name="cloud-upload-outline" size={20} color="#fff"/><Text style={{ color:"#fff", fontSize:15, fontWeight:"700" }}>Upload Recording</Text></>}
+            </LinearGradient>
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 // ── Call Row ──────────────────────────────────────────────────────────────────
-const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteData, theme, shadowSoft }) => {
+const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, onUpload, noteData, theme, shadowSoft }) => {
   const meta = CALL_TYPE[c.type] || CALL_TYPE.incoming;
   const open = expanded === c.id;
   const ns   = STATUSES.find(s => s.key === (noteData?.status || c.callStatus));
@@ -547,6 +692,7 @@ const CallRow = ({ c, expanded, onToggle, onProgress, onDetails, noteData, theme
                 { icon:"call",         label:"Call",     color:palette.emerald, fn:()=>Linking.openURL(`tel:${c.phone.replace(/\s/g,"")}`) },
                 { icon:"logo-whatsapp",label:"WhatsApp", color:"#25D366",       fn:()=>Linking.openURL(`whatsapp://send?phone=${c.phone.replace(/\D/g,"")}`).catch(()=>Linking.openURL(`https://wa.me/${c.phone.replace(/\D/g,"")}`)) },
                 { icon:"chatbubble-ellipses-outline", label:"SMS", color:palette.cyan, fn:()=>Linking.openURL(`sms:${c.phone.replace(/[^\d+]/g,"")}`).catch(()=>{}) },
+                { icon:"cloud-upload-outline", label:"Upload",   color:palette.amber,  fn:()=>onUpload(c) },
                 { icon:"stats-chart",  label:"Progress", color:palette.violet,  fn:()=>onProgress(c) },
                 { icon:"information-circle-outline", label:"Details", color:palette.teal, fn:()=>onDetails(c) },
               ].map(a=>(
@@ -578,6 +724,7 @@ export default function Calls() {
   const [refreshing,   setRefreshing]   = useState(false);
   const [progressCall, setProgressCall] = useState(null);
   const [detailsCall,  setDetailsCall]  = useState(null);
+  const [uploadCall,   setUploadCall]   = useState(null);
   const [notesMap,     setNotesMap]     = useState({});
   const { theme, shadowSoft } = useTheme();
   const debounceRef = useRef(null);
@@ -710,6 +857,7 @@ export default function Calls() {
         onToggle={() => setExpanded(expanded === item.id ? null : item.id)}
         onProgress={c => setProgressCall(c)}
         onDetails={c => setDetailsCall(c)}
+        onUpload={c => setUploadCall(c)}
         noteData={notesMap[item.id] || null}
         theme={theme}
         shadowSoft={shadowSoft}
@@ -838,6 +986,13 @@ export default function Calls() {
         call={detailsCall}
         allCalls={allCalls}
         syncedIds={new Set(allCalls.filter(c => c.synced).map(c => c.id))}
+        theme={theme}
+      />
+
+      <ManualUploadSheet
+        visible={!!uploadCall}
+        onClose={() => setUploadCall(null)}
+        call={uploadCall}
         theme={theme}
       />
     </SafeAreaView>

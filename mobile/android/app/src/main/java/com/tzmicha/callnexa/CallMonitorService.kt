@@ -10,6 +10,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.media.MediaRecorder
 import android.media.MediaScannerConnection
 import android.net.Uri
@@ -53,6 +54,25 @@ class CallMonitorService : Service() {
         private const val MIME_TYPE = "audio/mp4"
         private const val MIN_FILE_BYTES = 1024L
         private const val CALL_STATE_WATCHDOG_MS = 30_000L
+
+        // Cached at first use — the result never changes on a given device/OS.
+        @Volatile private var _voiceCallSupported: Boolean? = null
+        fun isVoiceCallSourceSupported(): Boolean {
+            _voiceCallSupported?.let { return it }
+            val result = try {
+                val probe = MediaRecorder()
+                probe.setAudioSource(MediaRecorder.AudioSource.VOICE_CALL)
+                probe.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                probe.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                probe.setOutputFile("/dev/null")
+                probe.prepare()
+                probe.reset()
+                probe.release()
+                true
+            } catch (_: Exception) { false }
+            _voiceCallSupported = result
+            return result
+        }
 
         @Volatile
         private var activeInstance: CallMonitorService? = null
@@ -234,12 +254,43 @@ class CallMonitorService : Service() {
 
         try {
             createRecordingDestination(recordingName!!)
-            val sources = intArrayOf(MediaRecorder.AudioSource.VOICE_CALL, MediaRecorder.AudioSource.MIC)
+            // Priority order:
+            // 1. VOICE_CALL     — captures both sides, blocked on most non-rooted devices
+            // 2. VOICE_COMMUNICATION — VoIP source, not silenced by Android's call policy
+            //                     Enable speakerphone so far-end audio reaches mic
+            // 3. MIC            — last resort with forced speakerphone
+            val sources = if (isVoiceCallSourceSupported()) {
+                intArrayOf(
+                    MediaRecorder.AudioSource.VOICE_CALL,
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    MediaRecorder.AudioSource.MIC,
+                )
+            } else {
+                intArrayOf(
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                    MediaRecorder.AudioSource.MIC,
+                )
+            }
             var lastError: Throwable? = null
+            var speakerEnabled = false
 
             for (source in sources) {
                 var candidate: MediaRecorder? = null
                 try {
+                    // Force speakerphone for mic-based sources so far-end audio
+                    // reaches the microphone and is not silent.
+                    if (source != MediaRecorder.AudioSource.VOICE_CALL && !speakerEnabled) {
+                        try {
+                            val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                            if (!am.isSpeakerphoneOn) {
+                                am.isSpeakerphoneOn = true
+                                speakerEnabled = true
+                                Log.i(TAG, "[RECORDER_SPEAKER_ON] forced speakerphone for $source")
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "[RECORDER_SPEAKER_WARN] ${e.message}")
+                        }
+                    }
                     closeDescriptor()
                     val output = openRecordingOutput()
                     val configuredRecorder = MediaRecorder()
@@ -256,7 +307,11 @@ class CallMonitorService : Service() {
                     }
                     recorder = candidate
                     mainHandler.postDelayed(callStateWatchdog, CALL_STATE_WATCHDOG_MS)
-                    val sourceName = if (source == MediaRecorder.AudioSource.VOICE_CALL) "VOICE_CALL" else "MIC"
+                    val sourceName = when (source) {
+                        MediaRecorder.AudioSource.VOICE_CALL -> "VOICE_CALL"
+                        MediaRecorder.AudioSource.VOICE_COMMUNICATION -> "VOICE_COMMUNICATION"
+                        else -> "MIC"
+                    }
                     Log.i(TAG, "[RECORDER_STARTED] source=$sourceName name=$recordingName")
                     updateNotification("Recording connected call")
                     return

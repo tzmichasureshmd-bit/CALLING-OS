@@ -23,6 +23,9 @@ import {
   isRecordingEnabled as getRecordingEnabled,
   setRecordingEnabled as persistRecordingEnabled,
 } from "../../src/recordingPreferences";
+import { NativeModules } from "react-native";
+
+const { CallRecorderModule } = NativeModules;
 
 const LAST_SYNC_KEY = "callos_last_sync_ts";
 
@@ -43,6 +46,7 @@ export default function Profile() {
   const [simOpen, setSimOpen]             = useState(false);
   const [refreshing, setRefreshing]       = useState(false);
   const [recordingEnabled, setRecordingEnabled] = useState(false);
+  const [voiceCallSupported, setVoiceCallSupported] = useState(null); // null=unknown, true/false
   const [syncHealth, setSyncHealth]       = useState(null);
   const [notifPerms, setNotifPerms]       = useState("undetermined");
   const [notifPrefs, setNotifPrefs]       = useState({ calls: true, sync: true, recording: true, transcription: true });
@@ -78,6 +82,12 @@ export default function Profile() {
     setDeviceInfo(getDeviceInfo());
     setRecordingEnabled(recEnabled);
     setSyncHealth(health);
+    // Check device recording capability once
+    if (CallRecorderModule?.checkRecordingPermissions) {
+      CallRecorderModule.checkRecordingPermissions().then(info => {
+        setVoiceCallSupported(info?.voiceCallSourceSupported ?? false);
+      }).catch(() => setVoiceCallSupported(false));
+    }
     setNotifPerms(np);
     setNotifPrefs(nprefs);
     if (ts) {
@@ -305,6 +315,12 @@ export default function Profile() {
                     ? "Enabled · records every connected call and uploads it"
                     : "Off · no new calls are recorded"}
                 </Text>
+                {voiceCallSupported === true && (
+                  <Text style={{ ...TYPE.micro, color: palette.emerald, marginTop: 2 }}>✓ Both sides captured (VOICE_CALL)</Text>
+                )}
+                {voiceCallSupported === false && (
+                  <Text style={{ ...TYPE.micro, color: palette.amber, marginTop: 2 }}>⚠ MIC only · use speakerphone for best results</Text>
+                )}
               </View>
               <Switch value={recordingEnabled} onValueChange={toggleRecording} trackColor={{ false: theme.border, true: palette.violet + "88" }} thumbColor={recordingEnabled ? palette.violet : theme.muted} />
             </View>
