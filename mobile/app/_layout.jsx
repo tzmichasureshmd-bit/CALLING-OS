@@ -59,9 +59,6 @@ function AuthGate() {
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 function Shell() {
-  const { appMode } = useRole();
-  const { theme: themeData } = useThemedColors(appMode);
-  
   // Native CallMonitorService owns call detection and recording. JavaScript
   // only configures notification channels and handles post-call synchronization.
   useEffect(() => {
@@ -73,7 +70,7 @@ function Shell() {
       <StatusBar style="light" />
       <AuthGate />
       <NotificationHandler />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: themeData.bg } }}>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#FFFFFF" } }}>
         <Stack.Screen name="intro" options={{ animationEnabled: false }} />
         <Stack.Screen name="login-selector" options={{ animationEnabled: true }} />
         <Stack.Screen name="login" />
