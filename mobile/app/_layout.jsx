@@ -45,10 +45,10 @@ function AuthGate() {
 
   useEffect(() => {
     if (!ready) return;
-    const inAuth = segments[0] === "login";
+    const inAuth = segments[0] === "login" || segments[0] === "login-selector" || segments[0] === "intro";
     const inOnboarding = segments[0] === "onboarding";
     if (!isAuthed && !inAuth && !inOnboarding) {
-      router.replace("/login");
+      router.replace("/intro");
     } else if (isAuthed && inAuth) {
       router.replace("/(tabs)");
     }
@@ -74,6 +74,8 @@ function Shell() {
       <AuthGate />
       <NotificationHandler />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: themeData.bg } }}>
+        <Stack.Screen name="intro" options={{ animationEnabled: false }} />
+        <Stack.Screen name="login-selector" options={{ animationEnabled: true }} />
         <Stack.Screen name="login" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="onboarding" options={{ presentation: "modal" }} />
