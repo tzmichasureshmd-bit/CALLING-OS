@@ -3,8 +3,9 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Notifications from "expo-notifications";
-import { ThemeProvider, useTheme } from "../src/theme";
+import { ThemeProvider, useTheme, useThemedColors } from "../src/theme";
 import { AuthProvider, useAuth } from "../src/AuthContext";
+import { RoleProvider, useRole } from "../src/RoleContext";
 import { setupNotificationChannels } from "../src/notificationManager";
 
 // ── Notification tap handler ──────────────────────────────────────────────────
@@ -58,7 +59,8 @@ function AuthGate() {
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 function Shell() {
-  const { theme, mode } = useTheme();
+  const { appMode } = useRole();
+  const { theme: themeData } = useThemedColors(appMode);
   
   // Native CallMonitorService owns call detection and recording. JavaScript
   // only configures notification channels and handles post-call synchronization.
@@ -68,10 +70,10 @@ function Shell() {
   
   return (
     <>
-      <StatusBar style={mode === "dark" ? "light" : "dark"} />
+      <StatusBar style="light" />
       <AuthGate />
       <NotificationHandler />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: themeData.bg } }}>
         <Stack.Screen name="login" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="onboarding" options={{ presentation: "modal" }} />
@@ -86,7 +88,9 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ThemeProvider>
         <AuthProvider>
-          <Shell />
+          <RoleProvider>
+            <Shell />
+          </RoleProvider>
         </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>

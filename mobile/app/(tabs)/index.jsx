@@ -6,12 +6,13 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { palette, gradientBrand, gradientBrandSoft, useTheme, TYPE, SPACE, RADIUS } from "../../src/theme";
+import { employeeTheme as palette, gradientBrand, gradientBrandSoft, useTheme, TYPE, SPACE, RADIUS } from "../../src/theme";
 import { AppHeader, Badge, Card, CardHeader, EmptyState, CountUp, LiveDot } from "../../src/components";
 import { RadialRing, AnimatedBars, ProgressBar } from "../../src/charts";
 import { getRealCallLog } from "../../src/callLogService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
+import { useRole } from "../../src/RoleContext";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const RANGES = [
