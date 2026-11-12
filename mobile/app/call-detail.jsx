@@ -330,8 +330,9 @@ export default function CallDetail() {
           api.getCall(id).catch(() => null),
           api.getTranscript(id).catch(() => null),
         ]);
-        setServerCall(sc);
-        setTranscript(tx);
+        // Ensure objects, not null
+        setServerCall(sc || { id: null, phone_number: "—", contact_name: "Unknown", call_type: "incoming" });
+        setTranscript(tx || { text: "" });
       }
     } finally {
       setLoading(false);

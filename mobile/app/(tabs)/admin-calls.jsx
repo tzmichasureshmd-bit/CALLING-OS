@@ -28,11 +28,12 @@ export default function AdminCalls() {
   const fetchCalls = async () => {
     try {
       setLoading(true);
-      const response = await api.get("/calls");
-      setCall(response.data || []);
+      const response = await api.getCalls();
+      setCall(response?.data || response || []);
     } catch (err) {
       console.error("Failed to fetch calls:", err);
       Alert.alert("Error", "Failed to load calls");
+      setCall([]);
     } finally {
       setLoading(false);
     }

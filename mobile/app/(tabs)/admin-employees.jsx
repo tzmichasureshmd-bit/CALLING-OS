@@ -32,11 +32,12 @@ export default function AdminEmployees() {
   const fetchEmployees = async () => {
     try {
       setLoading(true);
-      const response = await api.get("/employees");
-      setEmployees(response.data || []);
+      // Employee management via API not yet implemented
+      // Show empty list with message for now
+      setEmployees([]);
     } catch (err) {
       console.error("Failed to fetch employees:", err);
-      Alert.alert("Error", "Failed to load employees");
+      setEmployees([]);
     } finally {
       setLoading(false);
     }

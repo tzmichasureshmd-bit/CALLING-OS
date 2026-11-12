@@ -28,11 +28,16 @@ export default function AdminDashboard() {
   const fetchStats = async () => {
     try {
       setLoading(true);
-      // TODO: Call admin analytics endpoint
-      const response = await api.get("/analytics/company");
-      setStats(response.data);
+      // Use employee analytics endpoint — admin views company-wide stats
+      const response = await api.getAnalytics("today");
+      setStats({
+        active_calls: response?.active_calls || response?.total_calls || 0,
+        total_employees: response?.employee_count || 0,
+        completed_calls: response?.calls_today || 0,
+      });
     } catch (err) {
       console.error("Failed to fetch stats:", err);
+      setStats({ active_calls: 0, total_employees: 0, completed_calls: 0 });
     } finally {
       setLoading(false);
     }

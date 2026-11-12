@@ -251,16 +251,16 @@ export function AuthProvider({ children }) {
     // Register device — MUST succeed before any sync
     try {
       const dId = await ensureDevice(userData);
-      if (dId) {
-        setDeviceId(dId);
-        console.log("[AUTH] device registered: " + dId);
-        await sendHeartbeat(dId).catch(() => {});
-        syncSimInventory(dId, true).catch(() => {});
-        // Sync from install date — non-blocking, batched
-        doFirstFullSync(dId).catch((e) => console.warn("[AUTH] firstSync error:", e?.message));
-      } else {
-        console.warn("[AUTH] device registration failed — sync skipped");
+      if (!dId) {
+        console.warn("[AUTH] Device registration failed — sync and heartbeat skipped");
+        return userData; // Exit early, don't proceed with sync
       }
+      setDeviceId(dId);
+      console.log("[AUTH] device registered: " + dId);
+      await sendHeartbeat(dId).catch(() => {});
+      syncSimInventory(dId, true).catch(() => {});
+      // Sync from install date — non-blocking, batched
+      doFirstFullSync(dId).catch((e) => console.warn("[AUTH] firstSync error:", e?.message));
     } catch (e) {
       console.warn("[AUTH] ensureDevice error:", e?.message);
     }
