@@ -25,7 +25,7 @@ export default function LoginSelectorScreen() {
     setTimeout(() => {
       router.push({
         pathname: "/login",
-        params: { userType: type },
+        params: { userType: type }, // "company" or "employee"
       });
     }, 300);
   };
@@ -56,16 +56,16 @@ export default function LoginSelectorScreen() {
               },
             ]}
           >
-            {/* Company/Admin Login */}
+            {/* Company/Organization Login */}
             <Pressable
-              onPress={() => handleSelect("admin")}
+              onPress={() => handleSelect("company")}
               style={({ pressed }) => [
                 styles.optionCard,
                 {
                   opacity: pressed ? 0.9 : 1,
-                  borderColor: selected === "admin" ? adminPalette.primary : adminPalette.gray200,
+                  borderColor: selected === "company" ? adminPalette.primary : adminPalette.gray200,
                   borderWidth: 2,
-                  backgroundColor: selected === "admin" ? adminPalette.primaryLight : "#fff",
+                  backgroundColor: selected === "company" ? adminPalette.primaryLight : "#fff",
                 },
               ]}
             >
@@ -76,13 +76,13 @@ export default function LoginSelectorScreen() {
                 <MaterialCommunityIcons name="office-building" size={32} color="#fff" />
               </LinearGradient>
               <Text style={[TYPE.h3, { color: adminPalette.navy, marginTop: SPACE.md }]}>
-                Company Admin
+                Company / Organization
               </Text>
               <Text style={[TYPE.caption, { color: adminPalette.gray600, marginTop: SPACE.sm, textAlign: "center" }]}>
-                Manage team, view analytics, track performance
+                Admin access to manage company, view all employees & analytics
               </Text>
               <View style={styles.badgeContainer}>
-                <Text style={[TYPE.micro, { color: adminPalette.primary }]}>MANAGEMENT</Text>
+                <Text style={[TYPE.micro, { color: adminPalette.primary }]}>ORGANIZATION</Text>
               </View>
             </Pressable>
 
@@ -106,16 +106,16 @@ export default function LoginSelectorScreen() {
                 colors={[employeePalette.primary, employeePalette.primaryDark]}
                 style={styles.optionIconBg}
               >
-                <Ionicons name="call" size={32} color="#fff" />
+                <Ionicons name="person" size={32} color="#fff" />
               </LinearGradient>
               <Text style={[TYPE.h3, { color: employeePalette.navy, marginTop: SPACE.md }]}>
-                Sales Employee
+                Employee
               </Text>
               <Text style={[TYPE.caption, { color: employeePalette.gray600, marginTop: SPACE.sm, textAlign: "center" }]}>
-                Make calls, track activity, receive insights
+                Employee login to view calls, logs, and personal analytics
               </Text>
               <View style={styles.badgeContainer}>
-                <Text style={[TYPE.micro, { color: employeePalette.primary }]}>SALES</Text>
+                <Text style={[TYPE.micro, { color: employeePalette.primary }]}>EMPLOYEE</Text>
               </View>
             </Pressable>
           </Animated.View>
