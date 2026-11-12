@@ -88,6 +88,7 @@ function TabItem({ route, focused, onPress, appMode }) {
 function DialPad({ visible, onClose }) {
   const { appMode } = useRole();
   const colors = appMode === "admin" ? adminPalette : employeePalette;
+  const { bottom } = useSafeAreaInsets();
   const [number, setNumber] = useState("");
   const slideY = useRef(new Animated.Value(700)).current;
 
