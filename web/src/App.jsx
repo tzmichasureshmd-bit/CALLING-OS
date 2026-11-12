@@ -1,8 +1,7 @@
 import { useState, lazy, Suspense } from "react";
 import { Routes, Route, useLocation, Navigate, NavLink } from "react-router-dom";
 import { useAuth } from "./context/AuthContext.jsx";
-import Sidebar from "./components/Sidebar.jsx";
-import Topbar from "./components/Topbar.jsx";
+import { ModernLayoutWrapper } from "./components/ModernLayout.jsx";
 import { RouteFallback } from "./components/ui.jsx";
 import { LayoutDashboard, Phone, Users, BarChart3, Settings, ShieldCheck, LogOut, Sun, Moon } from "lucide-react";
 import { useTheme } from "./context/ThemeContext.jsx";
@@ -212,48 +211,45 @@ function SuperAdminShell() {
 }
 
 function OrgShell() {
-  const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
-  const title = ORG_TITLES[location.pathname] || "CallNexa";
+  const ORG_TITLES = {
+    "/dashboard": "Dashboard", "/analytics": "Analytics", "/call-logs": "Calls",
+    "/manage/employees": "Team", "/manage/excluded": "Excluded Numbers",
+    "/leads": "Leads", "/opportunities": "Opportunities",
+    "/integrations": "Integrations",
+    "/opportunities-closed": "Closed Deals", "/reports": "Reports",
+    "/subscription": "Billing", "/invoices": "Invoices", "/settings": "Settings",
+    "/follow-ups": "Follow-ups", "/device-health": "Device Health", "/transcribe": "Transcripts",
+  };
+  
+  const currentPage = ORG_TITLES[location.pathname] || "Dashboard";
+
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)" }}>
-      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <Topbar title={title} onMenu={() => setMenuOpen((o) => !o)} />
-        <main style={{ flex: 1 }}>
-          <Suspense fallback={<RouteFallback />}>
-            <Routes>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/landing" element={<LandingPage />} />
-              <Route path="/analytics" element={<Analytics />} />
-              <Route path="/manage/employees" element={<Employees />} />
-              <Route path="/manage/excluded" element={<ExcludedNumbers />} />
-              <Route path="/call-logs" element={<CallLogs />} />
-              <Route path="/leads" element={<Leads />} />
-              <Route path="/opportunities" element={<Opportunities />} />
-              <Route path="/device-health" element={<DeviceHealth />} />
-              <Route path="/transcribe" element={<Transcribe />} />
-              <Route path="/integrations" element={<Integrations />} />
-              <Route path="/opportunities-closed" element={<OpportunitiesClosed />} />
-              <Route path="/follow-ups" element={<FollowUps />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/subscription" element={<Subscription />} />
-              <Route path="/invoices" element={<Invoices />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </Suspense>
-        </main>
-      </div>
-      <nav className="nova-bottom-nav">
-        <NavLink to="/dashboard" end className={({ isActive }) => isActive ? "active" : ""}><LayoutDashboard /><span>Dashboard</span></NavLink>
-        <NavLink to="/call-logs" className={({ isActive }) => isActive ? "active" : ""}><Phone /><span>Calls</span></NavLink>
-        <NavLink to="/manage/employees" className={({ isActive }) => isActive ? "active" : ""}><Users /><span>Team</span></NavLink>
-        <NavLink to="/analytics" className={({ isActive }) => isActive ? "active" : ""}><BarChart3 /><span>Analytics</span></NavLink>
-        <NavLink to="/settings" className={({ isActive }) => isActive ? "active" : ""}><Settings /><span>Settings</span></NavLink>
-      </nav>
-    </div>
+    <ModernLayoutWrapper currentPage={currentPage} userRole="ADMIN">
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/landing" element={<LandingPage />} />
+          <Route path="/analytics" element={<Analytics />} />
+          <Route path="/manage/employees" element={<Employees />} />
+          <Route path="/manage/excluded" element={<ExcludedNumbers />} />
+          <Route path="/call-logs" element={<CallLogs />} />
+          <Route path="/leads" element={<Leads />} />
+          <Route path="/opportunities" element={<Opportunities />} />
+          <Route path="/device-health" element={<DeviceHealth />} />
+          <Route path="/transcribe" element={<Transcribe />} />
+          <Route path="/integrations" element={<Integrations />} />
+          <Route path="/opportunities-closed" element={<OpportunitiesClosed />} />
+          <Route path="/follow-ups" element={<FollowUps />} />
+          <Route path="/reports" element={<Reports />} />
+          <Route path="/subscription" element={<Subscription />} />
+          <Route path="/invoices" element={<Invoices />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </Suspense>
+    </ModernLayoutWrapper>
   );
 }
 
@@ -295,139 +291,32 @@ export default function App() {
 }
 
 // ── Employee Shell (Limited Dashboard) ────────────────────────────────────────
-const EMPLOYEE_TITLES = {
-  "/dashboard": "My Dashboard",
-  "/call-logs": "My Calls",
-  "/leads": "My Leads",
-  "/opportunities": "My Opportunities",
-  "/settings": "Settings",
-};
-
 function EmployeeShell() {
-  const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
-  const title = EMPLOYEE_TITLES[location.pathname] || "CallNexa";
-  const { user } = useAuth();
-  
-  return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)" }}>
-      {/* Employee Sidebar */}
-      <EmployeeSidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        {/* Employee Topbar */}
-        <Topbar title={title} onMenu={() => setMenuOpen((o) => !o)} />
-        
-        <main style={{ flex: 1 }}>
-          {/* Badge showing EMPLOYEE role */}
-          <div style={{ padding: "12px 24px", background: "var(--accent-soft)", borderBottom: "1px solid var(--border)" }}>
-            <div style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>
-              👤 EMPLOYEE VIEW • {user?.name || user?.email}
-            </div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-              You can only view your own data. Contact your manager for full access.
-            </div>
-          </div>
-          
-          <Suspense fallback={<RouteFallback />}>
-            <Routes>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/call-logs" element={<CallLogs />} />
-              <Route path="/leads" element={<Leads />} />
-              <Route path="/opportunities" element={<Opportunities />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              {/* Block all other routes */}
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </Suspense>
-        </main>
-      </div>
-      
-      {/* Employee Bottom Nav */}
-      <nav className="nova-bottom-nav">
-        <NavLink to="/dashboard" end className={({ isActive }) => isActive ? "active" : ""}>
-          <LayoutDashboard /><span>Dashboard</span>
-        </NavLink>
-        <NavLink to="/call-logs" className={({ isActive }) => isActive ? "active" : ""}>
-          <Phone /><span>My Calls</span>
-        </NavLink>
-        <NavLink to="/leads" className={({ isActive }) => isActive ? "active" : ""}>
-          <Users /><span>Leads</span>
-        </NavLink>
-        <NavLink to="/settings" className={({ isActive }) => isActive ? "active" : ""}>
-          <Settings /><span>Settings</span>
-        </NavLink>
-      </nav>
-    </div>
-  );
-}
+  const EMPLOYEE_TITLES = {
+    "/dashboard": "My Dashboard",
+    "/call-logs": "My Calls",
+    "/leads": "My Leads",
+    "/opportunities": "My Opportunities",
+    "/settings": "Settings",
+  };
 
-// ── Employee Sidebar (Limited Menu) ───────────────────────────────────────────
-function EmployeeSidebar({ open, onClose }) {
-  const { logout, user } = useAuth();
-  const { theme, toggleTheme } = useTheme();
-  
-  async function handleLogout() {
-    await logout();
-    window.location.href = "/login";
-  }
-  
+  const currentPage = EMPLOYEE_TITLES[location.pathname] || "Dashboard";
+
   return (
-    <>
-      {open && <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 49, display: "block" }} className="mobile-only" />}
-      <aside style={{
-        width: 260, background: "var(--bg-card)", borderRight: "1px solid var(--border)",
-        display: "flex", flexDirection: "column", position: "fixed", height: "100vh",
-        left: open ? 0 : -260, transition: "left 0.3s", zIndex: 50,
-      }} className="sidebar">
-        {/* Header */}
-        <div style={{ padding: "20px 16px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--accent-soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Phone size={18} color="var(--accent)" />
-            </div>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>CallNexa</div>
-              <div style={{ fontSize: 10, color: "var(--text-dim)", fontWeight: 600 }}>EMPLOYEE</div>
-            </div>
-          </div>
-        </div>
-        
-        {/* Navigation */}
-        <nav style={{ flex: 1, padding: "16px 12px", overflowY: "auto" }}>
-          <NavLink to="/dashboard" end className={({ isActive }) => isActive ? "sidebar-link active" : "sidebar-link"}>
-            <LayoutDashboard size={18} /> My Dashboard
-          </NavLink>
-          <NavLink to="/call-logs" className={({ isActive }) => isActive ? "sidebar-link active" : "sidebar-link"}>
-            <Phone size={18} /> My Calls
-          </NavLink>
-          <NavLink to="/leads" className={({ isActive }) => isActive ? "sidebar-link active" : "sidebar-link"}>
-            <Users size={18} /> My Leads
-          </NavLink>
-          <NavLink to="/opportunities" className={({ isActive }) => isActive ? "sidebar-link active" : "sidebar-link"}>
-            <BarChart3 size={18} /> My Opportunities
-          </NavLink>
-          <NavLink to="/settings" className={({ isActive }) => isActive ? "sidebar-link active" : "sidebar-link"}>
-            <Settings size={18} /> Settings
-          </NavLink>
-        </nav>
-        
-        {/* Footer */}
-        <div style={{ padding: 16, borderTop: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 12 }}>
-            {user?.email}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={toggleTheme} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
-            </button>
-            <button onClick={handleLogout} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--danger)" }}>
-              <LogOut size={16} />
-            </button>
-          </div>
-        </div>
-      </aside>
-    </>
+    <ModernLayoutWrapper currentPage={currentPage} userRole="EMPLOYEE">
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/call-logs" element={<CallLogs />} />
+          <Route path="/leads" element={<Leads />} />
+          <Route path="/opportunities" element={<Opportunities />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          {/* Block all other routes */}
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </Suspense>
+    </ModernLayoutWrapper>
   );
 }
