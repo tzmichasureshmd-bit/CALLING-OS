@@ -1,16 +1,3 @@
-:root {
-  --auth-sky-top: #a9def3;
-  --auth-sky-bottom: #f5fbff;
-  --auth-ink: #171b20;
-  --auth-muted: #77818d;
-  --auth-field: rgba(238, 243, 247, 0.92);
-  --auth-line: rgba(184, 205, 216, 0.66);
-  --auth-primary: #20242c;
-  --auth-primary-hover: #0f1217;
-  --auth-error: #c63e4a;
-  --auth-error-bg: rgba(255, 236, 238, 0.9);
-}
-
 .auth-reference {
   position: relative;
   display: flex;
@@ -19,8 +6,8 @@
   justify-content: center;
   overflow: hidden;
   padding: 30px 20px;
-  background: linear-gradient(180deg, var(--auth-sky-top) 0%, #d8f1fb 44%, var(--auth-sky-bottom) 100%);
-  color: var(--auth-ink);
+  background: linear-gradient(180deg, var(--app-gradient-cream) 0%, #d8f1fb 44%, var(--app-gradient-green) 100%);
+  color: var(--text-primary-app);
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -59,7 +46,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--auth-ink);
+  color: var(--text-primary-app);
   text-decoration: none;
 }
 
@@ -76,7 +63,7 @@
   height: 26px;
   place-items: center;
   border-radius: 7px;
-  background: var(--auth-ink);
+  background: var(--text-primary-app);
   color: white;
   font-size: 13px;
   font-weight: 800;
@@ -120,13 +107,13 @@
   border: 1px solid rgba(192, 216, 225, 0.86);
   border-radius: 16px;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(235, 245, 248, 0.84));
-  color: var(--auth-ink);
+  color: var(--text-primary-app);
   box-shadow: 0 8px 18px rgba(87, 143, 167, 0.11);
 }
 
 .auth-reference__hero h1 {
   margin: 0;
-  color: var(--auth-ink);
+  color: var(--text-primary-app);
   font-size: 21px;
   font-weight: 700;
   letter-spacing: -0.035em;
@@ -135,7 +122,7 @@
 .auth-reference__hero p {
   max-width: 290px;
   margin: 7px auto 0;
-  color: var(--auth-muted);
+  color: var(--text-muted-app);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -156,7 +143,7 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--auth-muted);
+  color: var(--text-muted-app);
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
@@ -181,7 +168,7 @@
 }
 
 .auth-reference__field label {
-  color: var(--auth-ink);
+  color: var(--text-primary-app);
   font-size: 11px;
   font-weight: 650;
 }
@@ -194,7 +181,7 @@
   padding: 0 11px;
   border: 1px solid transparent;
   border-radius: 9px;
-  background: var(--auth-field);
+  background: var(--surface-secondary);
   color: #87919a;
   transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
@@ -213,7 +200,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--auth-ink);
+  color: var(--text-primary-app);
   font: inherit;
   font-size: 12px;
 }
@@ -243,7 +230,7 @@
   margin-top: -4px;
   border: 0;
   background: transparent;
-  color: var(--auth-ink);
+  color: var(--text-primary-app);
   cursor: pointer;
   font-size: 11px;
 }
@@ -279,8 +266,8 @@
   padding: 9px 11px;
   border: 1px solid rgba(198, 62, 74, 0.42);
   border-radius: 8px;
-  background: var(--auth-error-bg);
-  color: var(--auth-error);
+  background: var(--danger-soft-app);
+  color: var(--danger-app);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -304,7 +291,7 @@
 
 .auth-reference__hint {
   margin: 17px 0 0;
-  color: var(--auth-muted);
+  color: var(--text-muted-app);
   font-size: 10.5px;
   line-height: 1.5;
   text-align: center;
@@ -342,13 +329,13 @@
   border: 1px solid rgba(194, 215, 223, 0.72);
   border-radius: 10px;
   background: rgba(235, 245, 248, 0.64);
-  color: var(--auth-muted);
+  color: var(--text-muted-app);
   font-size: 10.5px;
   line-height: 1.55;
 }
 
 .auth-reference__admin-note strong {
-  color: var(--auth-ink);
+  color: var(--text-primary-app);
 }
 
 @media (max-width: 640px) {
@@ -375,4 +362,83 @@
   .auth-reference__register-grid .auth-reference__field--full {
     grid-column: auto;
   }
+}
+
+/* Unified product theme override: authentication uses the same cream/pastel language as the app. */
+.auth-reference {
+  background: linear-gradient(135deg, var(--app-gradient-cream) 0%, var(--app-gradient-green) 40%, var(--app-gradient-peach) 100%);
+  color: var(--text-primary-app);
+}
+
+.auth-reference::before {
+  background:
+    radial-gradient(ellipse 32% 19% at 2% 100%, color-mix(in srgb, var(--surface-primary) 96%, transparent) 0%, color-mix(in srgb, var(--surface-primary) 68%, transparent) 48%, transparent 82%),
+    radial-gradient(ellipse 34% 20% at 52% 108%, color-mix(in srgb, var(--surface-primary) 94%, transparent) 0%, color-mix(in srgb, var(--surface-primary) 54%, transparent) 54%, transparent 84%),
+    radial-gradient(ellipse 30% 18% at 100% 99%, color-mix(in srgb, var(--surface-primary) 92%, transparent) 0%, color-mix(in srgb, var(--surface-primary) 52%, transparent) 56%, transparent 82%);
+}
+
+.auth-reference__card {
+  border-color: var(--border-primary-app);
+  background: color-mix(in srgb, var(--surface-primary) 88%, transparent);
+  box-shadow: var(--shadow-lg-app), inset 0 1px 0 rgba(255, 255, 255, 0.84);
+}
+
+.auth-reference__hero h1,
+.auth-reference__field label,
+.auth-reference__brand-name {
+  color: var(--text-primary-app);
+}
+
+.auth-reference__hero p,
+.auth-reference__hint,
+.auth-reference__role-label {
+  color: var(--text-muted-app);
+}
+
+.auth-reference__mode-switch,
+.auth-reference__input-wrap,
+.auth-reference__admin-note {
+  border-color: var(--border-primary-app);
+  background: var(--surface-muted);
+}
+
+.auth-reference__mode-switch button.is-active {
+  color: var(--success-app);
+}
+
+.auth-reference__input-wrap:focus-within {
+  border-color: var(--success-app);
+  box-shadow: var(--focus-app);
+}
+
+.auth-reference__submit {
+  border-color: var(--primary-dark-app);
+  background: var(--primary-dark-app);
+  color: #fff;
+}
+
+.auth-reference__submit:hover {
+  background: color-mix(in srgb, var(--primary-dark-app) 88%, #000);
+}
+
+[data-theme="dark"] .auth-reference {
+  background: linear-gradient(135deg, #0c1416 0%, #10251f 48%, #241b18 100%);
+}
+
+[data-theme="dark"] .auth-reference__card {
+  border-color: var(--border-primary-app);
+  background: color-mix(in srgb, var(--surface-primary) 92%, transparent);
+  box-shadow: var(--shadow-lg-app);
+}
+
+[data-theme="dark"] .auth-reference__input-wrap,
+[data-theme="dark"] .auth-reference__mode-switch,
+[data-theme="dark"] .auth-reference__admin-note {
+  background: var(--surface-muted);
+}
+
+[data-theme="dark"] .auth-reference__submit {
+  background: #edf7f1;
+  border-color: #edf7f1;
+  color: #14211b;
 }

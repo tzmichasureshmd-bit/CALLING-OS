@@ -16,7 +16,7 @@ import GlobalSearchTab from "./superadmin/GlobalSearchTab.jsx";
 const KPI_TABS = [
   { key: "orgs",      label: "Organizations", icon: Building2,  color: "var(--accent)",   stat: "total_organizations" },
   { key: "employees", label: "Employees",     icon: Users,      color: "var(--success)",  stat: "total_employees"     },
-  { key: "calls",     label: "Total Calls",   icon: Phone,      color: "var(--violet)",   stat: "total_calls"         },
+  { key: "calls",     label: "Total Calls",   icon: Phone,      color: "var(--accent-2)",   stat: "total_calls"         },
   { key: "devices",   label: "Devices",       icon: Smartphone, color: "var(--warning)",  stat: "total_devices"       },
 ];
 

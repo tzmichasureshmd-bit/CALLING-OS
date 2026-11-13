@@ -88,7 +88,7 @@ function OrgDetail({ orgId, onBack }) {
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <StatPill label="Employees" value={stats?.employees ?? employees.length} icon={Users}      color="var(--success)" />
-            <StatPill label="Calls"     value={stats?.calls     ?? calls.length}     icon={Phone}      color="var(--violet)" />
+            <StatPill label="Calls"     value={stats?.calls     ?? calls.length}     icon={Phone}      color="var(--accent-2)" />
             <StatPill label="Devices"   value={stats?.devices   ?? devices.length}   icon={Smartphone} color="var(--warning)" />
           </div>
         </div>

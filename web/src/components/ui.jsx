@@ -67,7 +67,7 @@ export function Badge({ children, tone = "neutral", dot = false, style }) {
   const tones = {
     neutral: { bg: "var(--bg-hover)", fg: "var(--text-muted)", bd: "var(--border)" },
     teal: { bg: "var(--accent-soft)", fg: "var(--accent)", bd: "transparent" },
-    violet: { bg: "rgba(139,92,246,0.14)", fg: "var(--accent-2)", bd: "transparent" },
+    violet: { bg: "var(--primary-soft-app)", fg: "var(--accent-2)", bd: "transparent" },
     success: { bg: "var(--success-soft)", fg: "var(--success)", bd: "transparent" },
     danger: { bg: "var(--danger-soft)", fg: "var(--danger)", bd: "transparent" },
     warning: { bg: "var(--warning-soft)", fg: "var(--warning)", bd: "transparent" },
@@ -85,8 +85,8 @@ export function Badge({ children, tone = "neutral", dot = false, style }) {
 export function Button({ children, variant = "primary", icon: Icon, style, ...rest }) {
   const [h, setH] = useState(false);
   const variants = {
-    primary: { bg: "var(--grad-brand)", fg: "#fff", bd: "transparent" },
-    solid: { bg: "var(--accent)", fg: "#04211d", bd: "transparent" },
+    primary: { bg: "var(--button-primary-bg)", fg: "var(--button-primary-fg)", bd: "transparent" },
+    solid: { bg: "var(--accent)", fg: "var(--text-primary-app)", bd: "transparent" },
     soft: { bg: "var(--accent-soft)", fg: "var(--accent)", bd: "transparent" },
     outline: { bg: "transparent", fg: "var(--text-secondary)", bd: "var(--border-strong)" },
     ghost: { bg: "transparent", fg: "var(--text-muted)", bd: "transparent" },
@@ -144,35 +144,44 @@ export function CountUp({ value, duration = 700, format = (n) => n }) {
 }
 
 export function KpiCard({ icon: Icon, label, value, sub, tone = "teal", numeric = false, delta }) {
-  const COLORS = { teal: "#14b8a6", violet: "#8b5cf6", cyan: "#22d3ee", success: "#22c55e", warning: "#f59e0b", danger: "#ef4444", info: "#0891b2" };
+  const COLORS = {
+    teal: "var(--accent)",
+    violet: "var(--accent-2)",
+    cyan: "var(--info)",
+    success: "var(--success)",
+    warning: "var(--warning)",
+    danger: "var(--danger)",
+    info: "var(--info)",
+  };
   const color = COLORS[tone] || COLORS.teal;
   return (
-    <div style={{
-      background: "var(--bg-card)",
-      border: `2px solid ${color}`,
-      borderRadius: "var(--radius-card)",
-      boxShadow: "var(--shadow-sm)",
-      padding: 20,
-      display: "flex", flexDirection: "column", gap: 12,
-      cursor: "pointer",
-      transition: "transform 0.16s ease, box-shadow 0.16s ease",
-    }}
-    onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; }}
-    onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "var(--shadow-sm)"; }}
+    <div
+      style={{
+        background: "var(--surface-primary)",
+        border: `1px solid ${color}`,
+        borderRadius: "var(--radius-lg-app)",
+        boxShadow: "var(--shadow-sm-app)",
+        padding: 20,
+        display: "flex", flexDirection: "column", gap: 12,
+        cursor: "pointer",
+        transition: "transform 0.16s ease, box-shadow 0.16s ease",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "var(--shadow-md-app)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "var(--shadow-sm-app)"; }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 12.5, color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
-        <div style={{ width: 34, height: 34, borderRadius: 10, background: color + "22", color, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontSize: 12.5, color: "var(--text-muted-app)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
+        <div style={{ width: 34, height: 34, borderRadius: 10, background: `color-mix(in srgb, ${color} 14%, transparent)`, color, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Icon size={17} />
         </div>
       </div>
-      <div style={{ fontFamily: "Space Grotesk", fontSize: 30, fontWeight: 700, color: "var(--text-primary)", lineHeight: 1 }}>
+      <div style={{ fontSize: 30, fontWeight: 750, color: "var(--text-primary-app)", lineHeight: 1 }}>
         {numeric ? <CountUp value={value} /> : value}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {sub && <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{sub}</span>}
+        {sub && <span style={{ fontSize: 12, color: "var(--text-subtle-app)" }}>{sub}</span>}
         {delta != null && (
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: delta >= 0 ? "var(--success)" : "var(--danger)" }}>
+          <span style={{ fontSize: 11.5, fontWeight: 650, color: delta >= 0 ? "var(--success-app)" : "var(--danger-app)" }}>
             {delta >= 0 ? "▲" : "▼"} {Math.abs(delta)}%
           </span>
         )}

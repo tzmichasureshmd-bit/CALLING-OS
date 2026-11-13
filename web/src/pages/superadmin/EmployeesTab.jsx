@@ -146,7 +146,7 @@ export default function EmployeesTab() {
                         <ActionBtn
                           icon={LogOut}
                           label="Force Logout"
-                          color="var(--violet)"
+                          color="var(--accent-2)"
                           disabled={!!busy[e.id]}
                           onClick={() => act(e.id, () => superApi.forceLogout(e.id))}
                         />
@@ -163,8 +163,8 @@ export default function EmployeesTab() {
 
       {/* Reset password modal */}
       {resetModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ background: "var(--bg-card)", borderRadius: 16, padding: 28, width: 360, border: "1px solid var(--border)" }}>
+        <div className="app-dialog-overlay" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div className="app-dialog-panel" style={{ background: "var(--bg-card)", borderRadius: 16, padding: 28, width: 360, border: "1px solid var(--border)" }}>
             <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6, color: "var(--text-primary)" }}>Reset Password</div>
             <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 18 }}>Set new password for <strong>{resetModal.name}</strong></div>
             <input

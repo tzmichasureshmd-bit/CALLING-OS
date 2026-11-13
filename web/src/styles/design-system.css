@@ -1,0 +1,496 @@
+/* CallNexa unified cream / pastel / charcoal design system. */
+:root {
+  --app-canvas: #f8f1e3;
+  --app-gradient-cream: #fff9f0;
+  --app-gradient-green: #e4ffe4;
+  --app-gradient-mint: #d9ffd7;
+  --app-gradient-peach: #ffe8cf;
+  --surface-primary: #ffffff;
+  --surface-secondary: #fafcfa;
+  --surface-muted: #f3f8f3;
+  --text-primary-app: #20272b;
+  --text-secondary-app: #5f6c70;
+  --text-muted-app: #87939a;
+  --text-subtle-app: #a0a9ad;
+  --border-primary-app: #e9eceb;
+  --border-soft-app: #f0f2f0;
+  --primary-dark-app: #1d262a;
+  --primary-soft-app: #eaf5ec;
+  --success-app: #62b879;
+  --success-soft-app: #e8f7e9;
+  --warning-app: #c78b55;
+  --warning-soft-app: #fff1df;
+  --danger-app: #c85e63;
+  --danger-soft-app: #ffebeb;
+  --info-app: #6b9db1;
+  --info-soft-app: #e8f3f8;
+  --pastel-yellow: #fff0d6;
+  --pastel-blue: #d9f1ff;
+  --pastel-green: #ddfbdd;
+  --pastel-pink: #ffe2e4;
+  --radius-sm-app: 8px;
+  --radius-md-app: 12px;
+  --radius-lg-app: 16px;
+  --radius-xl-app: 22px;
+  --radius-2xl-app: 28px;
+  --shadow-sm-app: 0 2px 8px rgba(68, 82, 70, 0.07);
+  --shadow-md-app: 0 10px 26px rgba(68, 82, 70, 0.11);
+  --shadow-lg-app: 0 20px 50px rgba(68, 82, 70, 0.16);
+  --focus-app: 0 0 0 3px rgba(128, 217, 139, 0.22);
+  --button-primary-bg: #1d262a;
+  --button-primary-fg: #ffffff;
+
+  /* Compatibility aliases for existing page logic. Values now belong to the new system. */
+  --bg: var(--app-canvas);
+  --bg-elevated: var(--surface-primary);
+  --surface: var(--surface-primary);
+  --surface-2: var(--surface-muted);
+  --bg-card: var(--surface-primary);
+  --bg-hover: var(--surface-muted);
+  --bg-input: var(--surface-secondary);
+  --rail: var(--surface-primary);
+  --command-bar: rgba(255, 255, 255, 0.86);
+  --text-primary: var(--text-primary-app);
+  --text-secondary: var(--text-secondary-app);
+  --text-muted: var(--text-muted-app);
+  --text-dim: var(--text-subtle-app);
+  --border: var(--border-primary-app);
+  --border-strong: #d6e0d7;
+  --accent: #5aa86f;
+  --accent-2: #a17fbb;
+  --accent-soft: var(--primary-soft-app);
+  --accent-hover: #458c5b;
+  --success: var(--success-app);
+  --success-soft: var(--success-soft-app);
+  --danger: var(--danger-app);
+  --danger-soft: var(--danger-soft-app);
+  --warning: var(--warning-app);
+  --warning-soft: var(--warning-soft-app);
+  --info: var(--info-app);
+  --info-soft: var(--info-soft-app);
+  --grad-brand: var(--primary-dark-app);
+  --grad-brand-soft: linear-gradient(135deg, var(--pastel-yellow), var(--pastel-green));
+  --shadow-sm: var(--shadow-sm-app);
+  --shadow-md: var(--shadow-md-app);
+  --shadow-lg: var(--shadow-lg-app);
+  --glow: 0 0 0 rgba(0, 0, 0, 0);
+  --radius-btn: var(--radius-sm-app);
+  --radius-card: var(--radius-lg-app);
+  --radius-panel: var(--radius-xl-app);
+}
+
+[data-theme="dark"] {
+  --app-canvas: #0b1012;
+  --app-gradient-cream: #121a1c;
+  --app-gradient-green: #10251f;
+  --app-gradient-mint: #142c24;
+  --app-gradient-peach: #241b18;
+  --surface-primary: #152025;
+  --surface-secondary: #19262a;
+  --surface-muted: #1b2b2d;
+  --text-primary-app: #eef7f1;
+  --text-secondary-app: #c2d1c9;
+  --text-muted-app: #98aaa4;
+  --text-subtle-app: #71827d;
+  --border-primary-app: #2b3a3b;
+  --border-soft-app: #223133;
+  --primary-dark-app: #edf7f1;
+  --primary-soft-app: #173527;
+  --success-app: #8be6a4;
+  --success-soft-app: #173527;
+  --warning-app: #e0ab70;
+  --warning-soft-app: #3b2c1d;
+  --danger-app: #f08c91;
+  --danger-soft-app: #3d2225;
+  --info-app: #8ec8dc;
+  --info-soft-app: #18323c;
+  --shadow-sm-app: 0 2px 10px rgba(0, 0, 0, 0.24);
+  --shadow-md-app: 0 12px 30px rgba(0, 0, 0, 0.3);
+  --shadow-lg-app: 0 22px 55px rgba(0, 0, 0, 0.42);
+  --focus-app: 0 0 0 3px rgba(139, 230, 176, 0.2);
+  --button-primary-bg: #edf7f1;
+  --button-primary-fg: #14211b;
+  --bg: var(--app-canvas);
+  --bg-elevated: var(--surface-primary);
+  --surface: var(--surface-primary);
+  --surface-2: var(--surface-muted);
+  --bg-card: var(--surface-primary);
+  --bg-hover: var(--surface-muted);
+  --bg-input: var(--surface-secondary);
+  --rail: var(--surface-primary);
+  --command-bar: rgba(21, 32, 37, 0.88);
+  --text-primary: var(--text-primary-app);
+  --text-secondary: var(--text-secondary-app);
+  --text-muted: var(--text-muted-app);
+  --text-dim: var(--text-subtle-app);
+  --border: var(--border-primary-app);
+  --border-strong: #3a4d4b;
+  --accent: #8be6a4;
+  --accent-2: #d0b3e0;
+  --accent-soft: var(--primary-soft-app);
+  --accent-hover: #a5efb8;
+  --success: var(--success-app);
+  --success-soft: var(--success-soft-app);
+  --danger: var(--danger-app);
+  --danger-soft: var(--danger-soft-app);
+  --warning: var(--warning-app);
+  --warning-soft: var(--warning-soft-app);
+  --info: var(--info-app);
+  --info-soft: var(--info-soft-app);
+  --grad-brand: var(--primary-dark-app);
+  --grad-brand-soft: linear-gradient(135deg, #3b3021, #173527);
+  --shadow-sm: var(--shadow-sm-app);
+  --shadow-md: var(--shadow-md-app);
+  --shadow-lg: var(--shadow-lg-app);
+  --border-strong: #3b4d4b;
+}
+
+html,
+body,
+#root {
+  background: var(--app-canvas);
+}
+
+body {
+  color: var(--text-primary-app);
+  font-family: Inter, Manrope, system-ui, -apple-system, sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+.nova-display {
+  font-family: Inter, Manrope, system-ui, sans-serif;
+  letter-spacing: -0.025em;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+::selection {
+  background: var(--primary-soft-app);
+  color: var(--text-primary-app);
+}
+
+:focus-visible {
+  outline: 2px solid var(--success-app);
+  outline-offset: 2px;
+  box-shadow: var(--focus-app);
+}
+
+.nova-page {
+  padding: 24px 28px 48px;
+}
+
+.nova-card {
+  border: 1px solid var(--border-primary-app);
+  border-radius: var(--radius-lg-app);
+  background: var(--surface-primary);
+  box-shadow: var(--shadow-sm-app);
+}
+
+.nova-scroll-x,
+.callos-scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.nova-skeleton {
+  background: linear-gradient(90deg, var(--surface-muted) 25%, var(--surface-secondary) 37%, var(--surface-muted) 63%);
+}
+
+.nova-live-dot {
+  background: var(--success-app);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success-app) 20%, transparent);
+}
+
+@media (max-width: 820px) {
+  .nova-page {
+    padding: 16px 16px 42px;
+  }
+}
+
+@media (max-width: 480px) {
+  .nova-page {
+    padding: 14px 12px 36px;
+  }
+
+  .nova-card {
+    border-radius: var(--radius-md-app) !important;
+  }
+}
+
+/* Public pages use the same product language instead of a separate dark marketing theme. */
+.co-site {
+  color: var(--text-primary-app);
+  background: var(--app-canvas);
+}
+
+.co-hero-wrap,
+.co-overview,
+.co-features,
+.co-faq {
+  background: var(--app-canvas);
+}
+
+.co-hero {
+  border-color: var(--border-primary-app);
+  background: linear-gradient(135deg, var(--app-gradient-cream), var(--app-gradient-green) 42%, var(--app-gradient-peach));
+  color: var(--text-primary-app);
+  box-shadow: var(--shadow-lg-app);
+}
+
+.co-hero-bg-video {
+  opacity: 0.08;
+  mix-blend-mode: multiply;
+}
+
+.co-hero-overlay {
+  background: linear-gradient(135deg, rgba(255, 249, 240, 0.76), rgba(228, 255, 228, 0.38) 48%, rgba(255, 232, 207, 0.62));
+}
+
+.co-atmosphere,
+.co-grid-glow {
+  opacity: 0.25;
+}
+
+.co-nav,
+.co-hero-bottom {
+  border-color: var(--border-primary-app);
+}
+
+.co-brand,
+.co-copy h1,
+.co-showcase h2,
+.co-final h2,
+.co-section h2,
+.co-pricing-page h2,
+.co-links a,
+.co-copy > p,
+.co-hero-bottom,
+.co-button-quiet {
+  color: var(--text-primary-app);
+}
+
+.co-brand-os,
+.co-copy h1 em,
+.co-section h2 em,
+.co-showcase h2 em,
+.co-final h2 em,
+.co-pricing-page h2 em,
+.co-eyebrow,
+.co-dark-eyebrow,
+.co-text-link {
+  color: var(--success-app);
+}
+
+.co-links a:hover,
+.co-links a.active {
+  color: var(--primary-dark-app);
+}
+
+.co-nav-cta,
+.co-button-light {
+  background: var(--primary-dark-app);
+  color: #fff !important;
+}
+
+.co-button-light:hover,
+.co-nav-cta:hover {
+  background: color-mix(in srgb, var(--primary-dark-app) 86%, #000);
+}
+
+.co-overview-art,
+.co-insight-visual,
+.co-step,
+.co-feature-card,
+.co-plan-card,
+.co-pricing-table,
+.co-compare-table {
+  border-color: var(--border-primary-app);
+  background: var(--surface-primary);
+  box-shadow: var(--shadow-sm-app);
+}
+
+.co-how,
+.co-analytics,
+.co-pricing,
+.co-pricing-page {
+  background: var(--surface-muted);
+}
+
+.co-step p,
+.co-feature-card p,
+.co-section-intro > p,
+.co-overview-grid > div:first-child > p,
+.co-analytics-grid > div:first-child > p,
+.co-price-box p,
+.co-price-intro,
+.co-faq-a {
+  color: var(--text-secondary-app);
+}
+
+.co-showcase,
+.co-final,
+.co-footer,
+.co-footer-full {
+  background: var(--primary-dark-app);
+  color: #fff;
+}
+
+.co-showcase > div > div:first-child > p,
+.co-final-inner > p,
+.co-footer-brand p,
+.co-footer-col a,
+.co-footer-bottom,
+.co-footer-bottom a {
+  color: color-mix(in srgb, #fff 68%, var(--primary-dark-app));
+}
+
+.co-button-dark {
+  background: var(--surface-primary);
+  color: var(--text-primary-app);
+}
+
+.co-button-dark:hover {
+  background: var(--pastel-green);
+}
+
+.co-faq-list,
+.co-faq-item {
+  border-color: var(--border-primary-app);
+}
+
+.co-faq-item {
+  color: var(--text-primary-app);
+}
+
+.co-feature-icon,
+.co-summary-icon,
+.co-proof-icon {
+  background: var(--primary-soft-app);
+  color: var(--success-app);
+}
+
+[data-theme="dark"] .co-site,
+[data-theme="dark"] .co-hero-wrap,
+[data-theme="dark"] .co-overview,
+[data-theme="dark"] .co-features,
+[data-theme="dark"] .co-faq {
+  background: var(--app-canvas);
+}
+
+[data-theme="dark"] .co-hero {
+  background: linear-gradient(135deg, var(--app-gradient-cream), var(--app-gradient-green) 48%, var(--app-gradient-peach));
+}
+
+[data-theme="dark"] .co-hero-overlay {
+  background: linear-gradient(135deg, rgba(16, 24, 32, 0.42), rgba(16, 37, 31, 0.52), rgba(33, 27, 24, 0.48));
+}
+
+/* Shared data surfaces and controls used by every authenticated page. */
+.premium-shell__page table {
+  border: 1px solid var(--border-primary-app);
+  border-radius: var(--radius-lg-app);
+  background: var(--surface-primary);
+  overflow: hidden;
+}
+
+.premium-shell__page thead {
+  background: var(--surface-muted);
+}
+
+.premium-shell__page th {
+  color: var(--text-muted-app);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.premium-shell__page td {
+  color: var(--text-secondary-app);
+  border-color: var(--border-soft-app) !important;
+}
+
+.premium-shell__page tbody tr:hover {
+  background: color-mix(in srgb, var(--primary-soft-app) 64%, transparent) !important;
+}
+
+.premium-shell__page input,
+.premium-shell__page select,
+.premium-shell__page textarea {
+  border-color: var(--border-primary-app);
+  border-radius: var(--radius-sm-app);
+  background: var(--surface-secondary);
+  color: var(--text-primary-app);
+}
+
+.premium-shell__page input:focus,
+.premium-shell__page select:focus,
+.premium-shell__page textarea:focus {
+  border-color: var(--success-app);
+  box-shadow: var(--focus-app);
+}
+
+.premium-shell__page button {
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.premium-shell__page button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.premium-shell__page [role="dialog"] {
+  border-radius: var(--radius-xl-app);
+  background: var(--surface-primary);
+  border: 1px solid var(--border-primary-app);
+  box-shadow: var(--shadow-lg-app);
+}
+
+/* Unified dialog and drawer surfaces. Page workflows keep their existing handlers. */
+.app-dialog-overlay {
+  background: color-mix(in srgb, var(--primary-dark-app) 58%, transparent) !important;
+  backdrop-filter: blur(7px);
+}
+
+.app-dialog-backdrop {
+  background: color-mix(in srgb, var(--primary-dark-app) 58%, transparent) !important;
+  backdrop-filter: blur(7px);
+}
+
+.app-dialog-panel {
+  border: 1px solid var(--border-primary-app) !important;
+  border-radius: var(--radius-xl-app) !important;
+  background: var(--surface-primary) !important;
+  box-shadow: var(--shadow-lg-app) !important;
+}
+
+.app-drawer-panel {
+  background: var(--surface-primary) !important;
+  border-color: var(--border-primary-app) !important;
+  box-shadow: var(--shadow-lg-app) !important;
+}
+
+[data-theme="dark"] .co-showcase,
+[data-theme="dark"] .co-final,
+[data-theme="dark"] .co-footer,
+[data-theme="dark"] .co-footer-full {
+  background: #0d1719;
+}
+
+[data-theme="dark"] .co-nav-cta,
+[data-theme="dark"] .co-button-light {
+  background: #edf7f1;
+  color: #14211b !important;
+}
+
+[data-theme="dark"] .co-button-dark {
+  background: #edf7f1;
+  color: #14211b;
+}

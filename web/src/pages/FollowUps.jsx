@@ -10,9 +10,9 @@ function EditModal({ item, onSave, onClose }) {
   const [note, setNote] = useState(item.note || "");
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(3,6,12,0.6)", backdropFilter: "blur(2px)" }} />
-      <div style={{ position: "relative", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: 360, boxShadow: "var(--shadow-lg)" }}>
+    <div className="app-dialog-overlay" style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="app-dialog-backdrop" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(3,6,12,0.6)", backdropFilter: "blur(2px)" }} />
+      <div className="app-dialog-panel" style={{ position: "relative", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: 360, boxShadow: "var(--shadow-lg)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <span style={{ fontFamily: "Space Grotesk", fontWeight: 700, fontSize: 15, color: "var(--text-primary)" }}>Edit Follow-up</span>
           <button onClick={onClose} style={{ border: "none", background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center" }}>

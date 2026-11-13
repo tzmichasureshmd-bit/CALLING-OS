@@ -5,7 +5,7 @@ import { superApi, TH, TD, fmtDate } from "./api.js";
 
 const CHANGE_COLORS = {
   INSERTED: "var(--success)", REMOVED: "var(--danger)",
-  REPLACED: "var(--warning)", CARRIER_CHANGED: "var(--violet)",
+  REPLACED: "var(--warning)", CARRIER_CHANGED: "var(--accent-2)",
 };
 
 export default function SimsTab() {

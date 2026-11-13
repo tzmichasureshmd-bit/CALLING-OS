@@ -30,9 +30,9 @@ export default function Analytics() {
               <XAxis dataKey="day" tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} />
               <Tooltip content={<ChartTooltip />} /><Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line type="monotone" dataKey="total" name="Total" stroke="#14b8a6" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="connected" name="Connected" stroke="#8b5cf6" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="missed" name="Missed" stroke="#ef4444" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="total" name="Total" stroke="#5aa86f" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="connected" name="Connected" stroke="#a17fbb" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="missed" name="Missed" stroke="#c85e63" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -45,9 +45,9 @@ export default function Analytics() {
               <XAxis dataKey="day" tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} />
               <Tooltip content={<ChartTooltip />} /><Legend wrapperStyle={{ fontSize: 11 }} />
-              <Bar dataKey="incoming" name="Incoming" stackId="a" fill="#14b8a6" />
-              <Bar dataKey="outgoing" name="Outgoing" stackId="a" fill="#8b5cf6" />
-              <Bar dataKey="missed" name="Missed" stackId="a" fill="#ef4444" radius={[5, 5, 0, 0]} />
+              <Bar dataKey="incoming" name="Incoming" stackId="a" fill="#5aa86f" />
+              <Bar dataKey="outgoing" name="Outgoing" stackId="a" fill="#a17fbb" />
+              <Bar dataKey="missed" name="Missed" stackId="a" fill="#c85e63" radius={[5, 5, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -57,7 +57,7 @@ export default function Analytics() {
           <ResponsiveContainer width="100%" height={250}>
             <PieChart>
               <Pie data={durationDistribution} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
-                {["#14b8a6", "#8b5cf6", "#22d3ee", "#f59e0b"].map((c, i) => <Cell key={i} fill={c} stroke="var(--bg-card)" strokeWidth={2} />)}
+                {["#5aa86f", "#a17fbb", "#7aaec2", "#c78b55"].map((c, i) => <Cell key={i} fill={c} stroke="var(--bg-card)" strokeWidth={2} />)}
               </Pie>
               <Tooltip content={<ChartTooltip />} /><Legend wrapperStyle={{ fontSize: 11 }} />
             </PieChart>
@@ -72,7 +72,7 @@ export default function Analytics() {
               <XAxis type="number" tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} />
               <YAxis type="category" dataKey="stage" tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} width={92} />
               <Tooltip content={<ChartTooltip />} />
-              <Bar dataKey="value" name="Count" radius={[0, 6, 6, 0]}>{funnel.map((_, i) => <Cell key={i} fill={i % 2 ? "#8b5cf6" : "#14b8a6"} />)}</Bar>
+              <Bar dataKey="value" name="Count" radius={[0, 6, 6, 0]}>{funnel.map((_, i) => <Cell key={i} fill={i % 2 ? "#a17fbb" : "#5aa86f"} />)}</Bar>
             </BarChart>
           </ResponsiveContainer>
         </Card>

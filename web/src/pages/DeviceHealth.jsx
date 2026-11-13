@@ -368,7 +368,7 @@ export default function DeviceHealth() {
   }
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 62px)", overflow: "hidden", background: "var(--bg-base)" }}>
+    <div style={{ display: "flex", height: "calc(100vh - 62px)", overflow: "hidden", background: "var(--app-canvas)" }}>
 
       {/* ── Left panel ── */}
       <div style={{ width: 300, flexShrink: 0, borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", background: "var(--bg-card)" }}>
@@ -429,7 +429,7 @@ export default function DeviceHealth() {
       </div>
 
       {/* ── Right panel ── */}
-      <div style={{ flex: 1, overflowY: "auto", background: "var(--bg-base)" }}>
+      <div style={{ flex: 1, overflowY: "auto", background: "var(--app-canvas)" }}>
         {selected ? (
           <DeviceDetail d={selected} connected={connected} />
         ) : (

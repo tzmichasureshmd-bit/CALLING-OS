@@ -5,7 +5,7 @@ import { superApi, TH, TD, fmtDate } from "./api.js";
 
 const ACTION_COLORS = {
   login: "var(--success)", logout: "var(--text-muted)",
-  call_sync: "var(--accent)", recording_upload: "var(--violet)",
+  call_sync: "var(--accent)", recording_upload: "var(--accent-2)",
   recording_access: "var(--warning)", transcript_start: "var(--accent)",
   transcript_complete: "var(--success)", org_created: "var(--success)",
   org_deleted: "var(--danger)", org_suspended: "var(--warning)",

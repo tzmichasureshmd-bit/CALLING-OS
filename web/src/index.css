@@ -1,112 +1,6 @@
 @import "tailwindcss";
 
-/* ============================================================
-   CALLOS NOVA — Design System Foundation
-   Teal + Violet · layered dark (signature) + independent light
-   Space Grotesk (headings/KPIs) + Inter (body)
-   ============================================================ */
-
-:root {
-  /* Brand */
-  --teal: #14b8a6;
-  --violet: #8b5cf6;
-  --cyan: #22d3ee;
-  --emerald: #22c55e;
-  --amber: #f59e0b;
-  --red: #ef4444;
-
-  --grad-brand: linear-gradient(135deg, #14b8a6 0%, #8b5cf6 100%);
-  --grad-brand-soft: linear-gradient(135deg, rgba(20, 184, 166, 0.16), rgba(139, 92, 246, 0.16));
-
-  /* ---- LIGHT THEME (independent, not an inversion) ---- */
-  --bg: #f7f8fc;
-  --bg-elevated: #ffffff;
-  --surface: #ffffff;
-  --surface-2: #f2f4f9;
-  --bg-card: #ffffff;
-  --bg-hover: #f2f4f9;
-  --bg-input: #ffffff;
-  --rail: #ffffff;
-  --command-bar: rgba(255, 255, 255, 0.82);
-
-  --text-primary: #0f1729;
-  --text-secondary: #384152;
-  --text-muted: #667085;
-  --text-dim: #98a2b3;
-
-  --border: #e5e7eb;
-  --border-strong: #d3d8e0;
-
-  --accent: #0d9488;          /* teal, tuned for light contrast */
-  --accent-2: #7c3aed;        /* violet */
-  --accent-soft: #e6f6f4;
-  --accent-hover: #0b7d73;
-
-  --success: #16a34a;
-  --success-soft: #e7f7ec;
-  --danger: #dc2626;
-  --danger-soft: #fdecec;
-  --warning: #d97706;
-  --warning-soft: #fdf2e3;
-  --info: #0891b2;
-  --info-soft: #e2f6fb;
-
-  --skeleton-base: #eceef3;
-  --skeleton-shine: #f6f7fb;
-
-  --shadow-sm: 0 1px 2px rgba(15, 23, 41, 0.06);
-  --shadow-md: 0 6px 20px rgba(15, 23, 41, 0.08);
-  --shadow-lg: 0 18px 44px rgba(15, 23, 41, 0.12);
-  --glow: 0 0 0 rgba(0, 0, 0, 0);
-
-  --radius-btn: 11px;
-  --radius-card: 16px;
-  --radius-panel: 20px;
-}
-
-[data-theme="dark"] {
-  /* ---- DARK THEME (signature) — layered surfaces ---- */
-  --bg: #080b12;
-  --bg-elevated: #101521;
-  --surface: #101521;
-  --surface-2: #151b29;
-  --bg-card: #101521;
-  --bg-hover: #171e2d;
-  --bg-input: #151b29;
-  --rail: #0b0f18;
-  --command-bar: rgba(16, 21, 33, 0.72);
-
-  --text-primary: #eef2f9;
-  --text-secondary: #c2cad8;
-  --text-muted: #8b95a7;
-  --text-dim: #5d6577;
-
-  --border: #1e2636;
-  --border-strong: #2a3446;
-
-  --accent: #2dd4bf;          /* brighter teal on dark */
-  --accent-2: #a78bfa;        /* brighter violet on dark */
-  --accent-soft: #0f2a2a;
-  --accent-hover: #5eead4;
-
-  --success: #34d399;
-  --success-soft: #0e2a1e;
-  --danger: #f87171;
-  --danger-soft: #2a1517;
-  --warning: #fbbf24;
-  --warning-soft: #2a2110;
-  --info: #38bdf8;
-  --info-soft: #0c2436;
-
-  --skeleton-base: #151b29;
-  --skeleton-shine: #1d2536;
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.6);
-  --glow: 0 0 24px rgba(20, 184, 166, 0.18);
-}
-
+/* Shared base styles. Theme tokens live in styles/design-system.css. */
 * {
   box-sizing: border-box;
 }
@@ -193,8 +87,8 @@ h1, h2, h3, h4, .nova-display {
 /* Live status dot */
 .nova-live-dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: var(--emerald);
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+  background: var(--success-app);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success-app) 20%, transparent);
   animation: nova-pulse-dot 2s ease infinite;
 }
 
@@ -248,7 +142,7 @@ html { -webkit-text-size-adjust: 100%; }
 @media (max-width: 540px)  { .nova-grid-3, .nova-grid-2 { grid-template-columns: 1fr !important; } }
 
 /* CALL OS public marketing experience */
-.co-site { --co-ink:#101b1d; --co-muted:#657170; --co-teal:#7bd9d0; --co-night:#07191c; color:var(--co-ink); background:#f7f8f4; overflow:hidden; font-family:Inter,system-ui,sans-serif; }
+.co-site { --co-ink:var(--text-primary-app); --co-muted:var(--text-secondary-app); --co-teal:var(--success-app); --co-night:var(--primary-dark-app); --co-border:var(--border-primary-app); --co-surface:var(--surface-primary); color:var(--co-ink); background:var(--app-canvas); overflow:hidden; font-family:Inter,system-ui,sans-serif; }
 .co-container { width:min(1120px,calc(100% - 64px)); margin:0 auto; }
 .co-hero-wrap { padding:20px 24px 0; background:#f7f8f4; }
 .co-hero { min-height:min(790px,calc(100svh - 20px)); min-height:max(680px,min(790px,calc(100svh - 20px))); position:relative; isolation:isolate; overflow:hidden; border:1px solid rgba(240,249,245,.29); border-radius:27px; color:#f4f7f3; background:#091a20; box-shadow:0 24px 65px rgba(8,30,32,.17); }

@@ -119,10 +119,10 @@ export const OUTCOME_BREAKDOWN = [
 
 // --- Duration distribution for donut chart ---
 export const DURATION_DISTRIBUTION = [
-  { name: "0-1 min", value: 42, color: "#94a3b8" },
-  { name: "1-3 min", value: 28, color: "#6366f1" },
-  { name: "3-5 min", value: 16, color: "#22c55e" },
-  { name: "5+ min", value: 9, color: "#f59e0b" },
+  { name: "0-1 min", value: 42, color: "#a0a9ad" },
+  { name: "1-3 min", value: 28, color: "#a17fbb" },
+  { name: "3-5 min", value: 16, color: "#62b879" },
+  { name: "5+ min", value: 9, color: "#c78b55" },
 ];
 
 // --- Excluded phone numbers ---

@@ -115,17 +115,17 @@ export default function Dashboard() {
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={dailyMetrics} margin={{ top: 5, right: 8, left: -18, bottom: 0 }}>
               <defs>
-                <linearGradient id="gTotal" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#14b8a6" stopOpacity={0.35} /><stop offset="100%" stopColor="#14b8a6" stopOpacity={0} /></linearGradient>
-                <linearGradient id="gConn" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.3} /><stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} /></linearGradient>
+                <linearGradient id="gTotal" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#5aa86f" stopOpacity={0.35} /><stop offset="100%" stopColor="#5aa86f" stopOpacity={0} /></linearGradient>
+                <linearGradient id="gConn" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#a17fbb" stopOpacity={0.3} /><stop offset="100%" stopColor="#a17fbb" stopOpacity={0} /></linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
               <XAxis dataKey="day" tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} />
               <Tooltip content={<ChartTooltip />} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Area type="monotone" dataKey="total" name="Total" stroke="#14b8a6" strokeWidth={2} fill="url(#gTotal)" />
-              <Area type="monotone" dataKey="connected" name="Connected" stroke="#8b5cf6" strokeWidth={2} fill="url(#gConn)" />
-              <Area type="monotone" dataKey="missed" name="Missed" stroke="#ef4444" strokeWidth={2} fillOpacity={0} />
+              <Area type="monotone" dataKey="total" name="Total" stroke="#5aa86f" strokeWidth={2} fill="url(#gTotal)" />
+              <Area type="monotone" dataKey="connected" name="Connected" stroke="#a17fbb" strokeWidth={2} fill="url(#gConn)" />
+              <Area type="monotone" dataKey="missed" name="Missed" stroke="#c85e63" strokeWidth={2} fillOpacity={0} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -286,7 +286,7 @@ export default function Dashboard() {
                 <YAxis type="category" dataKey="stage" tick={{ fontSize: 11, fill: axis }} axisLine={false} tickLine={false} width={90} />
                 <Tooltip content={<ChartTooltip />} />
                 <Bar dataKey="value" name="Count" radius={[0, 6, 6, 0]}>
-                  {salesFunnel.map((_, i) => <Cell key={i} fill={i % 2 ? "#8b5cf6" : "#14b8a6"} />)}
+                  {salesFunnel.map((_, i) => <Cell key={i} fill={i % 2 ? "#a17fbb" : "#5aa86f"} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -298,7 +298,7 @@ export default function Dashboard() {
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie data={durationDistribution} dataKey="value" nameKey="name" innerRadius={52} outerRadius={82} paddingAngle={2}>
-                {["#14b8a6", "#8b5cf6", "#22d3ee", "#f59e0b"].map((c, i) => <Cell key={i} fill={c} stroke="var(--bg-card)" strokeWidth={2} />)}
+                {["#5aa86f", "#a17fbb", "#7aaec2", "#c78b55"].map((c, i) => <Cell key={i} fill={c} stroke="var(--bg-card)" strokeWidth={2} />)}
               </Pie>
               <Tooltip content={<ChartTooltip />} />
               <Legend wrapperStyle={{ fontSize: 11 }} />

@@ -111,9 +111,9 @@ function ImportModal({ onClose }) {
   const inputStyle = { width: "100%", padding: "10px 13px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13.5, outline: "none", boxSizing: "border-box" };
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }} />
-      <div style={{ position: "relative", width: 500, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 20, padding: 28, boxShadow: "0 32px 80px rgba(0,0,0,0.4)" }}>
+    <div className="app-dialog-overlay" style={{ position: "fixed", inset: 0, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="app-dialog-backdrop" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }} />
+      <div className="app-dialog-panel" style={{ position: "relative", width: 500, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 20, padding: 28, boxShadow: "0 32px 80px rgba(0,0,0,0.4)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
           <div>
             <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>Import Data</div>
@@ -225,9 +225,9 @@ function CRM3Modal({ onClose }) {
   const inp = { width: "100%", padding: "10px 13px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13.5, outline: "none", boxSizing: "border-box", marginTop: 6 };
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }} />
-      <div style={{ position: "relative", width: 480, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 20, padding: 28, boxShadow: "0 32px 80px rgba(0,0,0,0.4)" }}>
+    <div className="app-dialog-overlay" style={{ position: "fixed", inset: 0, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="app-dialog-backdrop" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }} />
+      <div className="app-dialog-panel" style={{ position: "relative", width: 480, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 20, padding: 28, boxShadow: "0 32px 80px rgba(0,0,0,0.4)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
           <div>
             <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>Connect CRM 3.0</div>
@@ -390,9 +390,9 @@ export default function Integrations() {
 
       {/* Export modal */}
       {showExport && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div onClick={() => setShowExport(false)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }} />
-          <div style={{ position: "relative", width: 440, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 20, padding: 28, boxShadow: "0 32px 80px rgba(0,0,0,0.4)" }}>
+        <div className="app-dialog-overlay" style={{ position: "fixed", inset: 0, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="app-dialog-backdrop" onClick={() => setShowExport(false)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }} />
+          <div className="app-dialog-panel" style={{ position: "relative", width: 440, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 20, padding: 28, boxShadow: "0 32px 80px rgba(0,0,0,0.4)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
               <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>Export Data</div>
               <button onClick={() => setShowExport(false)} style={{ border: "none", background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer", width: 30, height: 30, borderRadius: 9, fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>

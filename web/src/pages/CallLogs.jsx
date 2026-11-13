@@ -322,9 +322,9 @@ function ScheduleModal({ call, onClose }) {
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(3,6,12,0.6)", backdropFilter: "blur(2px)" }} />
-      <div style={{ position: "relative", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: 360, boxShadow: "var(--shadow-lg)" }}>
+    <div className="app-dialog-overlay" style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="app-dialog-backdrop" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(3,6,12,0.6)", backdropFilter: "blur(2px)" }} />
+      <div className="app-dialog-panel" style={{ position: "relative", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: 360, boxShadow: "var(--shadow-lg)" }}>
 
         {saved ? (
           /* ── Success state ── */

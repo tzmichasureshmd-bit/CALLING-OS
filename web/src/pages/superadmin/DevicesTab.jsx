@@ -15,8 +15,8 @@ function DeviceDetail({ deviceId, orgName, onClose }) {
   const perms = d?.permissions || {};
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-start", justifyContent: "flex-end", zIndex: 1000 }}>
-      <div style={{ width: 480, height: "100vh", background: "var(--bg-card)", borderLeft: "1px solid var(--border)", overflowY: "auto", padding: 28, boxSizing: "border-box" }}>
+    <div className="app-dialog-overlay" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-start", justifyContent: "flex-end", zIndex: 1000 }}>
+      <div className="app-drawer-panel" style={{ width: 480, height: "100vh", background: "var(--bg-card)", borderLeft: "1px solid var(--border)", overflowY: "auto", padding: 28, boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
           <Smartphone size={20} color="var(--accent)" />
           <div style={{ flex: 1 }}>
