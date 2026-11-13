@@ -13,11 +13,13 @@ import {
   Card, CardHeader, Badge, PageContainer, KpiCard, ChartTooltip,
   SkeletonCard, SkeletonRows, ErrorState, EmptyState, SectionTitle,
 } from "../components/ui.jsx";
+import PremiumLayout from "../components/PremiumLayout.jsx";
 import { formatTalkTime } from "../data/mockData.js";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useRange } from "../context/RangeContext.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 import * as api from "../api/resources.js";
 
 const POLL_INTERVAL = 30000; // 30s live pulse refresh
@@ -41,6 +43,7 @@ function DashboardSkeleton() {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { range } = useRange();
+  const { theme, toggleTheme } = useTheme();
   const { loading, error, data, reload } = useResource(() => dataSource.getDashboard(range), [range]);
   const [livePulse, setLivePulse] = useState(null);
   const pollRef = useRef(null);
@@ -56,8 +59,14 @@ export default function Dashboard() {
     return () => clearInterval(pollRef.current);
   }, []);
 
-  if (loading) return <DashboardSkeleton />;
-  if (error) return <PageContainer><Card><ErrorState title="Sync interrupted" message={error.message} hint="Last successful sync: 12:41 PM" code={error.error_code} onRetry={reload} /></Card></PageContainer>;
+  if (loading) return <PremiumLayout pageTitle="Loading..."><DashboardSkeleton /></PremiumLayout>;
+  if (error) {
+    return (
+      <PremiumLayout pageTitle="Dashboard">
+        <PageContainer><Card><ErrorState title="Sync interrupted" message={error.message} hint="Last successful sync: 12:41 PM" code={error.error_code} onRetry={reload} /></Card></PageContainer>
+      </PremiumLayout>
+    );
+  }
 
   const { kpis, topPerformer: top, leaderboard, opportunities, dailyMetrics, outcomeBreakdown, durationDistribution, deviceHealth, needsAttention, salesFunnel } = data;
   const pulse = livePulse ?? data.livePulse ?? [];
@@ -65,7 +74,8 @@ export default function Dashboard() {
   const axis = "var(--text-dim)";
 
   return (
-    <PageContainer>
+    <PremiumLayout pageTitle="Dashboard" onThemeToggle={toggleTheme}>
+      <PageContainer>
       {/* KPI ROW */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 16, marginBottom: 18 }}>
         <div onClick={() => navigate("/call-logs")} style={{ cursor: "pointer" }}>
@@ -307,6 +317,7 @@ export default function Dashboard() {
         </Card>
       </div>
     </PageContainer>
+    </PremiumLayout>
   );
 }
 
