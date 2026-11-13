@@ -1,26 +1,30 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
-import { ShieldCheck } from "lucide-react";
+import AuthReferenceShell from "../components/AuthReferenceShell.jsx";
 
 export default function AdminLogin() {
-  const [email, setEmail]       = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState("");
-  const { login }               = useAuth();
-  const navigate                = useNavigate();
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const { login, logout } = useAuth();
+  const navigate = useNavigate();
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setError(""); setLoading(true);
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
     try {
-      const user = await login(email, password);
+      const user = await login(email.trim(), password);
       if (user?.role === "SUPER_ADMIN") {
         navigate("/superadmin");
       } else if (user?.role === "ADMIN") {
         navigate("/");
       } else {
+        await logout();
         setError("Access denied. This portal is for admins only.");
       }
     } catch (err) {
@@ -31,87 +35,44 @@ export default function AdminLogin() {
   }
 
   return (
-    <div style={{
-      minHeight: "100vh", background: "var(--bg)",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-    }}>
-      <div style={{ width: "100%", maxWidth: 400 }}>
-
-        {/* Header */}
-        <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: 20,
-            background: "var(--grad-brand)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            margin: "0 auto 16px",
-          }}>
-            <ShieldCheck size={30} color="#fff" />
+    <AuthReferenceShell
+      admin
+      title="Admin sign in"
+      subtitle="Manage your organization, team, and sales intelligence securely."
+      error={error}
+      footer={
+        <>
+          <div className="auth-reference__admin-note">
+            <strong>Super Admin</strong> sees all organizations.<br />
+            <strong>Admin</strong> manages one organization.
           </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>
-            Admin Portal
-          </div>
-          <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>
-            CallNexa · Restricted Access
+          <p className="auth-reference__hint"><Link to="/login">← Back to regular sign in</Link></p>
+        </>
+      }
+    >
+      <form className="auth-reference__form" onSubmit={handleSubmit}>
+        <div className="auth-reference__field">
+          <label htmlFor="admin-email">Email</label>
+          <div className="auth-reference__input-wrap">
+            <Mail size={15} aria-hidden="true" />
+            <input id="admin-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@company.com" autoComplete="email" required />
           </div>
         </div>
-
-        {/* Card */}
-        <div style={{
-          background: "var(--bg-card)", border: "1px solid var(--border)",
-          borderRadius: 18, padding: 28,
-        }}>
-          {error && (
-            <div style={{
-              background: "var(--danger-soft)", border: "1px solid var(--danger)",
-              borderRadius: 8, padding: "10px 12px", fontSize: 13,
-              color: "var(--danger)", marginBottom: 16,
-            }}>
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div>
-              <label style={lbl}>Email</label>
-              <input
-                type="email" value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@company.com"
-                required style={inp}
-              />
-            </div>
-            <div>
-              <label style={lbl}>Password</label>
-              <input
-                type="password" value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required style={inp}
-              />
-            </div>
-            <button type="submit" disabled={loading} style={btnPrimary}>
-              {loading ? "Signing in…" : "Sign In to Admin"}
+        <div className="auth-reference__field">
+          <label htmlFor="admin-password">Password</label>
+          <div className="auth-reference__input-wrap">
+            <LockKeyhole size={15} aria-hidden="true" />
+            <input id="admin-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••" autoComplete="current-password" required />
+            <button type="button" className="auth-reference__input-action" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"}>
+              {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
-          </form>
-
-          <div style={{ marginTop: 20, padding: "12px 14px", background: "var(--bg-hover)", borderRadius: 10 }}>
-            <div style={{ fontSize: 11.5, color: "var(--text-muted)", lineHeight: 1.6 }}>
-              <strong style={{ color: "var(--text-secondary)" }}>Super Admin</strong> — sees all organizations<br />
-              <strong style={{ color: "var(--text-secondary)" }}>Admin</strong> — manages their organization
-            </div>
           </div>
         </div>
-
-        <div style={{ textAlign: "center", marginTop: 16 }}>
-          <a href="/login" style={{ fontSize: 12.5, color: "var(--text-muted)", textDecoration: "none" }}>
-            ← Back to employee login
-          </a>
-        </div>
-      </div>
-    </div>
+        <button className="auth-reference__submit" type="submit" disabled={loading}>
+          {loading ? "Signing in…" : "Sign In to Admin"}
+          <ShieldCheck size={15} />
+        </button>
+      </form>
+    </AuthReferenceShell>
   );
 }
-
-const lbl = { display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 5 };
-const inp = { width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text-primary)", fontSize: 13.5, outline: "none", boxSizing: "border-box" };
-const btnPrimary = { width: "100%", padding: "12px", borderRadius: 11, border: "none", background: "var(--grad-brand)", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" };

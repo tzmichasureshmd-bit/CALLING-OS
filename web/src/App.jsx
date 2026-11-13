@@ -1,259 +1,211 @@
-import { useState, lazy, Suspense } from "react";
-import { Routes, Route, useLocation, Navigate, NavLink } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import {
+  BarChart3,
+  Ban,
+  CalendarCheck,
+  CreditCard,
+  FileBarChart,
+  LayoutDashboard,
+  Phone,
+  Plug,
+  ReceiptText,
+  Settings,
+  ShieldCheck,
+  Smartphone,
+  Target,
+  TrendingUp,
+  Users,
+} from "lucide-react";
 import { useAuth } from "./context/AuthContext.jsx";
-import Sidebar from "./components/Sidebar.jsx";
-import Topbar from "./components/Topbar.jsx";
 import { RouteFallback } from "./components/ui.jsx";
-import { LayoutDashboard, Phone, Users, BarChart3, Settings, ShieldCheck, LogOut, Sun, Moon } from "lucide-react";
-import { useTheme } from "./context/ThemeContext.jsx";
+import PremiumLayout from "./components/PremiumLayout.jsx";
 
-const Login        = lazy(() => import("./pages/Login.jsx"));
-const AdminLogin   = lazy(() => import("./pages/AdminLogin.jsx"));
-const SuperAdmin   = lazy(() => import("./pages/SuperAdmin.jsx"));
-const Dashboard    = lazy(() => import("./pages/Dashboard.jsx"));
-const Analytics    = lazy(() => import("./pages/Analytics.jsx"));
-const Employees    = lazy(() => import("./pages/Employees.jsx"));
-const ExcludedNumbers    = lazy(() => import("./pages/ExcludedNumbers.jsx"));
-const CallLogs     = lazy(() => import("./pages/CallLogs.jsx"));
-const Leads        = lazy(() => import("./pages/Leads.jsx"));
-const Opportunities      = lazy(() => import("./pages/Opportunities.jsx"));
+const Login = lazy(() => import("./pages/Login.jsx"));
+const AdminLogin = lazy(() => import("./pages/AdminLogin.jsx"));
+const SuperAdmin = lazy(() => import("./pages/SuperAdmin.jsx"));
+const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
+const Analytics = lazy(() => import("./pages/Analytics.jsx"));
+const Employees = lazy(() => import("./pages/Employees.jsx"));
+const ExcludedNumbers = lazy(() => import("./pages/ExcludedNumbers.jsx"));
+const CallLogs = lazy(() => import("./pages/CallLogs.jsx"));
+const Leads = lazy(() => import("./pages/Leads.jsx"));
+const Opportunities = lazy(() => import("./pages/Opportunities.jsx"));
 const DeviceHealth = lazy(() => import("./pages/DeviceHealth.jsx"));
-const Integrations  = lazy(() => import("./pages/Integrations.jsx"));
+const Integrations = lazy(() => import("./pages/Integrations.jsx"));
 const OpportunitiesClosed = lazy(() => import("./pages/OpportunitiesClosed.jsx"));
-const Reports      = lazy(() => import("./pages/Reports.jsx"));
+const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Subscription = lazy(() => import("./pages/Subscription.jsx"));
-const Invoices     = lazy(() => import("./pages/Invoices.jsx"));
+const Invoices = lazy(() => import("./pages/Invoices.jsx"));
 const SettingsPage = lazy(() => import("./pages/Settings.jsx"));
-const Transcribe   = lazy(() => import("./pages/Transcribe.jsx"));
-const FollowUps    = lazy(() => import("./pages/FollowUps.jsx"));
-const LandingPage  = lazy(() => import("./pages/LandingPage.jsx"));
+const Transcribe = lazy(() => import("./pages/Transcribe.jsx"));
+const FollowUps = lazy(() => import("./pages/FollowUps.jsx"));
+const LandingPage = lazy(() => import("./pages/LandingPage.jsx"));
 const FeaturesPage = lazy(() => import("./pages/FeaturesPage.jsx"));
-const PricingPage  = lazy(() => import("./pages/PricingPage.jsx"));
+const PricingPage = lazy(() => import("./pages/PricingPage.jsx"));
 
-const ORG_TITLES = {
-  "/dashboard": "Dashboard", "/analytics": "Analytics", "/call-logs": "Calls",
-  "/manage/employees": "Employees", "/manage/excluded": "Excluded Numbers",
-  "/leads": "Leads", "/opportunities": "Opportunities",
-  "/integrations": "Integrations",
-  "/opportunities-closed": "Closed Deals", "/reports": "Reports",
-  "/subscription": "Subscription", "/invoices": "Invoices", "/settings": "Settings",
-  "/follow-ups": "Follow-ups",
+const ICONS = {
+  dashboard: LayoutDashboard,
+  calls: Phone,
+  team: Users,
+  analytics: BarChart3,
+  leads: Target,
+  opportunities: TrendingUp,
+  devices: Smartphone,
+  excluded: Ban,
+  integrations: Plug,
+  followups: CalendarCheck,
+  reports: FileBarChart,
+  billing: CreditCard,
+  invoices: ReceiptText,
+  settings: Settings,
+  admin: ShieldCheck,
 };
 
-function SuperAdminTopbar({ onMenu, title }) {
-  const { user, logout } = useAuth();
-  const { theme, toggleTheme } = useTheme();
-  async function handleLogout() { await logout(); window.location.href = "/admin"; }
+const ORG_NAV = [
+  { to: "/dashboard", label: "Dashboard", icon: ICONS.dashboard, end: true },
+  { to: "/call-logs", label: "Calls", icon: ICONS.calls },
+  { to: "/manage/employees", label: "Employees", icon: ICONS.team },
+  { to: "/analytics", label: "Analytics", icon: ICONS.analytics },
+  { to: "/leads", label: "Leads", icon: ICONS.leads },
+  { to: "/opportunities", label: "Opportunities", icon: ICONS.opportunities },
+  { to: "/opportunities-closed", label: "Closed Deals", icon: ICONS.opportunities },
+  { to: "/device-health", label: "Device Health", icon: ICONS.devices },
+  { to: "/manage/excluded", label: "Excluded Numbers", icon: ICONS.excluded },
+  { to: "/integrations", label: "Integrations", icon: ICONS.integrations },
+  { to: "/follow-ups", label: "Follow-ups", icon: ICONS.followups },
+  { to: "/reports", label: "Reports", icon: ICONS.reports },
+  { to: "/subscription", label: "Subscription", icon: ICONS.billing },
+  { to: "/invoices", label: "Invoices", icon: ICONS.invoices },
+  { to: "/settings", label: "Settings", icon: ICONS.settings },
+];
+
+const EMPLOYEE_NAV = [
+  { to: "/dashboard", label: "My Dashboard", icon: ICONS.dashboard, end: true },
+  { to: "/call-logs", label: "My Calls", icon: ICONS.calls },
+  { to: "/leads", label: "My Leads", icon: ICONS.leads },
+  { to: "/opportunities", label: "My Opportunities", icon: ICONS.opportunities },
+  { to: "/settings", label: "Settings", icon: ICONS.settings },
+];
+
+const SUPER_ADMIN_NAV = [
+  { to: "/superadmin", label: "Super Admin", icon: ICONS.admin, end: true },
+  { to: "/dashboard", label: "Organizations", icon: ICONS.dashboard },
+  { to: "/call-logs", label: "All Calls", icon: ICONS.calls },
+  { to: "/manage/employees", label: "All Employees", icon: ICONS.team },
+  { to: "/analytics", label: "Analytics", icon: ICONS.analytics },
+  { to: "/leads", label: "All Leads", icon: ICONS.leads },
+  { to: "/opportunities", label: "All Opportunities", icon: ICONS.opportunities },
+  { to: "/opportunities-closed", label: "Closed Deals", icon: ICONS.opportunities },
+  { to: "/device-health", label: "All Devices", icon: ICONS.devices },
+  { to: "/manage/excluded", label: "Excluded Numbers", icon: ICONS.excluded },
+  { to: "/integrations", label: "Integrations", icon: ICONS.integrations },
+  { to: "/transcribe", label: "Transcripts", icon: Phone },
+  { to: "/reports", label: "Reports", icon: ICONS.reports },
+  { to: "/settings", label: "Settings", icon: ICONS.settings },
+];
+
+const TITLES = {
+  "/": "Dashboard",
+  "/dashboard": "Dashboard",
+  "/superadmin": "Super Admin",
+  "/call-logs": "Calls",
+  "/analytics": "Analytics",
+  "/manage/employees": "Employees",
+  "/manage/excluded": "Excluded Numbers",
+  "/leads": "Leads",
+  "/opportunities": "Opportunities",
+  "/opportunities-closed": "Closed Deals",
+  "/device-health": "Device Health",
+  "/transcribe": "Transcripts",
+  "/integrations": "Integrations",
+  "/follow-ups": "Follow-ups",
+  "/reports": "Reports",
+  "/subscription": "Subscription",
+  "/invoices": "Invoices",
+  "/settings": "Settings",
+};
+
+function AuthenticatedShell({ children, navItems, roleLabel }) {
+  const location = useLocation();
+  const pageTitle = TITLES[location.pathname] || "Dashboard";
+
   return (
-    <header className="nova-glass" style={{ height: 62, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 22px", position: "sticky", top: 0, zIndex: 40 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        <button onClick={onMenu} style={{ ...iconBtn, display: "none" }} className="mobile-only"><Users size={18} /></button>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 10, background: "var(--grad-brand)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <ShieldCheck size={17} color="#fff" />
-          </div>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>{title}</div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>CallNexa Platform</div>
-          </div>
-        </div>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "right" }}>
-          <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>{user?.email}</div>
-          <div style={{ color: "var(--accent)", fontWeight: 700, fontSize: 11 }}>SUPER ADMIN</div>
-        </div>
-        <button onClick={toggleTheme} style={iconBtn}>{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button>
-        <button onClick={handleLogout} style={{ ...iconBtn, color: "var(--danger)", borderColor: "var(--border)" }}><LogOut size={17} /></button>
-      </div>
-    </header>
+    <PremiumLayout
+      currentPage={pageTitle}
+      navItems={navItems}
+      roleLabel={roleLabel}
+      showPageHeading={location.pathname === "/dashboard" || location.pathname === "/superadmin"}
+    >
+      <Suspense fallback={<RouteFallback />}>{children}</Suspense>
+    </PremiumLayout>
   );
 }
 
-function SuperAdminSidebar({ open, onClose }) {
-  const { logout, user } = useAuth();
-  const { theme, toggleTheme } = useTheme();
-  
-  async function handleLogout() {
-    await logout();
-    window.location.href = "/admin";
-  }
-  
-  const NAV = [
-    { to: "/superadmin", label: "Super Admin Panel", icon: ShieldCheck, end: true },
-    { to: "/dashboard", label: "Organizations Dashboard", icon: LayoutDashboard },
-    { to: "/call-logs", label: "All Calls", icon: Phone },
-    { to: "/analytics", label: "Analytics", icon: BarChart3 },
-    { to: "/manage/employees", label: "All Employees", icon: Users },
-    { to: "/leads", label: "All Leads", icon: Users },
-    { to: "/opportunities", label: "All Opportunities", icon: BarChart3 },
-    { to: "/transcribe", label: "Transcripts", icon: Phone },
-    { to: "/device-health", label: "Devices", icon: Settings },
-    { to: "/integrations", label: "Integrations", icon: Settings },
-    { to: "/reports", label: "Reports", icon: BarChart3 },
-    { to: "/settings", label: "Settings", icon: Settings },
-  ];
-  
+function OrganizationShell() {
   return (
-    <>
-      {open && <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 49, display: "block" }} className="mobile-only" />}
-      <aside style={{
-        width: 260, background: "var(--bg-card)", borderRight: "1px solid var(--border)",
-        display: "flex", flexDirection: "column", position: "fixed", height: "100vh",
-        left: open ? 0 : -260, transition: "left 0.3s", zIndex: 50,
-      }} className="sidebar">
-        {/* Header */}
-        <div style={{ padding: "20px 16px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--grad-brand)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <ShieldCheck size={18} color="#fff" />
-            </div>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>CallNexa</div>
-              <div style={{ fontSize: 10, color: "var(--accent)", fontWeight: 700 }}>SUPER ADMIN</div>
-            </div>
-          </div>
-        </div>
-        
-        {/* Navigation */}
-        <nav style={{ flex: 1, padding: "16px 12px", overflowY: "auto" }}>
-          {NAV.map(item => (
-            <NavLink 
-              key={item.to} 
-              to={item.to} 
-              end={item.end}
-              className={({ isActive }) => isActive ? "sidebar-link active" : "sidebar-link"}
-            >
-              <item.icon size={18} /> {item.label}
-            </NavLink>
-          ))}
-        </nav>
-        
-        {/* Footer */}
-        <div style={{ padding: 16, borderTop: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 12 }}>
-            {user?.email}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={toggleTheme} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
-            </button>
-            <button onClick={handleLogout} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--danger)" }}>
-              <LogOut size={16} />
-            </button>
-          </div>
-        </div>
-      </aside>
-    </>
+    <AuthenticatedShell navItems={ORG_NAV} roleLabel="Organization">
+      <Routes>
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/analytics" element={<Analytics />} />
+        <Route path="/manage/employees" element={<Employees />} />
+        <Route path="/manage/excluded" element={<ExcludedNumbers />} />
+        <Route path="/call-logs" element={<CallLogs />} />
+        <Route path="/leads" element={<Leads />} />
+        <Route path="/opportunities" element={<Opportunities />} />
+        <Route path="/opportunities-closed" element={<OpportunitiesClosed />} />
+        <Route path="/device-health" element={<DeviceHealth />} />
+        <Route path="/transcribe" element={<Transcribe />} />
+        <Route path="/integrations" element={<Integrations />} />
+        <Route path="/follow-ups" element={<FollowUps />} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="/subscription" element={<Subscription />} />
+        <Route path="/invoices" element={<Invoices />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </AuthenticatedShell>
   );
 }
 
-const iconBtn = { width: 38, height: 38, borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--text-secondary)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" };
+function EmployeeShell() {
+  return (
+    <AuthenticatedShell navItems={EMPLOYEE_NAV} roleLabel="Employee">
+      <Routes>
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/call-logs" element={<CallLogs />} />
+        <Route path="/leads" element={<Leads />} />
+        <Route path="/opportunities" element={<Opportunities />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </AuthenticatedShell>
+  );
+}
 
 function SuperAdminShell() {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const location = useLocation();
-  
-  // SuperAdmin can access all organization pages + special superadmin panel
-  const SUPER_TITLES = {
-    "/superadmin": "Super Admin",
-    "/dashboard": "All Organizations Dashboard",
-    "/analytics": "Cross-Org Analytics", 
-    "/call-logs": "All Calls",
-    "/manage/employees": "All Employees",
-    "/manage/excluded": "Excluded Numbers",
-    "/leads": "All Leads",
-    "/opportunities": "All Opportunities",
-    "/integrations": "Integrations",
-    "/transcribe": "All Transcripts",
-    "/device-health": "All Devices",
-    "/reports": "Platform Reports",
-    "/settings": "Platform Settings",
-  };
-  
-  const title = SUPER_TITLES[location.pathname] || "Super Admin";
-  
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)" }}>
-      <SuperAdminSidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <SuperAdminTopbar onMenu={() => setMenuOpen((o) => !o)} title={title} />
-        <main style={{ flex: 1 }}>
-          <Suspense fallback={<RouteFallback />}>
-            <Routes>
-              <Route path="/superadmin" element={<SuperAdmin />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/analytics" element={<Analytics />} />
-              <Route path="/call-logs" element={<CallLogs />} />
-              <Route path="/manage/employees" element={<Employees />} />
-              <Route path="/manage/excluded" element={<ExcludedNumbers />} />
-              <Route path="/leads" element={<Leads />} />
-              <Route path="/opportunities" element={<Opportunities />} />
-              <Route path="/device-health" element={<DeviceHealth />} />
-              <Route path="/transcribe" element={<Transcribe />} />
-              <Route path="/integrations" element={<Integrations />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="*" element={<Navigate to="/superadmin" replace />} />
-            </Routes>
-          </Suspense>
-        </main>
-      </div>
-      {/* SuperAdmin Bottom Nav */}
-      <nav className="nova-bottom-nav">
-        <NavLink to="/superadmin" end className={({ isActive }) => isActive ? "active" : ""}><ShieldCheck /><span>Super Admin</span></NavLink>
-        <NavLink to="/dashboard" className={({ isActive }) => isActive ? "active" : ""}><LayoutDashboard /><span>Dashboard</span></NavLink>
-        <NavLink to="/call-logs" className={({ isActive }) => isActive ? "active" : ""}><Phone /><span>Calls</span></NavLink>
-        <NavLink to="/analytics" className={({ isActive }) => isActive ? "active" : ""}><BarChart3 /><span>Analytics</span></NavLink>
-        <NavLink to="/settings" className={({ isActive }) => isActive ? "active" : ""}><Settings /><span>Settings</span></NavLink>
-      </nav>
-    </div>
-  );
-}
-
-function OrgShell() {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const location = useLocation();
-  const title = ORG_TITLES[location.pathname] || "CallNexa";
-  return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)" }}>
-      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <Topbar title={title} onMenu={() => setMenuOpen((o) => !o)} />
-        <main style={{ flex: 1 }}>
-          <Suspense fallback={<RouteFallback />}>
-            <Routes>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/landing" element={<LandingPage />} />
-              <Route path="/analytics" element={<Analytics />} />
-              <Route path="/manage/employees" element={<Employees />} />
-              <Route path="/manage/excluded" element={<ExcludedNumbers />} />
-              <Route path="/call-logs" element={<CallLogs />} />
-              <Route path="/leads" element={<Leads />} />
-              <Route path="/opportunities" element={<Opportunities />} />
-              <Route path="/device-health" element={<DeviceHealth />} />
-              <Route path="/transcribe" element={<Transcribe />} />
-              <Route path="/integrations" element={<Integrations />} />
-              <Route path="/opportunities-closed" element={<OpportunitiesClosed />} />
-              <Route path="/follow-ups" element={<FollowUps />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/subscription" element={<Subscription />} />
-              <Route path="/invoices" element={<Invoices />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </Suspense>
-        </main>
-      </div>
-      <nav className="nova-bottom-nav">
-        <NavLink to="/dashboard" end className={({ isActive }) => isActive ? "active" : ""}><LayoutDashboard /><span>Dashboard</span></NavLink>
-        <NavLink to="/call-logs" className={({ isActive }) => isActive ? "active" : ""}><Phone /><span>Calls</span></NavLink>
-        <NavLink to="/manage/employees" className={({ isActive }) => isActive ? "active" : ""}><Users /><span>Team</span></NavLink>
-        <NavLink to="/analytics" className={({ isActive }) => isActive ? "active" : ""}><BarChart3 /><span>Analytics</span></NavLink>
-        <NavLink to="/settings" className={({ isActive }) => isActive ? "active" : ""}><Settings /><span>Settings</span></NavLink>
-      </nav>
-    </div>
+    <AuthenticatedShell navItems={SUPER_ADMIN_NAV} roleLabel="Super Admin">
+      <Routes>
+        <Route path="/superadmin" element={<SuperAdmin />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/analytics" element={<Analytics />} />
+        <Route path="/call-logs" element={<CallLogs />} />
+        <Route path="/manage/employees" element={<Employees />} />
+        <Route path="/manage/excluded" element={<ExcludedNumbers />} />
+        <Route path="/leads" element={<Leads />} />
+        <Route path="/opportunities" element={<Opportunities />} />
+        <Route path="/opportunities-closed" element={<OpportunitiesClosed />} />
+        <Route path="/device-health" element={<DeviceHealth />} />
+        <Route path="/transcribe" element={<Transcribe />} />
+        <Route path="/integrations" element={<Integrations />} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to="/superadmin" replace />} />
+      </Routes>
+    </AuthenticatedShell>
   );
 }
 
@@ -261,7 +213,6 @@ export default function App() {
   const { isAuthed, user } = useAuth();
   const location = useLocation();
 
-  // Marketing pages remain public even when an organization session is active.
   if (["/landing", "/features", "/pricing"].includes(location.pathname)) {
     return (
       <Suspense fallback={<RouteFallback />}>
@@ -291,143 +242,5 @@ export default function App() {
 
   if (user?.role === "SUPER_ADMIN") return <SuperAdminShell />;
   if (user?.role === "EMPLOYEE") return <EmployeeShell />;
-  return <OrgShell />;
-}
-
-// ── Employee Shell (Limited Dashboard) ────────────────────────────────────────
-const EMPLOYEE_TITLES = {
-  "/dashboard": "My Dashboard",
-  "/call-logs": "My Calls",
-  "/leads": "My Leads",
-  "/opportunities": "My Opportunities",
-  "/settings": "Settings",
-};
-
-function EmployeeShell() {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const location = useLocation();
-  const title = EMPLOYEE_TITLES[location.pathname] || "CallNexa";
-  const { user } = useAuth();
-  
-  return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)" }}>
-      {/* Employee Sidebar */}
-      <EmployeeSidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        {/* Employee Topbar */}
-        <Topbar title={title} onMenu={() => setMenuOpen((o) => !o)} />
-        
-        <main style={{ flex: 1 }}>
-          {/* Badge showing EMPLOYEE role */}
-          <div style={{ padding: "12px 24px", background: "var(--accent-soft)", borderBottom: "1px solid var(--border)" }}>
-            <div style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>
-              👤 EMPLOYEE VIEW • {user?.name || user?.email}
-            </div>
-            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-              You can only view your own data. Contact your manager for full access.
-            </div>
-          </div>
-          
-          <Suspense fallback={<RouteFallback />}>
-            <Routes>
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/call-logs" element={<CallLogs />} />
-              <Route path="/leads" element={<Leads />} />
-              <Route path="/opportunities" element={<Opportunities />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              {/* Block all other routes */}
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
-          </Suspense>
-        </main>
-      </div>
-      
-      {/* Employee Bottom Nav */}
-      <nav className="nova-bottom-nav">
-        <NavLink to="/dashboard" end className={({ isActive }) => isActive ? "active" : ""}>
-          <LayoutDashboard /><span>Dashboard</span>
-        </NavLink>
-        <NavLink to="/call-logs" className={({ isActive }) => isActive ? "active" : ""}>
-          <Phone /><span>My Calls</span>
-        </NavLink>
-        <NavLink to="/leads" className={({ isActive }) => isActive ? "active" : ""}>
-          <Users /><span>Leads</span>
-        </NavLink>
-        <NavLink to="/settings" className={({ isActive }) => isActive ? "active" : ""}>
-          <Settings /><span>Settings</span>
-        </NavLink>
-      </nav>
-    </div>
-  );
-}
-
-// ── Employee Sidebar (Limited Menu) ───────────────────────────────────────────
-function EmployeeSidebar({ open, onClose }) {
-  const { logout, user } = useAuth();
-  const { theme, toggleTheme } = useTheme();
-  
-  async function handleLogout() {
-    await logout();
-    window.location.href = "/login";
-  }
-  
-  return (
-    <>
-      {open && <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 49, display: "block" }} className="mobile-only" />}
-      <aside style={{
-        width: 260, background: "var(--bg-card)", borderRight: "1px solid var(--border)",
-        display: "flex", flexDirection: "column", position: "fixed", height: "100vh",
-        left: open ? 0 : -260, transition: "left 0.3s", zIndex: 50,
-      }} className="sidebar">
-        {/* Header */}
-        <div style={{ padding: "20px 16px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--accent-soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Phone size={18} color="var(--accent)" />
-            </div>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text-primary)", fontFamily: "Space Grotesk" }}>CallNexa</div>
-              <div style={{ fontSize: 10, color: "var(--text-dim)", fontWeight: 600 }}>EMPLOYEE</div>
-            </div>
-          </div>
-        </div>
-        
-        {/* Navigation */}
-        <nav style={{ flex: 1, padding: "16px 12px", overflowY: "auto" }}>
-          <NavLink to="/dashboard" end className={({ isActive }) => isActive ? "sidebar-link active" : "sidebar-link"}>
-            <LayoutDashboard size={18} /> My Dashboard
-          </NavLink>
-          <NavLink to="/call-logs" className={({ isActive }) => isActive ? "sidebar-link active" : "sidebar-link"}>
-            <Phone size={18} /> My Calls
-          </NavLink>
-          <NavLink to="/leads" className={({ isActive }) => isActive ? "sidebar-link active" : "sidebar-link"}>
-            <Users size={18} /> My Leads
-          </NavLink>
-          <NavLink to="/opportunities" className={({ isActive }) => isActive ? "sidebar-link active" : "sidebar-link"}>
-            <BarChart3 size={18} /> My Opportunities
-          </NavLink>
-          <NavLink to="/settings" className={({ isActive }) => isActive ? "sidebar-link active" : "sidebar-link"}>
-            <Settings size={18} /> Settings
-          </NavLink>
-        </nav>
-        
-        {/* Footer */}
-        <div style={{ padding: 16, borderTop: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 12 }}>
-            {user?.email}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={toggleTheme} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
-            </button>
-            <button onClick={handleLogout} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--danger)" }}>
-              <LogOut size={16} />
-            </button>
-          </div>
-        </div>
-      </aside>
-    </>
-  );
+  return <OrganizationShell />;
 }

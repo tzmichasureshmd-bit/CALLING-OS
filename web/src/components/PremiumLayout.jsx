@@ -1,306 +1,214 @@
-import { useState, useMemo } from "react";
-import { Home, BarChart3, Folder, Calendar, Settings, Sun, Moon } from "lucide-react";
+import { useState } from "react";
+import {
+  Bell,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Grid2X2,
+  LogOut,
+  Moon,
+  Search,
+  Sun,
+} from "lucide-react";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 import "../styles/premium-layout.css";
 
-export default function PremiumLayout({ children, pageTitle = "Schedule", onThemeToggle }) {
-  const [activeNav, setActiveNav] = useState("calendar");
+const DEFAULT_NAV = [];
+
+function initials(value, fallback = "CN") {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  return text
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+export default function PremiumLayout({
+  children,
+  currentPage = "Dashboard",
+  navItems = DEFAULT_NAV,
+  roleLabel = "Organization",
+  showPageHeading = false,
+}) {
+  const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
+  const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const organizationName = user?.organization_name || "CallNexa";
+  const userInitials = initials(user?.name || user?.email, "AW");
+
+  async function handleLogout() {
+    await logout();
+    window.location.href = roleLabel === "Super Admin" ? "/admin" : "/login";
+  }
+
+  function handleSearchKeyDown(event) {
+    if (event.key === "Escape") setSearch("");
+    if (event.key === "Enter" && search.trim()) {
+      navigate(`/call-logs?search=${encodeURIComponent(search.trim())}`);
+    }
+  }
 
   return (
-    <div className="premium-layout">
-      <div className="dashboard-container">
-        {/* Gradient Background */}
-        <div className="dashboard-gradient-bg"></div>
+    <div className="premium-shell">
+      <div className="premium-shell__container">
+        <aside className="premium-shell__sidebar" aria-label="Primary navigation">
+          <NavLink to="/dashboard" className="premium-shell__brand" aria-label="CallNexa home">
+            <span className="premium-shell__brand-mark">N</span>
+            <span className="premium-shell__brand-name">CallNexa</span>
+          </NavLink>
 
-        {/* Left Sidebar */}
-        <div className="premium-sidebar">
-          <div className="sidebar-icon-group">
-            <button
-              className={`sidebar-icon-btn ${activeNav === "home" ? "active" : ""}`}
-              onClick={() => setActiveNav("home")}
-              title="Home"
-            >
-              <Home size={20} />
-            </button>
-            <button
-              className={`sidebar-icon-btn ${activeNav === "analytics" ? "active" : ""}`}
-              onClick={() => setActiveNav("analytics")}
-              title="Analytics"
-            >
-              <BarChart3 size={20} />
-            </button>
-            <button
-              className={`sidebar-icon-btn ${activeNav === "files" ? "active" : ""}`}
-              onClick={() => setActiveNav("files")}
-              title="Files"
-            >
-              <Folder size={20} />
-            </button>
-            <button
-              className={`sidebar-icon-btn ${activeNav === "calendar" ? "active" : ""}`}
-              onClick={() => setActiveNav("calendar")}
-              title="Calendar"
-            >
-              <Calendar size={20} />
-            </button>
-            <button
-              className={`sidebar-icon-btn ${activeNav === "settings" ? "active" : ""}`}
-              onClick={() => setActiveNav("settings")}
-              title="Settings"
-            >
-              <Settings size={20} />
-            </button>
-          </div>
-
-          <div className="sidebar-spacer"></div>
-
-          <div className="sidebar-theme-group">
-            <button
-              className="sidebar-icon-btn"
-              onClick={onThemeToggle}
-              title="Theme"
-            >
-              <Sun size={20} />
-            </button>
-            <button
-              className="sidebar-icon-btn"
-              title="Dark Mode"
-            >
-              <Moon size={20} />
-            </button>
-          </div>
-        </div>
-
-        {/* Main Content */}
-        <div className="dashboard-content">
-          {/* Top Navigation */}
-          <div className="top-nav-bar">
-            <div className="nav-left">
-              <div className="brand-logo">N</div>
-            </div>
-
-            <div className="nav-center">
-              <button className="dropdown-btn">
-                Schedule <span>▼</span>
-              </button>
-              <div className="search-bar">
-                <span className="search-icon">🔍</span>
-                <input
-                  type="text"
-                  placeholder="Look up representative, record ID, or phone line..."
-                />
-              </div>
-            </div>
-
-            <div className="nav-right">
-              <button className="icon-btn" title="Apps">
-                ⊞
-              </button>
-              <button className="icon-btn" title="Notifications">
-                🔔
-              </button>
-              <div className="user-avatar">AW</div>
-            </div>
-          </div>
-
-          {/* Page Content */}
-          <div className="page-content">
-            {/* Page Header */}
-            <div className="page-header">
-              <h1 className="page-title">{pageTitle}</h1>
-              <div className="page-meta">Squad Beta • 10:15 AM EST</div>
-            </div>
-
-            {/* Schedule Controls */}
-            <div className="schedule-controls">
-              <div className="date-selector">
-                <button className="date-nav-btn">←</button>
-                <span className="date-label">18 Mar</span>
-                <button className="date-nav-btn">→</button>
-              </div>
-
-              <div className="view-selector">
-                <button className="view-option active">Single Day</button>
-                <button className="view-option">7 Days</button>
-              </div>
-
-              <button className="create-btn">+ Create Booking</button>
-            </div>
-
-            {/* Calendar Grid */}
-            <div className="calendar-grid">
-              {/* Time Column */}
-              <div className="time-column">
-                {[
-                  "8:00 am",
-                  "8:30 am",
-                  "9:00 am",
-                  "9:30 am",
-                  "10:00 am",
-                  "10:30 am",
-                  "11:00 am",
-                  "11:30 am",
-                ].map((time) => (
-                  <div key={time} className="time-slot">
-                    {time}
-                  </div>
-                ))}
-              </div>
-
-              {/* Schedule Columns */}
-              <div className="schedule-columns">
-                {[0, 1, 2].map((colIdx) => (
-                  <div key={colIdx} className="schedule-column">
-                    <div className="column-slots">
-                      {Array(8)
-                        .fill(0)
-                        .map((_, idx) => (
-                          <div key={idx} className="time-row"></div>
-                        ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Current Time Indicator */}
-              <div
-                className="current-time-indicator"
-                style={{
-                  top: `calc(20px + ${5.5 * 50}px)`,
-                }}
+          <nav className="premium-shell__nav" aria-label={`${roleLabel} navigation`}>
+            {navItems.map(({ to, label, icon: Icon, end }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                title={label}
+                aria-label={label}
+                className={({ isActive }) =>
+                  `premium-shell__nav-item${isActive ? " is-active" : ""}`
+                }
               >
-                <div className="current-time-label">10:45 am</div>
-              </div>
+                <Icon size={18} strokeWidth={1.8} />
+                <span>{label}</span>
+              </NavLink>
+            ))}
+          </nav>
 
-              {/* Booking Cards */}
-              <BookingCard
-                name="Sarah"
-                title="Alignment Sync"
-                time="8:00–8:30"
-                rep="Alex Wright"
-                color="card-yellow"
-                style={{
-                  top: `calc(20px + ${0 * 50}px)`,
-                  left: "calc(80px + 5%)",
-                  width: "calc((100% - 80px) / 3 - 10px)",
-                  height: "50px",
-                }}
-              />
-              <BookingCard
-                name="Marcus"
-                title="Client Assist"
-                time="8:00–8:30"
-                rep="Hannah Lee"
-                color="card-blue"
-                style={{
-                  top: `calc(20px + ${0 * 50}px)`,
-                  left: "calc(80px + 38%)",
-                  width: "calc((100% - 80px) / 3 - 10px)",
-                  height: "50px",
-                }}
-              />
-              <BookingCard
-                name="Liam"
-                title="Technical Help"
-                time="8:30–9:00"
-                rep="Alex Chen"
-                color="card-green"
-                style={{
-                  top: `calc(20px + ${1 * 50}px)`,
-                  left: "calc(80px + 71%)",
-                  width: "calc((100% - 80px) / 3 - 10px)",
-                  height: "50px",
-                }}
-              />
-              <BookingCard
-                name="Sophia"
-                title="Introductory..."
-                time="10:00–10:30"
-                rep="Alex Wright"
-                color="card-pink"
-                style={{
-                  top: `calc(20px + ${4 * 50}px)`,
-                  left: "calc(80px + 5%)",
-                  width: "calc((100% - 80px) / 3 - 10px)",
-                  height: "50px",
-                }}
-              />
-              <BookingCard
-                name="Daniel"
-                title="Project Transfer"
-                time="11:00–11:30"
-                rep="Alex Wright"
-                color="card-yellow"
-                style={{
-                  top: `calc(20px + ${6 * 50}px)`,
-                  left: "calc(80px + 71%)",
-                  width: "calc((100% - 80px) / 3 - 10px)",
-                  height: "50px",
-                }}
-              />
+          <div className="premium-shell__sidebar-footer">
+            <button
+              type="button"
+              className="premium-shell__icon-button"
+              onClick={toggleTheme}
+              title={theme === "light" ? "Use dark theme" : "Use light theme"}
+              aria-label={theme === "light" ? "Use dark theme" : "Use light theme"}
+            >
+              {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
+            </button>
+            <button
+              type="button"
+              className="premium-shell__icon-button premium-shell__icon-button--danger"
+              onClick={handleLogout}
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              <LogOut size={18} />
+            </button>
+          </div>
+        </aside>
+
+        <section className="premium-shell__workspace">
+          <header className="premium-shell__topbar">
+            <div className="premium-shell__topbar-left">
+              <button
+                type="button"
+                className="premium-shell__menu-button"
+                onClick={() => setMenuOpen((open) => !open)}
+                aria-label="Toggle navigation"
+                aria-expanded={menuOpen}
+              >
+                {menuOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+              </button>
+              <div className="premium-shell__page-switcher">
+                <button
+                  type="button"
+                  className="premium-shell__page-switcher-button"
+                  onClick={() => setMenuOpen((open) => !open)}
+                  aria-expanded={menuOpen}
+                >
+                  {currentPage}
+                  <ChevronDown size={14} />
+                </button>
+                <span className="premium-shell__role-label">{roleLabel}</span>
+              </div>
             </div>
 
-            {/* Floating Booking Panel */}
-            <FloatingBookingPanel />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+            <div className="premium-shell__topbar-center">
+              <div className="premium-shell__search">
+                <Search size={15} aria-hidden="true" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="Look up representative, record ID, or phone line..."
+                  aria-label="Search calls and records"
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")} aria-label="Clear search">
+                    <span aria-hidden="true">×</span>
+                  </button>
+                )}
+              </div>
+            </div>
 
-function BookingCard({ name, title, time, rep, color, style }) {
-  return (
-    <div className={`booking-card ${color}`} style={style}>
-      <div className="booking-header">
-        <div className="booking-avatar">{name.charAt(0)}</div>
-        <div className="booking-info">
-          <div className="booking-name">{name}</div>
-          <div className="booking-title">{title}</div>
-        </div>
-      </div>
-      <div className="booking-details">
-        <span className="booking-time">{time}</span>
-        <span className="booking-indicator"></span>
-      </div>
-      <div className="booking-rep">{rep}</div>
-    </div>
-  );
-}
+            <div className="premium-shell__topbar-right">
+              <button type="button" className="premium-shell__compact-button" title="Applications" aria-label="Applications">
+                <Grid2X2 size={17} />
+              </button>
+              <div className="premium-shell__notification-wrap">
+                <button
+                  type="button"
+                  className="premium-shell__compact-button"
+                  onClick={() => setNotificationsOpen((open) => !open)}
+                  aria-label="Notifications"
+                  aria-expanded={notificationsOpen}
+                >
+                  <Bell size={17} />
+                  <span className="premium-shell__notification-dot" />
+                </button>
+                {notificationsOpen && (
+                  <div className="premium-shell__popover">
+                    <strong>Notifications</strong>
+                    <span>No new notifications</span>
+                  </div>
+                )}
+              </div>
+              <div className="premium-shell__account" title={user?.email || roleLabel}>
+                <span className="premium-shell__avatar">{userInitials}</span>
+                <span className="premium-shell__account-copy">
+                  <strong>{organizationName}</strong>
+                  <small>{user?.email || roleLabel}</small>
+                </span>
+              </div>
+            </div>
+          </header>
 
-function FloatingBookingPanel() {
-  return (
-    <div className="floating-panel">
-      <input
-        type="text"
-        className="panel-input"
-        placeholder="Type Session Title..."
-      />
+          <div className={`premium-shell__mobile-nav${menuOpen ? " is-open" : ""}`}>
+              {navItems.map(({ to, label, icon: Icon, end }) => (
+                <NavLink key={to} to={to} end={end} onClick={() => setMenuOpen(false)}>
+                  <Icon size={17} />
+                  {label}
+                </NavLink>
+              ))}
+              <button type="button" onClick={handleLogout}>
+                <LogOut size={17} />
+                Sign out
+              </button>
+            </div>
 
-      <div className="input-with-icon">
-        <span className="input-icon">📅</span>
-        <input type="text" placeholder="Tuesday, 18 May" />
+          <main className="premium-shell__page">
+            {showPageHeading && (
+              <div className="premium-shell__heading">
+                <div>
+                  <h1>{currentPage}</h1>
+                  <p>Everything important, in one calm workspace.</p>
+                </div>
+                <span>{organizationName} • {roleLabel}</span>
+              </div>
+            )}
+            {children}
+          </main>
+        </section>
       </div>
-
-      <div className="input-with-icon">
-        <span className="input-icon">🕐</span>
-        <input type="text" placeholder="10:15 AM" />
-      </div>
-
-      <div className="input-with-icon">
-        <span className="input-icon">📍</span>
-        <input type="text" placeholder="1 Lexington Ave" />
-      </div>
-
-      <div className="participants-row">
-        <div className="participant-avatar">AW</div>
-        <div className="participant-avatar">MK</div>
-        <div className="participant-avatar">LH</div>
-        <button className="add-participant-btn">+</button>
-      </div>
-
-      <button className="panel-button">
-        Create Booking <span>+</span>
-      </button>
     </div>
   );
 }
