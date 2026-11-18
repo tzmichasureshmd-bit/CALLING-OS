@@ -363,12 +363,12 @@ export async function findRecordingForCall(c) {
 export async function uploadRecording(callId, filePath, token, mimeType = "audio/mp4") {
   if (!filePath || !callId) return null;
 
-  // Expo's upload API requires a file:// URI for a local path. Native Android
-  // discovery returns an absolute path, while MediaStore returns content://.
   let uploadPath = filePath.startsWith("content://") || filePath.startsWith("file://")
     ? filePath
     : `file://${filePath}`;
-  let tempPath   = null;
+  let tempPath = null;
+
+  // content:// URIs must be copied to cache first (FileSystem can't stream them directly)
   if (filePath.startsWith("content://")) {
     const extension = {
       "audio/mpeg": "mp3", "audio/ogg": "ogg", "audio/wav": "wav",
@@ -389,21 +389,25 @@ export async function uploadRecording(callId, filePath, token, mimeType = "audio
     if (!info.exists) throw new Error("Recording file no longer exists at path: " + filePath);
     if (!info.size || info.size < 1024) throw new Error("Recording file is empty or too small: " + info.size + " bytes");
 
+    // Use BINARY_CONTENT (raw bytes) instead of MULTIPART to avoid the
+    // multipart boundary overhead that triggers nginx 413 on large files.
+    // The backend accepts raw binary on this endpoint via UploadFile.
     const result = await FileSystem.uploadAsync(
       `${BASE_URL}/calls/${callId}/recording`,
       uploadPath,
       {
         httpMethod:  "POST",
-        uploadType:  FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName:   "file",
+        uploadType:  FileSystem.FileSystemUploadType.BINARY_CONTENT,
         mimeType,
-        headers:     { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization:   `Bearer ${token}`,
+          "Content-Type":  mimeType,
+          "X-File-Name":   `recording.${mimeType.split("/")[1] || "mp4"}`,
+        },
       }
     );
 
     if (result.status === 200 || result.status === 201) {
-      // Strict confirmation: the backend returns {"status":"uploaded","recording_available":true,...}.
-      // Anything else — unparseable body, missing flag — is NOT a confirmed upload.
       let parsed = null;
       try { parsed = result.body ? JSON.parse(result.body) : null; } catch { parsed = null; }
       if (!parsed || parsed.status !== "uploaded" || parsed.recording_available !== true) {
@@ -411,6 +415,12 @@ export async function uploadRecording(callId, filePath, token, mimeType = "audio
       }
       return parsed;
     }
+
+    // 413 = proxy body size limit — give a clear message
+    if (result.status === 413) {
+      throw new Error("HTTP 413: Recording file is too large for the server. Try a shorter call or check server upload limits.");
+    }
+
     let detail = "Upload failed";
     try { detail = JSON.parse(result.body)?.detail || detail; } catch {}
     throw new Error(`HTTP ${result.status}: ${detail}`);

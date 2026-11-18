@@ -3,3 +3,4 @@ from .employee import EmployeeCreate, EmployeeUpdate, EmployeeOut, PaginatedEmpl
 from .device import DeviceRegister, DeviceHeartbeat, DeviceOut, SIMOut
 from .call import CallSyncRequest, CallSyncResponse, CallOut, PaginatedCalls
 from .analytics import DashboardAnalytics, KPIs, EmployeeStat
+from .customer import CustomerCreate, CustomerUpdate, CustomerActivityOut

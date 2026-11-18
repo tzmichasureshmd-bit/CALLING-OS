@@ -6,10 +6,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { employeePalette, adminPalette, useTheme, TYPE, SPACE, RADIUS } from "./theme";
 import { useRole } from "./RoleContext";
 
-const EMPLOYEE_ICONS  = { index: "call-outline",     logs: "document-outline",    insights: "stats-chart-outline", settings: "settings-outline" };
-const EMPLOYEE_ICONS_ACTIVE = { index: "call",     logs: "document",             insights: "stats-chart",         settings: "settings" };
-const ADMIN_ICONS    = { "admin-dashboard": "home-outline",  "admin-employees": "people-outline",  "admin-calls": "call-outline", settings: "settings-outline" };
-const ADMIN_ICONS_ACTIVE = { "admin-dashboard": "home",    "admin-employees": "people",           "admin-calls": "call",         settings: "settings" };
+const EMPLOYEE_ICONS        = { index: "call-outline", logs: "document-outline", leads: "person-add-outline", settings: "settings-outline" };
+const EMPLOYEE_ICONS_ACTIVE = { index: "call",         logs: "document",         leads: "person-add",         settings: "settings" };
+const ADMIN_ICONS           = { "admin-dashboard": "home-outline", "admin-employees": "people-outline", "admin-calls": "call-outline", "admin-settings": "settings-outline" };
+const ADMIN_ICONS_ACTIVE    = { "admin-dashboard": "home",         "admin-employees": "people",          "admin-calls": "call",         "admin-settings": "settings" };
 
 // ── Animated tab item ─────────────────────────────────────────────────────────
 function TabItem({ route, focused, onPress, appMode }) {
@@ -38,16 +38,14 @@ function TabItem({ route, focused, onPress, appMode }) {
 
   const getLabel = () => {
     const name = route.name;
-    const adminLabels = { "admin-dashboard": "Dashboard", "admin-employees": "Employees", "admin-calls": "Calls", settings: "Settings" };
-    const employeeLabels = { index: "Calls", logs: "Logs", insights: "Insights", settings: "Settings" };
+    const adminLabels    = { "admin-dashboard": "Dashboard", "admin-employees": "Employees", "admin-calls": "Calls", "admin-settings": "Settings" };
+    const employeeLabels = { index: "Home", logs: "Logs", leads: "Leads", settings: "Settings" };
     return roleMode === "admin" ? (adminLabels[name] || name) : (employeeLabels[name] || name);
   };
 
   const getIcon = () => {
     const name = route.name;
-    if (roleMode === "admin") {
-      return focused ? ADMIN_ICONS_ACTIVE[name] : ADMIN_ICONS[name];
-    }
+    if (roleMode === "admin") return focused ? ADMIN_ICONS_ACTIVE[name] : ADMIN_ICONS[name];
     return focused ? EMPLOYEE_ICONS_ACTIVE[name] : EMPLOYEE_ICONS[name];
   };
 
@@ -216,9 +214,13 @@ export default function Dock({ state, navigation }) {
   const [dialOpen, setDialOpen] = useState(false);
   const fabScale = useRef(new Animated.Value(1)).current;
 
-  const routes = state.routes.filter(r => r.name !== "onboarding");
+  const VISIBLE_ADMIN    = ["admin-dashboard", "admin-employees", "admin-calls", "admin-settings"];
+  const VISIBLE_EMPLOYEE = ["index", "logs", "leads", "settings"];
+  const visibleNames = appMode === "admin" ? VISIBLE_ADMIN : VISIBLE_EMPLOYEE;
+
+  const routes = state.routes.filter(r => visibleNames.includes(r.name));
   const left   = routes.slice(0, 2);
-  const right  = routes.slice(2);
+  const right  = routes.slice(2, 4);
 
   function onFabPressIn() { Animated.spring(fabScale, { toValue: 0.9, useNativeDriver: true, speed: 80 }).start(); }
   function onFabPressOut() { Animated.spring(fabScale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 12 }).start(); }

@@ -12,6 +12,7 @@ export const authApi = {
   refresh: (refresh_token) => client.post("/auth/refresh", { refresh_token }).then((r) => r.data),
   logout: () => client.post("/auth/logout").then((r) => r.data),
   me: () => client.get("/auth/me").then((r) => r.data),
+  changePassword: (payload) => client.post("/auth/change-password", payload).then((r) => r.data),
 };
 
 export const organizationApi = {
@@ -49,6 +50,7 @@ export const callsApi = {
 export const analyticsApi = {
   dashboard: (params) => client.get("/analytics/dashboard", { params }).then((r) => r.data),
   employees: (params) => client.get("/analytics/employees", { params }).then((r) => r.data),
+  employee: (employeeId, params) => client.get(`/analytics/employees/${employeeId}`, { params }).then((r) => r.data),
   team: (params) => client.get("/analytics/team", { params }).then((r) => r.data),
   needsAttention: () => client.get("/analytics/needs-attention").then((r) => r.data),
   livePulse: () => client.get("/analytics/live-pulse").then((r) => r.data),
@@ -62,6 +64,23 @@ export const leadsApi = {
 
 export const opportunitiesApi = {
   list: (params) => client.get("/opportunities", { params }).then((r) => r.data),
+  create: (payload) => client.post("/opportunities", payload).then((r) => r.data),
+  update: (id, payload) => client.patch(`/opportunities/${id}`, payload).then((r) => r.data),
+};
+
+export const followUpsApi = {
+  list: (params) => client.get("/follow-ups", { params }).then((r) => r.data),
+  create: (payload) => client.post("/follow-ups", payload).then((r) => r.data),
+  update: (id, payload) => client.patch(`/follow-ups/${id}`, payload).then((r) => r.data),
+  complete: (id) => client.post(`/follow-ups/${id}/complete`).then((r) => r.data),
+};
+
+export const customersApi = {
+  list: (params) => client.get("/customers", { params }).then((r) => r.data),
+  create: (payload) => client.post("/customers", payload).then((r) => r.data),
+  get: (id) => client.get(`/customers/${id}`).then((r) => r.data),
+  update: (id, payload) => client.patch(`/customers/${id}`, payload).then((r) => r.data),
+  timeline: (id, params) => client.get(`/customers/${id}/timeline`, { params }).then((r) => r.data),
 };
 
 export const excludedApi = {
@@ -72,12 +91,34 @@ export const excludedApi = {
 
 export const invoicesApi = {
   list: (params) => client.get("/invoices", { params }).then((r) => r.data),
+  get: (id) => client.get(`/subscription/invoices/${id}`).then((r) => r.data),
 };
 
+export const subscriptionAdminApi = {
+  plans: () => client.get("/admin/plans").then((r) => r.data),
+  subscriptions: () => client.get("/admin/subscriptions").then((r) => r.data),
+  createPlan: (payload) => client.post("/admin/plans", payload).then((r) => r.data),
+  updatePlan: (id, payload) => client.patch(`/admin/plans/${id}`, payload).then((r) => r.data),
+  updatePrice: (id, payload) => client.patch(`/admin/plan-prices/${id}`, payload).then((r) => r.data),
+  extend: (id, payload) => client.post(`/admin/subscriptions/${id}/extend`, payload).then((r) => r.data),
+  suspend: (id, payload) => client.post(`/admin/subscriptions/${id}/suspend`, payload).then((r) => r.data),
+};
+
+
+
 export const subscriptionApi = {
-  current: () => client.get("/subscriptions/current").then((r) => r.data),
-  selectPlan: (plan, billing_cycle = "monthly") => client.post("/subscriptions/select-plan", { plan, billing_cycle }).then((r) => r.data),
+  plans: () => client.get("/subscription/plans").then((r) => r.data),
+  plan: (id) => client.get(`/subscription/plans/${id}`).then((r) => r.data),
+  current: () => client.get("/subscription/current").then((r) => r.data),
+  checkout: (payload) => client.post("/subscription/checkout", payload).then((r) => r.data),
+  selectPlan: (plan, billing_cycle = "monthly") => client.post("/subscriptions/select-plan", { plan, duration: billing_cycle }).then((r) => r.data),
   applyCoupon: (code) => client.post("/subscriptions/apply-coupon", { code }).then((r) => r.data),
+  verifyPayment: (payload) => client.post("/subscription/payment/verify", payload).then((r) => r.data),
+  renew: (payload = {}) => client.post("/subscription/renew", payload).then((r) => r.data),
+  changePlan: (payload) => client.post("/subscription/change-plan", payload).then((r) => r.data),
+  payments: () => client.get("/subscription/payments").then((r) => r.data),
+  invoices: () => client.get("/subscription/invoices").then((r) => r.data),
+  usage: () => client.get("/subscription/usage").then((r) => r.data),
 };
 
 export const transcriptsApi = {

@@ -333,9 +333,13 @@ export const dataSource = {
     const res = await api.invoicesApi.list();
     return {
       items: (res.items || []).map((inv) => ({
-        id: inv.id, period: inv.period, users: inv.users,
+        id: inv.id, invoiceId: inv.invoice_id, period: inv.period, users: inv.users,
         amount: `₹${Number(inv.amount).toLocaleString("en-IN")}`,
-        status: inv.status, date: inv.date,
+        regularPrice: inv.regular_price, sellingPrice: inv.selling_price,
+        subtotal: inv.subtotal, taxAmount: inv.tax_amount, discountAmount: inv.discount_amount,
+        totalAmount: inv.total_amount, currency: inv.currency,
+        status: inv.status, date: inv.date, paymentReference: inv.payment_reference,
+        planName: inv.plan_name, duration: inv.duration,
       })),
     };
   },

@@ -54,6 +54,11 @@ def _validate_references(body, user, db):
 @router.get("")
 def list_opportunities(closed: Optional[bool] = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     query = db.query(Opportunity).options(joinedload(Opportunity.employee)).filter(Opportunity.organization_id == user.organization_id)
+    if (user.role or "").upper() == "EMPLOYEE":
+        employee = db.query(Employee).filter(Employee.user_id == user.id, Employee.organization_id == user.organization_id).first()
+        if not employee:
+            return {"items": [], "total": 0}
+        query = query.filter(Opportunity.employee_id == employee.id)
     if closed is True:
         query = query.filter(Opportunity.is_closed.in_(("won", "lost")))
     elif closed is False:
@@ -84,6 +89,9 @@ def update_opportunity(opportunity_id: str, body: OpportunityUpdate, db: Session
     if values.get("stage") in {"Won", "Lost"}:
         item.is_closed = values["stage"].lower()
         item.closed_at = datetime.now(timezone.utc)
+    elif values.get("stage") in {"New", "Qualified", "Proposal", "Negotiation"}:
+        item.is_closed = "open"
+        item.closed_at = None
     db.commit()
     db.refresh(item)
     return _item(item)

@@ -35,6 +35,14 @@ class Settings(BaseSettings):
 
     GOOGLE_CLIENT_ID: str = ""
 
+    # Billing provider settings. Keep provider-independent until a merchant
+    # account and webhook secret are configured in the deployment environment.
+    PAYMENT_PROVIDER: str = "unconfigured"
+    PAYMENT_CURRENCY: str = "INR"
+    PAYMENT_TEST_MODE: bool = False
+    PAYMENT_WEBHOOK_SECRET: str = ""
+    BILLING_TAX_RATE_PERCENT: float = 0.0
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",")]

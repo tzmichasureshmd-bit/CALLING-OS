@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 from datetime import datetime, timezone, timedelta
@@ -18,20 +18,55 @@ DURATION_COLORS = {
 }
 
 
-def _date_range(range_str: str):
-    now = datetime.now(timezone.utc)
-    if range_str == "yesterday":
+def _employee_scope(user: User, db: Session) -> Optional[str]:
+    if (user.role or "").upper() != "EMPLOYEE":
+        return None
+    employee = db.query(Employee).filter(
+        Employee.user_id == user.id,
+        Employee.organization_id == user.organization_id,
+        Employee.status == "active",
+    ).first()
+    return employee.id if employee else "__no_employee__"
+
+
+def _scoped_calls(db: Session, user: User, start=None, end=None):
+    query = db.query(Call).filter(Call.organization_id == user.organization_id)
+    employee_id = _employee_scope(user, db)
+    if employee_id:
+        query = query.filter(Call.employee_id == employee_id)
+    if start is not None:
+        query = query.filter(Call.start_time >= start)
+    if end is not None:
+        query = query.filter(Call.start_time <= end)
+    return query.all()
+
+
+def _date_range(range_str: str, start_date: str | None = None, end_date: str | None = None):
+    now = datetime.utcnow()  # naive UTC — matches DateTime columns in DB
+    if range_str == "custom" and start_date and end_date:
+        try:
+            start = datetime.fromisoformat(start_date.split("T")[0])  # naive, date only
+            end   = datetime.fromisoformat(end_date.split("T")[0]).replace(hour=23, minute=59, second=59)
+            if (end - start).days > 90:
+                start = end - timedelta(days=90)
+        except ValueError:
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end   = now
+    elif range_str == "yesterday":
         start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end = start.replace(hour=23, minute=59, second=59)
+        end   = start.replace(hour=23, minute=59, second=59)
     elif range_str == "7d":
         start = (now - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end = now
+        end   = now
     elif range_str == "30d":
         start = (now - timedelta(days=30)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end = now
+        end   = now
+    elif range_str == "90d":
+        start = (now - timedelta(days=90)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end   = now
     else:  # today
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = now
+        end   = now
     return start, end
 
 
@@ -57,26 +92,28 @@ def _build_kpis(calls) -> KPIs:
     )
 
 
-def _build_daily(calls, days: int) -> list[DailyPoint]:
-    now = datetime.now(timezone.utc)
+def _build_daily(calls, days: int, start=None) -> list[DailyPoint]:
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    base = start.date() if start else (datetime.utcnow() - timedelta(days=days - 1)).date()
     result = []
-    for i in range(days - 1, -1, -1):
-        d = (now - timedelta(days=i)).date()
+    for i in range(days):
+        d = base + timedelta(days=i)
         day_calls = [c for c in calls if c.start_time.date() == d]
-        total = len(day_calls)
-        conn = sum(1 for c in day_calls if c.duration_seconds > 0 and c.call_type != "missed")
-        miss = sum(1 for c in day_calls if c.call_type == "missed")
-        result.append(DailyPoint(day=day_names[d.weekday()], total=total, connected=conn, missed=miss))
+        result.append(DailyPoint(
+            day=day_names[d.weekday()],
+            total=len(day_calls),
+            connected=sum(1 for c in day_calls if c.duration_seconds > 0 and c.call_type != "missed"),
+            missed=sum(1 for c in day_calls if c.call_type == "missed"),
+        ))
     return result
 
 
-def _build_outcome(calls, days: int) -> list[OutcomePoint]:
-    now = datetime.now(timezone.utc)
+def _build_outcome(calls, days: int, start=None) -> list[OutcomePoint]:
     day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    base = start.date() if start else (datetime.utcnow() - timedelta(days=days - 1)).date()
     result = []
-    for i in range(days - 1, -1, -1):
-        d = (now - timedelta(days=i)).date()
+    for i in range(days):
+        d = base + timedelta(days=i)
         day_calls = [c for c in calls if c.start_time.date() == d]
         result.append(OutcomePoint(
             day=day_names[d.weekday()],
@@ -137,29 +174,45 @@ def _build_leaderboard(db: Session, org_id: str, calls) -> list[EmployeeStat]:
 
 @router.get("/dashboard", response_model=DashboardAnalytics)
 def dashboard_analytics(
-    range: str = Query("today", regex="^(today|yesterday|7d|30d)$"),
+    range: str = Query("today", pattern="^(today|yesterday|7d|30d|90d|custom)$"),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    start, end = _date_range(range)
-    calls = db.query(Call).filter(
-        Call.organization_id == user.organization_id,
-        Call.start_time >= start,
-        Call.start_time <= end,
-    ).all()
+    start, end = _date_range(range, start_date, end_date)
+    calls = _scoped_calls(db, user, start, end)
 
-    hot_leads = db.query(Lead).filter(
+    hot_leads_query = db.query(Lead).filter(
         Lead.organization_id == user.organization_id,
         Lead.status.in_(["hot", "interested", "follow_up"]),
-    ).count()
+    )
+    employee_id = _employee_scope(user, db)
+    if employee_id:
+        hot_leads_query = hot_leads_query.filter(Lead.employee_id == employee_id)
+    hot_leads = hot_leads_query.count()
 
-    days = 1 if range in ("today", "yesterday") else 30 if range == "30d" else 7
+    # days = actual span so charts align with the selected range
+    if range in ("today", "yesterday"):
+        days = 1
+    elif range == "custom" and start_date and end_date:
+        try:
+            days = max(1, (end.date() - start.date()).days + 1)
+        except Exception:
+            days = 7
+    elif range == "30d":
+        days = 30
+    elif range == "90d":
+        days = 90
+    else:
+        days = 7
+
     kpis = _build_kpis(calls)
     kpis.hot_leads = hot_leads
     return DashboardAnalytics(
         kpis=kpis,
-        daily_metrics=_build_daily(calls, days),
-        outcome_breakdown=_build_outcome(calls, days),
+        daily_metrics=_build_daily(calls, days, start),
+        outcome_breakdown=_build_outcome(calls, days, start),
         duration_distribution=_build_duration(calls),
         leaderboard=_build_leaderboard(db, user.organization_id, calls),
         range=range,
@@ -173,22 +226,86 @@ def employee_analytics(
     user: User = Depends(get_current_user),
 ):
     start, end = _date_range(range)
-    calls = db.query(Call).filter(
-        Call.organization_id == user.organization_id,
-        Call.start_time >= start,
-        Call.start_time <= end,
-    ).all()
+    calls = _scoped_calls(db, user, start, end)
     return {"leaderboard": _build_leaderboard(db, user.organization_id, calls)}
 
 
-@router.get("/team", response_model=DashboardAnalytics)
-def team_analytics(
+@router.get("/employees/{employee_id}")
+def employee_overview(
+    employee_id: str,
     range: str = Query("7d", pattern="^(today|yesterday|7d|30d)$"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """Return a scoped employee profile, metrics, and device overview."""
+    employee = db.query(Employee).filter(
+        Employee.id == employee_id,
+        Employee.organization_id == user.organization_id,
+    ).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    team_roles = {"TEAM_LEAD", "MANAGER", "ADMIN", "SUPER_ADMIN"}
+    if (user.role or "").upper() not in team_roles and employee.user_id != user.id:
+        raise HTTPException(status_code=403, detail="You can only view your own employee profile")
+
+    start, end = _date_range(range)
+    calls = db.query(Call).filter(
+        Call.organization_id == user.organization_id,
+        Call.employee_id == employee_id,
+        Call.start_time >= start,
+        Call.start_time <= end,
+    ).order_by(Call.start_time.desc()).all()
+    days = 30 if range == "30d" else 7 if range == "7d" else 1
+    devices = db.query(Device).filter(
+        Device.organization_id == user.organization_id,
+        Device.employee_id == employee_id,
+    ).order_by(Device.last_seen_at.desc()).all()
+
+    return {
+        "employee": {
+            "id": employee.id,
+            "name": employee.name,
+            "email": employee.email,
+            "phone": employee.phone,
+            "employee_code": employee.employee_code,
+            "status": employee.status,
+            "created_at": employee.created_at,
+            "last_active_at": employee.last_active_at,
+        },
+        "range": range,
+        "kpis": _build_kpis(calls).model_dump(),
+        "daily_metrics": [point.model_dump() for point in _build_daily(calls, days)],
+        "outcome_breakdown": [point.model_dump() for point in _build_outcome(calls, days)],
+        "duration_distribution": [bucket.model_dump() for bucket in _build_duration(calls)],
+        "devices": [
+            {
+                "id": device.id,
+                "model": device.model,
+                "manufacturer": device.manufacturer,
+                "android_version": device.android_version,
+                "app_version": device.app_version,
+                "battery_level": device.battery_level,
+                "is_online": device.is_online,
+                "last_seen_at": device.last_seen_at,
+                "network_type": device.network_type,
+                "permissions_status": device.permissions_status or {},
+            }
+            for device in devices
+        ],
+    }
+
+
+@router.get("/team", response_model=DashboardAnalytics)
+def team_analytics(
+    range: str = Query("7d", pattern="^(today|yesterday|7d|30d|90d|custom)$"),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """Team-wide analytics used by the web analytics view."""
-    return dashboard_analytics(range=range, db=db, user=user)
+    return dashboard_analytics(range=range, start_date=start_date, end_date=end_date, db=db, user=user)
 
 
 @router.get("/calls")
@@ -199,11 +316,7 @@ def call_analytics(
 ):
     """A compact call-performance summary for reports and future integrations."""
     start, end = _date_range(range)
-    calls = db.query(Call).filter(
-        Call.organization_id == user.organization_id,
-        Call.start_time >= start,
-        Call.start_time <= end,
-    ).all()
+    calls = _scoped_calls(db, user, start, end)
     return {"kpis": _build_kpis(calls), "range": range}
 
 
@@ -214,30 +327,44 @@ def needs_attention(
 ):
     """Items that require manager action: offline devices, missed call spikes, permission issues."""
     items = []
+    if (user.role or "").upper() == "EMPLOYEE":
+        return {"items": []}
     now = datetime.now(timezone.utc)
 
-    # Offline devices (last seen > 2 hours ago)
-    devices = db.query(Device).filter(Device.organization_id == user.organization_id).all()
-    for d in devices:
+    # One alert per employee — keep only the most recently seen device per employee
+    all_devices = db.query(Device).filter(Device.organization_id == user.organization_id).all()
+    emp_device: dict[str, Device] = {}
+    for d in all_devices:
+        if not d.employee_id:
+            continue
+        existing = emp_device.get(d.employee_id)
+        if existing is None:
+            emp_device[d.employee_id] = d
+        else:
+            existing_ts = existing.last_seen_at.timestamp() if existing.last_seen_at else 0
+            new_ts = d.last_seen_at.timestamp() if d.last_seen_at else 0
+            if new_ts > existing_ts:
+                emp_device[d.employee_id] = d
+
+    employees = {e.id: e for e in db.query(Employee).filter(Employee.organization_id == user.organization_id).all()}
+
+    for emp_id, d in emp_device.items():
+        name = employees[emp_id].name if emp_id in employees else "Unknown"
+
         if d.last_seen_at and (now - d.last_seen_at).total_seconds() > 7200:
-            emp = db.query(Employee).filter(Employee.id == d.employee_id).first()
-            name = emp.name if emp else "Unknown"
             items.append({
-                "id": f"offline-{d.id}",
+                "id": f"offline-{emp_id}",
                 "title": f"{name}'s device is offline",
                 "detail": f"Last seen {int((now - d.last_seen_at).total_seconds() / 3600)}h ago · {d.model or 'Unknown device'}",
                 "severity": "high",
                 "to": "/device-health",
             })
 
-        # Permission issues
         perms = d.permissions_status or {}
         missing = [k for k in ["callLog", "phoneState"] if not perms.get(k)]
         if missing and d.is_online:
-            emp = db.query(Employee).filter(Employee.id == d.employee_id).first()
-            name = emp.name if emp else "Unknown"
             items.append({
-                "id": f"perms-{d.id}",
+                "id": f"perms-{emp_id}",
                 "title": f"{name} has missing permissions",
                 "detail": f"Missing: {', '.join(missing)}",
                 "severity": "medium",
@@ -276,13 +403,11 @@ def live_pulse(
     user: User = Depends(get_current_user),
 ):
     """Last 20 call events for the live pulse feed on the dashboard."""
-    calls = (
-        db.query(Call)
-        .filter(Call.organization_id == user.organization_id)
-        .order_by(Call.start_time.desc())
-        .limit(20)
-        .all()
-    )
+    query = db.query(Call).filter(Call.organization_id == user.organization_id)
+    employee_id = _employee_scope(user, db)
+    if employee_id:
+        query = query.filter(Call.employee_id == employee_id)
+    calls = query.order_by(Call.start_time.desc()).limit(20).all()
     now = datetime.now(timezone.utc)
     items = []
     for c in calls:

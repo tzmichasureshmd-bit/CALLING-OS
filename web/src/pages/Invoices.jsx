@@ -1,24 +1,30 @@
 import { FileText, Download } from "lucide-react";
 import { PageContainer, Card, CardHeader, Badge, EmptyState, LoadingState, ErrorState } from "../components/ui.jsx";
 import { dataSource } from "../api/dataSource.js";
-import { useResource } from "../api/useResource.js";
+import { invoicesApi } from "../api/resources.js";
 
-function downloadInvoice(inv) {
-  const lines = [
-    `CALLOS INVOICE`,
-    `Invoice #: ${inv.id}`,
-    `Period:    ${inv.period}`,
-    `Date:      ${new Date(inv.date).toLocaleDateString("en-IN")}`,
-    ``,
-    `Users:     ${inv.users}`,
-    `Amount:    ${inv.amount}`,
-    `Status:    ${inv.status}`,
-  ];
-  const blob = new Blob([lines.join("\n")], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `invoice-${inv.id}.txt`;
-  a.click(); URL.revokeObjectURL(url);
+async function downloadInvoice(inv) {
+  try {
+    const detail = await invoicesApi.get(inv.id);
+    const lines = [
+      "CALLNEXA INVOICE",
+      `Invoice #: ${detail.id}`,
+      `Plan:      ${detail.plan_name || "—"}`,
+      `Duration:  ${detail.duration || detail.period || "—"}`,
+      `Members:   ${detail.users || "—"}`,
+      `Date:      ${new Date(detail.invoice_date || detail.date).toLocaleDateString("en-IN")}`,
+      "",
+      `Regular:   ₹${Number(detail.regular_price || 0).toLocaleString("en-IN")}`,
+      `Discount:  -₹${Number(detail.discount_amount || 0).toLocaleString("en-IN")}`,
+      `Tax:       ₹${Number(detail.tax_amount || 0).toLocaleString("en-IN")}`,
+      `Total:     ₹${Number(detail.total_amount || detail.amount || 0).toLocaleString("en-IN")}`,
+      `Payment:   ${detail.payment_reference || "—"}`,
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `invoice-${detail.id}.txt`; a.click(); URL.revokeObjectURL(url);
+  } catch (error) { window.alert(error?.message || "Unable to download invoice"); }
 }
 
 export default function Invoices() {

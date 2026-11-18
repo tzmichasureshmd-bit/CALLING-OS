@@ -9,6 +9,16 @@ import { LinearGradient } from "expo-linear-gradient";
 import { palette, gradientBrand, useTheme, TYPE, SPACE, RADIUS } from "../../src/theme";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
+
+const MORE_ITEMS = [
+  { route: "/(employee)/leads",                icon: "person-add-outline",        label: "Leads",            color: "#EF4444",        desc: "Hot & warm leads" },
+  { route: "/(employee)/opportunities",        icon: "trending-up-outline",       label: "Opportunities",    color: palette.violet,  desc: "Active pipeline" },
+  { route: "/(employee)/opportunities-closed", icon: "checkmark-circle-outline",  label: "Closed Deals",     color: palette.emerald, desc: "Won & lost deals" },
+  { route: "/(employee)/customers",            icon: "people-outline",            label: "Customers",        color: "#06B6D4",        desc: "Customer profiles" },
+  { route: "/(employee)/insights",             icon: "stats-chart-outline",       label: "Insights",         color: palette.amber,   desc: "My performance" },
+  { route: "/(employee)/reports",              icon: "bar-chart-outline",         label: "Reports",          color: "#8B5CF6",        desc: "Call & sales reports" },
+  { route: "/(employee)/sync-status",          icon: "cloud-upload-outline",      label: "Sync Status",      color: palette.teal,    desc: "Call sync & device log" },
+];
 import { useAuth } from "../../src/AuthContext";
 import { checkPermissions, requestAllPermissions, readSimInfo, getDeviceInfo } from "../../src/nativeModules";
 import { api } from "../../src/api";
@@ -30,7 +40,7 @@ const { CallRecorderModule } = NativeModules;
 const LAST_SYNC_KEY = "callos_last_sync_ts";
 
 export default function Profile() {
-  const { theme, mode, toggle, shadowSoft } = useTheme();
+  const { theme, isDark, toggleDark, shadowSoft } = useTheme();
   const router = useRouter();
   const { user, setUser, logout, syncCalls, deviceId } = useAuth();
   const [syncing, setSyncing]             = useState(false);
@@ -133,29 +143,12 @@ export default function Profile() {
     try {
       const result = await syncCalls();
       setSyncResult(result);
-
-      if ((result.failed || 0) > 0) {
-        Alert.alert(
-          "Sync Incomplete",
-          `${result.accepted || 0} new, ${result.duplicates || 0} already synced, ${result.failed} failed. Pending calls remain recoverable and will retry.`,
-        );
-        return;
-      }
-
       const completedAt = result.completed_at || Date.now();
       setLastSync(new Date(completedAt).toLocaleTimeString("en-IN", {
         hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short",
       }));
-      if ((result.total || 0) === 0) {
-        Alert.alert("Sync Complete", "No pending calls were found.");
-      } else {
-        Alert.alert(
-          "Sync Complete",
-          `${result.accepted || 0} new, ${result.duplicates || 0} already synced, ${result.total || 0} checked.`,
-        );
-      }
     } catch (e) {
-      Alert.alert("Sync Error", e?.message || "Unable to synchronize calls. Pending calls will retry.");
+      setSyncResult({ error: e?.message || "Sync failed" });
     } finally {
       setSyncing(false);
     }
@@ -214,7 +207,7 @@ export default function Profile() {
     AsyncStorage.setItem("callos_user", JSON.stringify(merged));
   }
 
-  const dark = mode === "dark";
+  const dark = isDark;
   const e = {
     name:        user?.name        || "Employee",
     email:       user?.email       || "",
@@ -283,6 +276,25 @@ export default function Profile() {
 
         <View style={{ paddingHorizontal: SPACE.lg, gap: SPACE.sm }}>
 
+          {/* ── SECTION: MORE SCREENS ── */}
+          <Text style={sectionLabel}>More</Text>
+          <View style={[card, shadowSoft, { padding: 0, overflow: "hidden" }]}>
+            {MORE_ITEMS.map((item, i) => (
+              <Pressable key={item.route} onPress={() => router.push(item.route)}
+                style={{ flexDirection: "row", alignItems: "center", padding: SPACE.lg,
+                  borderBottomWidth: i < MORE_ITEMS.length - 1 ? 1 : 0, borderBottomColor: theme.border }}>
+                <View style={{ width: 38, height: 38, borderRadius: RADIUS.md, alignItems: "center", justifyContent: "center", backgroundColor: item.color + "1a" }}>
+                  <Ionicons name={item.icon} size={18} color={item.color} />
+                </View>
+                <View style={{ flex: 1, marginLeft: SPACE.md }}>
+                  <Text style={{ ...TYPE.title, color: theme.primary }}>{item.label}</Text>
+                  {item.desc && <Text style={{ ...TYPE.micro, color: theme.muted, marginTop: 2 }}>{item.desc}</Text>}
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={theme.dim} />
+              </Pressable>
+            ))}
+          </View>
+
           {/* ── SECTION: APP SETTINGS ── */}
           <Text style={sectionLabel}>App Settings</Text>
 
@@ -332,7 +344,7 @@ export default function Profile() {
                 <Text style={{ ...TYPE.title, color: theme.primary }}>Theme</Text>
                 <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>{dark ? "Dark Mode" : "Light Mode"}</Text>
               </View>
-              <Pressable onPress={toggle} style={{ width: 46, height: 26, borderRadius: 13, backgroundColor: dark ? palette.teal : theme.borderStrong, justifyContent: "center", paddingHorizontal: 2 }}>
+              <Pressable onPress={toggleDark} style={{ width: 46, height: 26, borderRadius: 13, backgroundColor: dark ? palette.teal : theme.borderStrong, justifyContent: "center", paddingHorizontal: 2 }}>
                 <View style={{ position: "absolute", left: dark ? 22 : 2, width: 22, height: 22, borderRadius: 11, backgroundColor: "#fff" }} />
               </Pressable>
             </View>
@@ -403,18 +415,18 @@ export default function Profile() {
             </View>
 
             {/* Sync Now */}
-            <Pressable onPress={handleSync} disabled={syncing}
+            <Pressable onPress={() => router.push("/(employee)/sync-status")}
               style={{ flexDirection: "row", alignItems: "center", padding: SPACE.lg }}>
               <View style={iconBox(palette.teal + "1a")}>
                 {syncing ? <ActivityIndicator size="small" color={palette.teal} /> : <Ionicons name="cloud-upload-outline" size={18} color={palette.teal} />}
               </View>
               <View style={{ flex: 1, marginLeft: SPACE.md }}>
-                <Text style={{ ...TYPE.title, color: theme.primary }}>Sync Calls Now</Text>
+                <Text style={{ ...TYPE.title, color: theme.primary }}>Sync Calls</Text>
                 <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 1 }}>
-                  {syncing ? "Syncing…" : syncResult ? `✓ ${syncResult.accepted} new · ${syncResult.duplicates} duplicates` : lastSync ? `Last synced: ${lastSync}` : "Auto-syncs while the app is active"}
+                  {lastSync ? `Last synced: ${lastSync}` : "View sync status & history"}
                 </Text>
               </View>
-              {!syncing && <Ionicons name="chevron-forward" size={18} color={palette.teal} />}
+              <Ionicons name="chevron-forward" size={18} color={palette.teal} />
             </Pressable>
           </View>
 

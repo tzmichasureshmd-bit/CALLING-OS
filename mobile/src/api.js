@@ -141,6 +141,7 @@ export const api = {
     request("POST", "/auth/register/employee", { name, email, password, company_code }),
   me:             () => request("GET", "/auth/me"),
   updateProfile:  (payload) => request("PATCH", "/auth/me", payload),
+  changePassword: (payload) => request("POST", "/auth/change-password", payload),
   refresh:        (refreshToken) => request("POST", "/auth/refresh", { refresh_token: refreshToken }),
   logout:         () => request("POST", "/auth/logout").catch(() => {}),
 
@@ -158,12 +159,61 @@ export const api = {
   syncCalls:          (deviceId, calls) => request("POST", "/calls/sync", { device_id: deviceId, calls }),
   getTranscript:      (callId) => request("GET", `/transcripts/${callId}`),
   updateCallNote:     (callId, status, notes) => request("PATCH", `/calls/${callId}/note`, { call_status: status, notes }),
+  getNoteHistory:     (phone) => request("GET", `/call-notes/history/${encodeURIComponent(phone)}`),
+  postCallProgress:   (callId, payload) => request("POST", `/calls/${callId}/post-call`, payload),
+  getFollowUps:       (params = {}) => { const q = new URLSearchParams(params).toString(); return request("GET", `/follow-ups${q ? "?" + q : ""}`); },
+  createFollowUp:     (payload) => request("POST", "/follow-ups", payload),
+  updateFollowUp:     (id, payload) => request("PATCH", `/follow-ups/${id}`, payload),
+  completeFollowUp:   (id) => request("POST", `/follow-ups/${id}/complete`),
   setCallPrivacy:     (callId, privacy) => request("PATCH", `/calls/${callId}/privacy`, { call_privacy: privacy }),
   getExcludedNumbers: () => request("GET", "/excluded-phone-numbers"),
 
+  // Company workspace
+  getOrganization: () => request("GET", "/organizations/current"),
+  updateOrganization: (payload) => request("PATCH", "/organizations/current", payload),
+  regenerateCompanyCode: () => request("POST", "/organizations/current/regenerate-code"),
+  getEmployees: (params = {}) => { const q = new URLSearchParams(params).toString(); return request("GET", `/employees${q ? "?" + q : ""}`); },
+  createEmployee: (payload) => request("POST", "/employees", payload),
+  updateEmployee: (id, payload) => request("PATCH", `/employees/${id}`, payload),
+  deleteEmployee: (id) => request("DELETE", `/employees/${id}`),
+
+  // Leads
+  getLeads: (params = {}) => { const q = new URLSearchParams(params).toString(); return request("GET", `/leads${q ? "?" + q : ""}`); },
+  createLead: (payload) => request("POST", "/leads", payload),
+  updateLead: (id, payload) => request("PATCH", `/leads/${id}`, payload),
+
+  // Opportunities
+  getOpportunities: (params = {}) => { const q = new URLSearchParams(params).toString(); return request("GET", `/opportunities${q ? "?" + q : ""}`); },
+  createOpportunity: (payload) => request("POST", "/opportunities", payload),
+  updateOpportunity: (id, payload) => request("PATCH", `/opportunities/${id}`, payload),
+
+  // Customers
+  getCustomers: (params = {}) => { const q = new URLSearchParams(params).toString(); return request("GET", `/customers${q ? "?" + q : ""}`); },
+  getCustomer: (id) => request("GET", `/customers/${id}`),
+  createCustomer: (payload) => request("POST", "/customers", payload),
+  updateCustomer: (id, payload) => request("PATCH", `/customers/${id}`, payload),
+  getCustomerTimeline: (id) => request("GET", `/customers/${id}/timeline?limit=200`),
+
   // Analytics
-  getAnalytics: (range = "today") =>
-    request("GET", `/analytics/dashboard?range=${range}`),
+  getAnalytics: (range = "today", startDate = null, endDate = null) => {
+    let path = `/analytics/dashboard?range=${range}`;
+    if (range === "custom" && startDate && endDate)
+      path += `&start_date=${startDate}&end_date=${endDate}`;
+    return request("GET", path);
+  },
+  getTeamAnalytics: (range = "7d") => request("GET", `/analytics/team?range=${range}`),
+  getEmployeeAnalytics: (employeeId, range = "7d") => request("GET", `/analytics/employees/${employeeId}?range=${range}`),
+  getNeedsAttention: () => request("GET", "/analytics/needs-attention"),
+  getLivePulse:      () => request("GET", "/analytics/live-pulse"),
+
+  // Devices
+  getDevices: () => request("GET", "/devices"),
+
+  // Opportunities (already have getOpportunities but add closed param support)
+  getOpportunitiesList: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return request("GET", `/opportunities${q ? "?" + q : ""}`);
+  },
 };
 
 // ── Session helpers ───────────────────────────────────────────────────────────
@@ -220,6 +270,10 @@ export async function getDeviceId() {
 
 export async function saveDeviceId(id) {
   await AsyncStorage.setItem("callos_device_id", id);
+}
+
+export async function getAccessToken() {
+  return secureGet("callos_token");
 }
 
 export async function getRefreshToken() {

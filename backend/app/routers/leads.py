@@ -55,6 +55,15 @@ def list_leads(
     db: Session = Depends(get_db), user: User = Depends(get_current_user),
 ):
     query = db.query(Lead).options(joinedload(Lead.employee)).filter(Lead.organization_id == user.organization_id)
+    employee_id = None
+    if (user.role or "").upper() == "EMPLOYEE":
+        employee = db.query(Employee).filter(
+            Employee.user_id == user.id,
+            Employee.organization_id == user.organization_id,
+            Employee.status == "active",
+        ).first()
+        employee_id = employee.id if employee else "__no_employee__"
+        query = query.filter(Lead.employee_id == employee_id)
     if status:
         query = query.filter(Lead.status == status)
     if q:

@@ -1,320 +1,246 @@
-import { useState, useEffect, useRef } from "react";
-import { View, Text, Pressable, StyleSheet, Animated, Easing, Image } from "react-native";
+import { useEffect, useRef } from "react";
+import { View, Text, Pressable, Animated, Easing, Image, useWindowDimensions, Linking } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { employeePalette, adminPalette, TYPE, SPACE, RADIUS, gradientBrand } from "../src/theme";
+import { useFonts, DancingScript_700Bold } from "@expo-google-fonts/dancing-script";
 
-export default function IntroScreen() {
-  const router = useRouter();
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(100)).current;
-  const rotateAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.8)).current;
-  const buttonScaleAnim = useRef(new Animated.Value(1)).current;
+const NAVY = "#0D1B4B";
+const TEAL = "#0ABFA3";
 
+function CallWaves() {
+  const anim = useRef(new Animated.Value(0)).current;
+  const bars = [
+    8,12,20,32,18,44,28,52,36,48,22,40,16,38,24,50,34,46,20,42,
+    30,52,38,44,26,48,18,36,28,44,32,50,22,40,16,34,24,46,30,48,
+  ];
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
-      Animated.timing(slideAnim, { toValue: 0, duration: 1000, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(rotateAnim, { toValue: 1, duration: 2000, easing: Easing.linear, useNativeDriver: true }),
-      Animated.timing(scaleAnim, { toValue: 1, duration: 1000, easing: Easing.out(Easing.back(1.2)), useNativeDriver: true }),
-    ]).start();
-
-    // Button pulse animation
-    const pulseAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(buttonScaleAnim, { toValue: 1.05, duration: 1000, useNativeDriver: true }),
-        Animated.timing(buttonScaleAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
-      ])
-    );
-    pulseAnimation.start();
+    Animated.loop(
+      Animated.timing(anim, { toValue: 1, duration: 1600, useNativeDriver: false, easing: Easing.inOut(Easing.sin) })
+    ).start();
+    return () => anim.stopAnimation();
   }, []);
-
   return (
-    <SafeAreaView style={styles.container}>
-      <LinearGradient 
-        colors={["#D1F4E8", "#E8F5E9", "#C7F0DD"]} 
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.background}
-      >
-        <View style={styles.content}>
-          {/* Animated Background Elements */}
-          <Animated.View style={[styles.bgElement1, { opacity: fadeAnim }]} />
-          <Animated.View style={[styles.bgElement2, { opacity: fadeAnim }]} />
-
-          {/* Header Section */}
-          <Animated.View
-            style={[
-              styles.headerSection,
-              {
-                opacity: fadeAnim,
-                transform: [{ translateY: slideAnim }, { scale: scaleAnim }],
-              },
-            ]}
-          >
-            {/* Logo */}
-            <View style={styles.logoContainer}>
-              <Animated.View
-                style={{
-                  transform: [
-                    {
-                      rotate: rotateAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ["0deg", "360deg"],
-                      }),
-                    },
-                  ],
-                }}
-              >
-                <LinearGradient 
-                  colors={[employeePalette.primary, employeePalette.primaryDark, employeePalette.navy]} 
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.logoBg}
-                >
-                  <Ionicons name="call" size={52} color="#fff" />
-                </LinearGradient>
-              </Animated.View>
-              
-              {/* Glow Effect */}
-              <View style={styles.glowEffect} />
-            </View>
-
-            {/* App Name with gradient */}
-            <Text style={[TYPE.h1, styles.appName, { color: employeePalette.navy }]}>
-              CALL
-            </Text>
-            <Text style={[TYPE.caption, styles.subtitle, { color: employeePalette.primary, fontWeight: "700" }]}>
-              Analytics & Monitoring
-            </Text>
-
-            {/* Description */}
-            <Text style={[TYPE.body, styles.description, { color: employeePalette.gray600, lineHeight: 24 }]}>
-              Intelligent call monitoring and sales analytics for modern teams
-            </Text>
-          </Animated.View>
-
-          {/* Feature List */}
-          <Animated.View
-            style={[
-              styles.featuresSection,
-              {
-                opacity: fadeAnim,
-                transform: [{ translateY: slideAnim }],
-              },
-            ]}
-          >
-            <FeatureRow
-              icon="phone"
-              title="Real-time Monitoring"
-              description="Track calls as they happen"
-              color={employeePalette.primary}
-            />
-            <FeatureRow
-              icon="analytics"
-              title="Performance Analytics"
-              description="Detailed insights and metrics"
-              color={employeePalette.primary}
-            />
-            <FeatureRow
-              icon="people"
-              title="Team Management"
-              description="Manage and track your team"
-              color={employeePalette.primary}
-            />
-            <FeatureRow
-              icon="lock-closed"
-              title="Secure & Reliable"
-              description="Enterprise-grade security"
-              color={employeePalette.primary}
-            />
-          </Animated.View>
-
-          {/* Spacer */}
-          <View style={{ flex: 1 }} />
-
-          {/* CTA Buttons */}
-          <Animated.View
-            style={[
-              styles.ctaSection,
-              {
-                opacity: fadeAnim,
-                transform: [{ translateY: slideAnim }, { scale: buttonScaleAnim }],
-              },
-            ]}
-          >
-            <Pressable
-              onPress={() => router.push("/login-selector")}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                { opacity: pressed ? 0.85 : 1, transform: [{ scale: pressed ? 0.95 : 1 }] },
-              ]}
-            >
-              <LinearGradient 
-                colors={gradientBrand}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.buttonContent}
-              >
-                <Text style={[TYPE.bodyBold, { color: "#fff", fontSize: 16 }]}>
-                  Get Started
-                </Text>
-                <Ionicons name="arrow-forward" size={20} color="#fff" style={{ marginLeft: SPACE.sm }} />
-              </LinearGradient>
-            </Pressable>
-
-            {/* Footer Text */}
-            <Text style={[TYPE.caption, styles.footerText, { color: employeePalette.gray500, marginTop: SPACE.md }]}>
-              ✓ Trusted by sales teams worldwide
-            </Text>
-          </Animated.View>
-        </View>
-      </LinearGradient>
-    </SafeAreaView>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Feature Row Component
-// ════════════════════════════════════════════════════════════════════════════
-function FeatureRow({ icon, title, description, color }) {
-  return (
-    <View style={styles.featureRow}>
-      <View style={[styles.featureIcon, { backgroundColor: color, opacity: 0.15 }]}>
-        <Ionicons name={icon} size={20} color={color} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={[TYPE.title, { color: employeePalette.navy }]}>{title}</Text>
-        <Text style={[TYPE.caption, { color: employeePalette.gray500, marginTop: SPACE.xs }]}>
-          {description}
-        </Text>
-      </View>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, height: 70 }}>
+      {bars.map((h, i) => {
+        const phase = (i / bars.length) * Math.PI * 2;
+        const animH = anim.interpolate({
+          inputRange: [0, 0.25, 0.5, 0.75, 1],
+          outputRange: [
+            h,
+            Math.max(6, h * (0.5 + 0.3 * Math.sin(phase))),
+            Math.max(6, h * (0.8 + 0.4 * Math.cos(phase))),
+            Math.max(6, h * (0.6 + 0.3 * Math.sin(phase + 1))),
+            h,
+          ],
+        });
+        const isTeal = i > bars.length * 0.2 && i < bars.length * 0.8;
+        return (
+          <Animated.View key={i} style={{
+            width: 4, height: animH, borderRadius: 3,
+            backgroundColor: isTeal ? TEAL : NAVY + "44",
+          }} />
+        );
+      })}
     </View>
   );
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// Styles
-// ════════════════════════════════════════════════════════════════════════════
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  background: {
-    flex: 1,
-  },
-  bgElement1: {
-    position: "absolute",
-    top: -100,
-    right: -50,
-    width: 300,
-    height: 300,
-    borderRadius: 150,
-    backgroundColor: "rgba(16, 185, 129, 0.1)",
-  },
-  bgElement2: {
-    position: "absolute",
-    bottom: -80,
-    left: -60,
-    width: 250,
-    height: 250,
-    borderRadius: 125,
-    backgroundColor: "rgba(16, 185, 129, 0.08)",
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: SPACE.lg,
-    paddingVertical: SPACE.xl,
-    justifyContent: "space-between",
-  },
-  headerSection: {
-    alignItems: "center",
-    marginTop: SPACE.xxxl,
-  },
-  logoContainer: {
-    marginBottom: SPACE.xl,
-    position: "relative",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  logoBg: {
-    width: 90,
-    height: 90,
-    borderRadius: 25,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: employeePalette.primary,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 10,
-  },
-  glowEffect: {
-    position: "absolute",
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 2,
-    borderColor: "rgba(16, 185, 129, 0.3)",
-    top: -10,
-    left: -10,
-  },
-  appName: {
-    marginBottom: SPACE.xs,
-    fontSize: 32,
-  },
-  subtitle: {
-    marginBottom: SPACE.lg,
-    letterSpacing: 1,
-  },
-  description: {
-    textAlign: "center",
-    lineHeight: 22,
-    marginHorizontal: SPACE.md,
-  },
-  featuresSection: {
-    marginTop: SPACE.xxxl,
-    gap: SPACE.lg,
-  },
-  featureRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: SPACE.md,
-    paddingVertical: SPACE.sm,
-  },
-  featureIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: RADIUS.md,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  ctaSection: {
-    gap: SPACE.lg,
-    alignItems: "center",
-  },
-  primaryButton: {
-    width: "100%",
-    borderRadius: RADIUS.md,
-    overflow: "hidden",
-  },
-  buttonContent: {
-    flexDirection: "row",
-    paddingVertical: SPACE.md + 2,
-    paddingHorizontal: SPACE.lg,
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: RADIUS.md,
-    shadowColor: employeePalette.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  footerText: {
-    textAlign: "center",
-  },
-});
+const AVATARS = ["SU", "HA", "RA", "KA", "+13"];
+const AVATAR_COLORS = [TEAL, NAVY, TEAL, NAVY, NAVY];
+
+// Creative pulsing CTA button
+function PulseButton({ onPress }) {
+  const pulse1 = useRef(new Animated.Value(1)).current;
+  const pulse2 = useRef(new Animated.Value(1)).current;
+  const pulse1Opacity = useRef(new Animated.Value(0.5)).current;
+  const pulse2Opacity = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const p1 = Animated.loop(Animated.parallel([
+      Animated.timing(pulse1, { toValue: 1.5, duration: 1500, useNativeDriver: true, easing: Easing.out(Easing.ease) }),
+      Animated.timing(pulse1Opacity, { toValue: 0, duration: 1500, useNativeDriver: true }),
+    ]));
+    const p2 = Animated.loop(Animated.parallel([
+      Animated.sequence([
+        Animated.delay(500),
+        Animated.timing(pulse2, { toValue: 1.8, duration: 1500, useNativeDriver: true, easing: Easing.out(Easing.ease) }),
+      ]),
+      Animated.sequence([
+        Animated.delay(500),
+        Animated.timing(pulse2Opacity, { toValue: 0, duration: 1500, useNativeDriver: true }),
+      ]),
+    ]));
+    p1.start(); p2.start();
+    return () => { p1.stop(); p2.stop(); };
+  }, []);
+
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1, alignItems: "center", justifyContent: "center", width: "100%" })}>
+      {/* Pulse rings */}
+      <Animated.View style={{
+        position: "absolute",
+        width: "100%", height: 56, borderRadius: 28,
+        backgroundColor: TEAL,
+        transform: [{ scale: pulse1 }],
+        opacity: pulse1Opacity,
+      }} />
+      <Animated.View style={{
+        position: "absolute",
+        width: "100%", height: 56, borderRadius: 28,
+        backgroundColor: TEAL,
+        transform: [{ scale: pulse2 }],
+        opacity: pulse2Opacity,
+      }} />
+      {/* Main button */}
+      <LinearGradient
+        colors={[TEAL, "#089E88"]}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+        style={{
+          width: "100%", height: 56, borderRadius: 28,
+          flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10,
+          shadowColor: TEAL, shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.4, shadowRadius: 20, elevation: 12,
+        }}>
+        <Text style={{ fontSize: 17, fontWeight: "800", color: "#fff", letterSpacing: 0.5 }}>Start Monitoring</Text>
+        <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.25)", alignItems: "center", justifyContent: "center" }}>
+          <Text style={{ fontSize: 16, color: "#fff", fontWeight: "700" }}>→</Text>
+        </View>
+      </LinearGradient>
+    </Pressable>
+  );
+}
+
+export default function IntroScreen() {
+  const router = useRouter();
+  const { width } = useWindowDimensions();
+  const fadeAnim  = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const [fontsLoaded] = useFonts({ DancingScript_700Bold });
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim,  { toValue: 1, duration: 700, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 700, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#EDFFF5" }}>
+      <LinearGradient
+        colors={["#EDFFF5", "#D8F9E8", "#C5F2DA"]}
+        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+        style={{ flex: 1 }}
+      >
+        <Animated.View style={{ flex: 1, opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+
+          {/* ── TOP BAR: Logo + name left, nothing right ── */}
+          <View style={{
+            flexDirection: "row", alignItems: "center",
+            paddingHorizontal: 28, paddingTop: 20, marginBottom: 8,
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Image source={require("../assets/logo.png")} style={{ width: 38, height: 38, borderRadius: 10 }} resizeMode="contain" />
+              <View>
+                <Text style={{ fontSize: 18, fontWeight: "900", color: NAVY, letterSpacing: -0.3 }}>
+                  Call<Text style={{ color: TEAL }}>Nexa</Text>
+                </Text>
+                <Text style={{ fontSize: 9, fontWeight: "700", color: TEAL, letterSpacing: 2 }}>ANALYTICS</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* ── MAIN CONTENT ── */}
+          <View style={{ flex: 1, paddingHorizontal: 28 }}>
+
+            {/* Big heading */}
+            <View style={{ marginTop: 24, marginBottom: 12 }}>
+              <Text style={{
+                fontSize: 58,
+                fontFamily: fontsLoaded ? "DancingScript_700Bold" : undefined,
+                fontWeight: fontsLoaded ? undefined : "900",
+                color: NAVY, lineHeight: 66, letterSpacing: -1,
+              }}>
+                Call
+              </Text>
+              <Text style={{ fontSize: 48, fontWeight: "900", color: NAVY, lineHeight: 56, letterSpacing: -2 }}>
+                Monitoring
+              </Text>
+              <Text style={{
+                fontSize: 48,
+                fontFamily: fontsLoaded ? "DancingScript_700Bold" : undefined,
+                fontWeight: fontsLoaded ? undefined : "300",
+                color: TEAL, lineHeight: 56, letterSpacing: -1,
+              }}>
+                Suite
+              </Text>
+            </View>
+
+            {/* Subtitle */}
+            <Text style={{ fontSize: 15, color: NAVY + "77", lineHeight: 22, marginBottom: 28 }}>
+              Analyze the Team Productivity{"\n"}with Ease!
+            </Text>
+
+            {/* Waveform */}
+            <CallWaves />
+
+            <View style={{ flex: 1 }} />
+
+            {/* ── BOTTOM CARD ── */}
+            <View style={{
+              backgroundColor: NAVY,
+              borderRadius: 28,
+              padding: 24,
+              marginBottom: 8,
+            }}>
+              {/* Avatar row inside card */}
+              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 20 }}>
+                {AVATARS.map((av, i) => (
+                  <View key={i} style={{
+                    width: 36, height: 36, borderRadius: 18,
+                    backgroundColor: AVATAR_COLORS[i] === NAVY ? TEAL : AVATAR_COLORS[i],
+                    alignItems: "center", justifyContent: "center",
+                    marginLeft: i === 0 ? 0 : -10,
+                    borderWidth: 2.5, borderColor: NAVY,
+                    zIndex: AVATARS.length - i,
+                  }}>
+                    <Text style={{ fontSize: av.startsWith("+") ? 9 : 11, fontWeight: "800", color: "#fff" }}>{av}</Text>
+                  </View>
+                ))}
+                <View style={{ marginLeft: 14 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: "#fff" }}>12 of 15 on work</Text>
+                  <Text style={{ fontSize: 11, color: TEAL, marginTop: 2 }}>Team is active now</Text>
+                </View>
+              </View>
+
+              {/* CTA Button - simple, no animation */}
+              <Pressable onPress={() => router.push("/login-selector")}
+                style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1 })}>
+                <View style={{ height: 54, borderRadius: 16, backgroundColor: TEAL, alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 17, fontWeight: "800", color: "#fff", letterSpacing: 0.3 }}>Start Monitoring</Text>
+                </View>
+              </Pressable>
+
+              {/* Tzmicha branding inside card */}
+              <Pressable
+                onPress={() => Linking.openURL("https://www.tzmicha.com/")}
+                style={({ pressed }) => ({
+                  opacity: pressed ? 0.7 : 1,
+                  flexDirection: "row", alignItems: "center", justifyContent: "center",
+                  gap: 8, marginTop: 16,
+                })}>
+                <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", fontWeight: "500" }}>A product by</Text>
+                <Image
+                  source={require("../assets/tzmicha-logo.png")}
+                  style={{ width: 80, height: 20, tintColor: "rgba(255,255,255,0.7)" }}
+                  resizeMode="contain"
+                />
+              </Pressable>
+            </View>
+
+          </View>
+        </Animated.View>
+      </LinearGradient>
+    </SafeAreaView>
+  );
+}

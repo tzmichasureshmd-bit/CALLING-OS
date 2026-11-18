@@ -69,6 +69,10 @@ jobs:
             # Rebuild both backend and web images
             docker compose build callingos-backend callingos-web --no-cache
 
+            # Apply append-only database migrations before restarting the API.
+            # The runner is checksum-protected and fails closed on errors.
+            docker compose run --rm callingos-backend python migration_runner.py
+
             # Stop old containers first, then start new ones
             docker compose down callingos-backend callingos-web --remove-orphans || true
             docker compose up -d callingos-backend callingos-web

@@ -24,11 +24,12 @@ export function Logo({ size = 24, showText = true, collapsed = false }) {
   );
 }
 
-export function Card({ children, style, className = "", padding = 20, hover = false, ...rest }) {
+export function Card({ children, style, className = "", padding = 20, hover = false, tone, ...rest }) {
   const [h, setH] = useState(false);
+  const toneClass = tone ? ` app-card--${tone}` : "";
   return (
     <div
-      className={`nova-card ${className}`}
+      className={`nova-card${toneClass} ${className}`}
       style={{
         padding,
         transition: "transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease",

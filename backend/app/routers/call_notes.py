@@ -73,6 +73,34 @@ def upsert_note(
         "notes":    body.notes,
         "now":      now,
     })
+
+    # Resolve changer name
+    emp_row = db.execute(
+        text("SELECT name FROM employees WHERE user_id = :uid AND organization_id = :oid LIMIT 1"),
+        {"uid": user.id, "oid": user.organization_id},
+    ).fetchone()
+    changer_name = emp_row[0] if emp_row else user.email
+
+    # Log to history
+    db.execute(text("""
+        INSERT INTO call_note_history
+            (id, organization_id, employee_id, call_id, phone_number,
+             status, notes, changed_by_id, changed_by_name, changed_by_role, created_at)
+        VALUES
+            (gen_random_uuid()::text, :org_id, :emp_id, :call_id, :phone,
+             :status, :notes, :changed_by_id, :changed_by_name, :changed_by_role, :now)
+    """), {
+        "org_id":           user.organization_id,
+        "emp_id":           employee_id,
+        "call_id":          body.call_id,
+        "phone":            body.phone_number,
+        "status":           body.status,
+        "notes":            body.notes,
+        "changed_by_id":    user.id,
+        "changed_by_name":  changer_name,
+        "changed_by_role":  user.role,
+        "now":              now,
+    })
     db.commit()
     return {"saved": True}
 
@@ -136,3 +164,36 @@ def get_note_by_phone(
         "updated_at":    row[5],
         "employee_name": row[6],
     }}
+
+
+@router.get("/history/{phone_number}")
+def get_note_history(
+    phone_number: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Get full progress history for a phone number — shown in mobile/web timeline."""
+    rows = db.execute(text("""
+        SELECT
+            h.id, h.status, h.notes,
+            h.changed_by_name, h.changed_by_role,
+            h.call_id, h.created_at
+        FROM call_note_history h
+        WHERE h.organization_id = :org_id
+          AND h.phone_number = :phone
+        ORDER BY h.created_at DESC
+        LIMIT 50
+    """), {"org_id": user.organization_id, "phone": phone_number}).fetchall()
+
+    return {"items": [
+        {
+            "id":               r[0],
+            "status":           r[1],
+            "notes":            r[2],
+            "changed_by_name":  r[3],
+            "changed_by_role":  r[4],
+            "call_id":          r[5],
+            "created_at":       r[6].isoformat() if r[6] else None,
+        }
+        for r in rows
+    ]}

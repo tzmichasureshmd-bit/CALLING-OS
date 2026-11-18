@@ -28,8 +28,8 @@ export default function AdminCalls() {
   const fetchCalls = async () => {
     try {
       setLoading(true);
-      const response = await api.getCalls();
-      setCall(response?.data || response || []);
+      const response = await api.getCalls({ page_size: 200 });
+      setCall(response?.items || (Array.isArray(response) ? response : response?.data || []));
     } catch (err) {
       console.error("Failed to fetch calls:", err);
       Alert.alert("Error", "Failed to load calls");

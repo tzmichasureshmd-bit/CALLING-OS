@@ -26,6 +26,8 @@ import {
   notifyRecordingUploaded,
 } from "./notificationManager";
 import { checkPermissions, startCallLogObserver, stopCallLogObserver } from "./nativeModules";
+import { enqueuePostCall } from "./pendingPostCallStore";
+import { queuePendingCall, removePendingCall } from "./pendingCallSyncStore";
 import { api, BASE_URL } from "./api";
 import { isRecordingEnabled as getRecordingEnabledPreference } from "./recordingPreferences";
 
@@ -178,6 +180,7 @@ async function directSync(deviceId, calls) {
 
     // Notify and kick off recording check for confirmed calls
     for (const c of confirmed) {
+      enqueuePostCall(c).catch(() => {});
       notifyCallCompleted(c).catch(() => {});
       _checkAndUploadRecording(c).catch(() => {});
     }
@@ -293,6 +296,17 @@ async function _checkAndUploadRecording(call, attempt = 0) {
   updateTranscriptStatus(call.client_event_id, STATUS.TRANSCRIPTION_PENDING);
 }
 
+export async function syncSelectedCall(deviceId, call) {
+  if (!deviceId || !call?.client_event_id) {
+    return { accepted: 0, duplicates: 0, failed: 1, total: 1, error: "Call is not ready to sync" };
+  }
+  const result = await directSync(deviceId, [call]);
+  if ((result.failed || 0) === 0) {
+    await removePendingCall(call.client_event_id);
+  }
+  return result;
+}
+
 // ── Main sync cycle ───────────────────────────────────────────────────────────
 async function _runSyncCycle(deviceId, mode) {
   if (!deviceId) {
@@ -339,18 +353,18 @@ async function _runSyncCycle(deviceId, mode) {
     const newCalls = eligibleCalls.filter(c => !_sessionConfirmed.has(c.client_event_id));
     if (!newCalls.length) return { accepted: 0, duplicates: 0, failed: 0, total: 0 };
 
-    console.log(`[CALL_SYNC_ELIGIBLE] mode=${mode} new_calls=${newCalls.length} ts=${Date.now()}`);
-    newCalls.forEach(c => {
-      upsertCallStatus(c.client_event_id, {
-        sync_status:      STATUS.DETECTED,
-        phone_number:     c.phone_number,
-        call_type:        c.call_type,
-        duration_seconds: c.duration_seconds,
-        start_time:       c.start_time,
+    console.log(`[CALL_SYNC_PENDING_APPROVAL] mode=${mode} pending_calls=${newCalls.length} ts=${Date.now()}`);
+    newCalls.forEach((call) => {
+      upsertCallStatus(call.client_event_id, {
+        sync_status: STATUS.DETECTED,
+        phone_number: call.phone_number,
+        call_type: call.call_type,
+        duration_seconds: call.duration_seconds,
+        start_time: call.start_time,
       });
     });
-
-    return await directSync(deviceId, newCalls);
+    await Promise.all(newCalls.map((call) => queuePendingCall(call)));
+    return { accepted: 0, duplicates: 0, failed: 0, queued: newCalls.length, total: newCalls.length };
   } catch (e) {
     console.warn(`[SYNC_CYCLE_ERROR] mode=${mode} error=${e?.message} ts=${Date.now()}`);
     return { accepted: 0, duplicates: 0, failed: 1, total: 0, error: e?.message || "Sync failed" };
@@ -437,7 +451,7 @@ export async function registerBackgroundSync() {
 }
 
 // ── useAutoSync hook ──────────────────────────────────────────────────────────
-export function useAutoSync() {
+export function useAutoSync(enabled = true) {
   const { deviceId } = useAuth();
   const appState       = useRef(AppState.currentState);
   const heartbeatRef   = useRef(null);
@@ -451,7 +465,7 @@ export function useAutoSync() {
   useEffect(() => { deviceIdRef.current = deviceId; }, [deviceId]);
 
   useEffect(() => {
-    if (!deviceId) return;
+    if (!enabled || !deviceId) return;
     mountedRef.current = true;
 
     setupNotificationChannels();
@@ -543,5 +557,5 @@ export function useAutoSync() {
       observerSub.current = null;
       stopCallLogObserver().catch(() => {});
     };
-  }, [deviceId]);
+  }, [deviceId, enabled]);
 }

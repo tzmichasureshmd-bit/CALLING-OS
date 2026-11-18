@@ -2,6 +2,7 @@ import logging
 import re
 import time
 import uuid
+import logging
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +15,7 @@ from .routers import (
     auth_router, employees_router, devices_router, calls_router, analytics_router,
     organization_router, leads_router, opportunities_router, excluded_numbers_router,
     billing_router, transcripts_router, superadmin_router, audit_router, call_notes_router,
+    follow_ups_router, customers_router,
 )
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -247,6 +249,8 @@ app.include_router(transcripts_router,      prefix=prefix)
 app.include_router(superadmin_router,       prefix=prefix)
 app.include_router(audit_router,            prefix=prefix)
 app.include_router(call_notes_router,       prefix=prefix)
+app.include_router(follow_ups_router,        prefix=prefix)
+app.include_router(customers_router,          prefix=prefix)
 
 
 @app.get("/", tags=["root"])

@@ -1,12 +1,16 @@
 # CALLOS — Sales Call Monitoring Platform
 
-A clone of the CALLOS sales-call monitoring system. Two apps share one data model:
+# CallNexa
 
-- **`web/`** — Company / manager **web dashboard** (React 19 + Vite + Tailwind 4). The reporting and analytics command centre. Managers see all employees' calls, opportunities, leaderboards, and reports.
-- **`mobile/`** — Employee **Android app** (React Native + Expo). Each salesperson installs it, enters the company code, grants permissions, and the app reads their phone call log + recordings and syncs them to the dashboard.
-- **`backend/`** — (planned) FastAPI + PostgreSQL API tying the two together.
+CallNexa is a sales call monitoring and management platform with a web dashboard, mobile employee app, and FastAPI/PostgreSQL backend.
 
-> Both frontends currently run on **mock data** so every screen is fully visible without a backend.
+**Current web handoff document:** [`docs/CALLNEXA_WEB_APPLICATION_MAIN.md`](docs/CALLNEXA_WEB_APPLICATION_MAIN.md)
+
+- **`web/`** — Company, Employee, and Super Admin web application.
+- **`mobile/`** — Employee Android application for call-log and recording sync. Mobile work is outside the current web phase.
+- **`backend/`** — FastAPI API, PostgreSQL data model, authentication, CRM workflows, analytics, subscriptions, and billing foundation.
+
+The web application uses real authentication and backend APIs. Payment checkout is intentionally deferred; plan selection currently opens the CallNexa sales contact flow.
 
 ---
 

@@ -1,6 +1,10 @@
 # CallNexa Web Dashboard - Complete Feature List
 
-## ✅ All Features Verified - Production Ready
+# Web dashboard feature notes
+
+> **Current source of truth:** Read [`docs/CALLNEXA_WEB_APPLICATION_MAIN.md`](docs/CALLNEXA_WEB_APPLICATION_MAIN.md) before sharing web status with the team. This older file is retained as historical feature notes and may not reflect the current hidden Integrations page, contact-first subscription flow, or exact 12-package pricing catalog.
+
+## Historical feature notes
 
 ### 🏠 Core Pages (12 Pages)
 

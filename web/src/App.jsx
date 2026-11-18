@@ -8,7 +8,6 @@ import {
   FileBarChart,
   LayoutDashboard,
   Phone,
-  Plug,
   ReceiptText,
   Settings,
   ShieldCheck,
@@ -30,9 +29,9 @@ const Employees = lazy(() => import("./pages/Employees.jsx"));
 const ExcludedNumbers = lazy(() => import("./pages/ExcludedNumbers.jsx"));
 const CallLogs = lazy(() => import("./pages/CallLogs.jsx"));
 const Leads = lazy(() => import("./pages/Leads.jsx"));
+const Customers = lazy(() => import("./pages/Customers.jsx"));
 const Opportunities = lazy(() => import("./pages/Opportunities.jsx"));
 const DeviceHealth = lazy(() => import("./pages/DeviceHealth.jsx"));
-const Integrations = lazy(() => import("./pages/Integrations.jsx"));
 const OpportunitiesClosed = lazy(() => import("./pages/OpportunitiesClosed.jsx"));
 const Reports = lazy(() => import("./pages/Reports.jsx"));
 const Subscription = lazy(() => import("./pages/Subscription.jsx"));
@@ -53,7 +52,6 @@ const ICONS = {
   opportunities: TrendingUp,
   devices: Smartphone,
   excluded: Ban,
-  integrations: Plug,
   followups: CalendarCheck,
   reports: FileBarChart,
   billing: CreditCard,
@@ -64,45 +62,57 @@ const ICONS = {
 
 const ORG_NAV = [
   { to: "/dashboard", label: "Dashboard", icon: ICONS.dashboard, end: true },
-  { to: "/call-logs", label: "Calls", icon: ICONS.calls },
-  { to: "/manage/employees", label: "Employees", icon: ICONS.team },
-  { to: "/analytics", label: "Analytics", icon: ICONS.analytics },
-  { to: "/leads", label: "Leads", icon: ICONS.leads },
-  { to: "/opportunities", label: "Opportunities", icon: ICONS.opportunities },
-  { to: "/opportunities-closed", label: "Closed Deals", icon: ICONS.opportunities },
-  { to: "/device-health", label: "Device Health", icon: ICONS.devices },
-  { to: "/manage/excluded", label: "Excluded Numbers", icon: ICONS.excluded },
-  { to: "/integrations", label: "Integrations", icon: ICONS.integrations },
-  { to: "/follow-ups", label: "Follow-ups", icon: ICONS.followups },
-  { to: "/reports", label: "Reports", icon: ICONS.reports },
-  { to: "/subscription", label: "Subscription", icon: ICONS.billing },
-  { to: "/invoices", label: "Invoices", icon: ICONS.invoices },
-  { to: "/settings", label: "Settings", icon: ICONS.settings },
+  {
+    to: "/call-logs", label: "Calls", icon: ICONS.calls,
+    children: [
+      { to: "/call-logs", label: "Call Logs" },
+      { to: "/transcribe", label: "Transcripts" },
+    ],
+  },
+  { to: "/follow-ups", label: "Follow-up Calendar", icon: ICONS.followups },
+  { to: "/manage/employees", label: "Team", icon: ICONS.team },
+  { to: "/leads", label: "Leads", icon: ICONS.leads, children: [{ to: "/customers", label: "Customers" }] },
+  {
+    to: "/opportunities", label: "Opportunities", icon: ICONS.opportunities,
+    children: [
+      { to: "/opportunities", label: "Open Opportunities" },
+      { to: "/opportunities-closed", label: "Closed Deals" },
+    ],
+  },
+  {
+    to: "/analytics", label: "Analytics", icon: ICONS.analytics,
+    children: [{ to: "/reports", label: "Reports" }],
+  },
+  { to: "/device-health", label: "Devices", icon: ICONS.devices },
+  {
+    to: "/subscription", label: "Billing", icon: ICONS.billing,
+    children: [{ to: "/invoices", label: "Invoices" }],
+  },
+  {
+    to: "/settings", label: "Settings", icon: ICONS.settings,
+    children: [{ to: "/manage/excluded", label: "Excluded Numbers" }],
+  },
 ];
 
 const EMPLOYEE_NAV = [
   { to: "/dashboard", label: "My Dashboard", icon: ICONS.dashboard, end: true },
   { to: "/call-logs", label: "My Calls", icon: ICONS.calls },
-  { to: "/leads", label: "My Leads", icon: ICONS.leads },
-  { to: "/opportunities", label: "My Opportunities", icon: ICONS.opportunities },
+  { to: "/follow-ups", label: "My Follow-up Calendar", icon: ICONS.followups },
+  { to: "/leads", label: "My Leads", icon: ICONS.leads, children: [{ to: "/customers", label: "My Customers" }] },
+  { to: "/opportunities", label: "My Opportunities", icon: ICONS.opportunities, children: [{ to: "/opportunities-closed", label: "Closed Deals" }] },
   { to: "/settings", label: "Settings", icon: ICONS.settings },
 ];
 
 const SUPER_ADMIN_NAV = [
   { to: "/superadmin", label: "Super Admin", icon: ICONS.admin, end: true },
   { to: "/dashboard", label: "Organizations", icon: ICONS.dashboard },
-  { to: "/call-logs", label: "All Calls", icon: ICONS.calls },
-  { to: "/manage/employees", label: "All Employees", icon: ICONS.team },
-  { to: "/analytics", label: "Analytics", icon: ICONS.analytics },
+  { to: "/call-logs", label: "All Calls", icon: ICONS.calls, children: [{ to: "/transcribe", label: "All Transcripts" }] },
+  { to: "/manage/employees", label: "Team", icon: ICONS.team },
+  { to: "/analytics", label: "Analytics", icon: ICONS.analytics, children: [{ to: "/reports", label: "Reports" }] },
   { to: "/leads", label: "All Leads", icon: ICONS.leads },
-  { to: "/opportunities", label: "All Opportunities", icon: ICONS.opportunities },
-  { to: "/opportunities-closed", label: "Closed Deals", icon: ICONS.opportunities },
-  { to: "/device-health", label: "All Devices", icon: ICONS.devices },
-  { to: "/manage/excluded", label: "Excluded Numbers", icon: ICONS.excluded },
-  { to: "/integrations", label: "Integrations", icon: ICONS.integrations },
-  { to: "/transcribe", label: "Transcripts", icon: Phone },
-  { to: "/reports", label: "Reports", icon: ICONS.reports },
-  { to: "/settings", label: "Settings", icon: ICONS.settings },
+  { to: "/opportunities", label: "Opportunities", icon: ICONS.opportunities, children: [{ to: "/opportunities-closed", label: "Closed Deals" }] },
+  { to: "/device-health", label: "Devices", icon: ICONS.devices },
+  { to: "/settings", label: "Settings", icon: ICONS.settings, children: [{ to: "/manage/excluded", label: "Excluded Numbers" }] },
 ];
 
 const TITLES = {
@@ -114,12 +124,12 @@ const TITLES = {
   "/manage/employees": "Employees",
   "/manage/excluded": "Excluded Numbers",
   "/leads": "Leads",
+  "/customers": "Customers",
   "/opportunities": "Opportunities",
   "/opportunities-closed": "Closed Deals",
   "/device-health": "Device Health",
   "/transcribe": "Transcripts",
-  "/integrations": "Integrations",
-  "/follow-ups": "Follow-ups",
+  "/follow-ups": "Follow-up Calendar",
   "/reports": "Reports",
   "/subscription": "Subscription",
   "/invoices": "Invoices",
@@ -153,11 +163,11 @@ function OrganizationShell() {
         <Route path="/manage/excluded" element={<ExcludedNumbers />} />
         <Route path="/call-logs" element={<CallLogs />} />
         <Route path="/leads" element={<Leads />} />
+        <Route path="/customers" element={<Customers />} />
         <Route path="/opportunities" element={<Opportunities />} />
         <Route path="/opportunities-closed" element={<OpportunitiesClosed />} />
         <Route path="/device-health" element={<DeviceHealth />} />
         <Route path="/transcribe" element={<Transcribe />} />
-        <Route path="/integrations" element={<Integrations />} />
         <Route path="/follow-ups" element={<FollowUps />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/subscription" element={<Subscription />} />
@@ -176,8 +186,11 @@ function EmployeeShell() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/call-logs" element={<CallLogs />} />
+        <Route path="/follow-ups" element={<FollowUps />} />
         <Route path="/leads" element={<Leads />} />
+        <Route path="/customers" element={<Customers />} />
         <Route path="/opportunities" element={<Opportunities />} />
+        <Route path="/opportunities-closed" element={<OpportunitiesClosed />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
@@ -196,11 +209,11 @@ function SuperAdminShell() {
         <Route path="/manage/employees" element={<Employees />} />
         <Route path="/manage/excluded" element={<ExcludedNumbers />} />
         <Route path="/leads" element={<Leads />} />
+        <Route path="/customers" element={<Customers />} />
         <Route path="/opportunities" element={<Opportunities />} />
         <Route path="/opportunities-closed" element={<OpportunitiesClosed />} />
         <Route path="/device-health" element={<DeviceHealth />} />
         <Route path="/transcribe" element={<Transcribe />} />
-        <Route path="/integrations" element={<Integrations />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/superadmin" replace />} />
@@ -240,7 +253,7 @@ export default function App() {
     );
   }
 
-  if (user?.role === "SUPER_ADMIN") return <SuperAdminShell />;
-  if (user?.role === "EMPLOYEE") return <EmployeeShell />;
+  if ((user?.role || "").toUpperCase() === "SUPER_ADMIN") return <SuperAdminShell />;
+  if ((user?.role || "").toUpperCase() === "EMPLOYEE") return <EmployeeShell />;
   return <OrganizationShell />;
 }

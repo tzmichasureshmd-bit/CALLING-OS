@@ -3,7 +3,7 @@ import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   api, saveSession, clearSession, getStoredUser,
-  getDeviceId, saveDeviceId, getRefreshToken, updateAccessToken, updateRefreshToken,
+  getDeviceId, saveDeviceId, getAccessToken, getRefreshToken, updateAccessToken, updateRefreshToken,
 } from "./api";
 import { getDeviceInfo, requestAllPermissions, checkPermissions, readSimInfo } from "./nativeModules";
 import { syncSimInventory } from "./simInventoryService";
@@ -175,6 +175,7 @@ async function ensureDevice(user) {
 // ── Provider ──────────────────────────────────────────────────────────────────
 export function AuthProvider({ children }) {
   const [user, setUser]       = useState(null);
+  const [sessionTokens, setSessionTokens] = useState({ callos_token: "", callos_refresh_token: "" });
   const [deviceId, setDeviceId] = useState(null);
   const [ready, setReady]     = useState(false);
 
@@ -184,6 +185,28 @@ export function AuthProvider({ children }) {
       await ensureInstallDate(); // save install date on every app open (first time only)
       if (u) {
         setUser(u);
+        setSessionTokens({ callos_token: await getAccessToken(), callos_refresh_token: await getRefreshToken() });
+
+        // Always re-fetch /me on startup to get the real current role
+        let activeUser = u;
+        try {
+          const token = await getAccessToken();
+          if (token) {
+            const me = await api.me();
+            activeUser = { ...u, ...me, name: me.name || me.email?.split("@")[0] || u.name };
+            await AsyncStorage.setItem("callos_user", JSON.stringify(activeUser));
+            setUser(activeUser);
+          }
+        } catch { /* offline — use cached role */ }
+
+        const activeRole = (activeUser.role || "").toUpperCase();
+
+        if (activeRole !== "EMPLOYEE") {
+          // Admin/SuperAdmin — no device, no sync, no permissions
+          setReady(true);
+          return;
+        }
+        // Employee — register device, sync, heartbeat
         let d = await getDeviceId();
         setDeviceId(d);
 
@@ -196,12 +219,11 @@ export function AuthProvider({ children }) {
             if (newTokens.refresh_token) {
               await updateRefreshToken(newTokens.refresh_token);
             }
+            setSessionTokens({ callos_token: newTokens.access_token, callos_refresh_token: newTokens.refresh_token || refresh });
           }
-        } catch { /* runtime request refresh will retry; login is required if it also fails */ }
+        } catch {}
 
-        // Re-upsert on every authenticated startup. This repairs a stale cached
-        // backend device ID while preserving the stable hardware identifier.
-        const ensuredDeviceId = await ensureDevice(u);
+        const ensuredDeviceId = await ensureDevice(activeUser);
         if (ensuredDeviceId) {
           d = ensuredDeviceId;
           setDeviceId(d);
@@ -223,15 +245,30 @@ export function AuthProvider({ children }) {
     })();
   }, []);
 
-  const _afterAuth = useCallback(async (tokenData) => {
+  const _afterAuth = useCallback(async (tokenData, expectedMode = null) => {
     await saveSession(tokenData, { id: tokenData.organization_id, email: "" });
     const me = await api.me();
     const userData = {
       ...me,
       name: me.name || me.email?.split("@")[0] || "Employee",
     };
+    const normalizedRole = (userData.role || "").toUpperCase();
+    const roleMatches = !expectedMode
+      || (expectedMode === "employee" && normalizedRole === "EMPLOYEE")
+      || (expectedMode === "company" && ["ADMIN", "SUPER_ADMIN"].includes(normalizedRole));
+    if (!roleMatches) {
+      await clearSession();
+      throw new Error(expectedMode === "company" ? "Company login requires an organization administrator account." : "Employee login requires an employee account.");
+    }
     await saveSession(tokenData, userData);
+    setSessionTokens({ callos_token: tokenData.access_token, callos_refresh_token: tokenData.refresh_token || "" });
     setUser(userData);
+
+    if (normalizedRole !== "EMPLOYEE") {
+      // Company and Super Admin sessions must never request phone permissions,
+      // register an employee device, or start employee call-log sync.
+      return userData;
+    }
 
     if (Platform.OS === "android") {
       await requestAllPermissions().catch(() => {});
@@ -268,9 +305,9 @@ export function AuthProvider({ children }) {
     return userData;
   }, []);
 
-  const login = useCallback(async (email, password) => {
+  const login = useCallback(async (email, password, expectedMode = null) => {
     const data = await api.login(email, password);
-    return _afterAuth(data);
+    return _afterAuth(data, expectedMode);
   }, [_afterAuth]);
 
   const register = useCallback(async (payload) => {
@@ -285,6 +322,7 @@ export function AuthProvider({ children }) {
     await api.logout().catch(() => {});
     await clearSession();
     setUser(null);
+    setSessionTokens({ callos_token: "", callos_refresh_token: "" });
     setDeviceId(null);
   }, []);
 
@@ -295,7 +333,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, setUser, deviceId, ready,
+      user, setUser, deviceId, ready, tokenSnapshot: sessionTokens,
       login, register, logout, syncCalls,
       isAuthed: !!user,
     }}>

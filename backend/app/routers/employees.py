@@ -5,6 +5,7 @@ from ..database import get_db
 from ..models import User, Employee, Device
 from ..schemas import EmployeeCreate, EmployeeUpdate, EmployeeOut, PaginatedEmployees
 from ..auth import get_current_user, require_role
+from ..billing_service import enforce_member_limit
 import math
 
 router = APIRouter(prefix="/employees", tags=["employees"])
@@ -21,7 +22,7 @@ def list_employees(
     q: str = Query(None),
     status: str = Query(None),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("ADMIN")),
 ):
     query = db.query(Employee).filter(Employee.organization_id == _org_scope(user))
     # Exclude the admin's own employee record — admins are auto-created as employees
@@ -49,9 +50,11 @@ def create_employee(
     db: Session = Depends(get_db),
     user: User = Depends(require_role("ADMIN")),
 ):
+    enforce_member_limit(db, user.organization_id)
     emp = Employee(
         organization_id=_org_scope(user),
-        **body.model_dump(),
+        employee_code=body.employee_code or f"EMP{db.query(Employee).filter(Employee.organization_id == user.organization_id).count() + 1:03d}",
+        **{key: value for key, value in body.model_dump().items() if key != "employee_code"},
     )
     db.add(emp)
     db.commit()
@@ -63,7 +66,7 @@ def create_employee(
 def get_employee(
     employee_id: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("ADMIN")),
 ):
     emp = db.query(Employee).filter(
         Employee.id == employee_id,

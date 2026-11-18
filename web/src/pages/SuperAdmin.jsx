@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Building2, Users, Phone, Smartphone, Microchip, Activity, ScrollText, HeartPulse, Package, Search } from "lucide-react";
+import { Building2, Users, Phone, Smartphone, Microchip, Activity, ScrollText, HeartPulse, Package, Search, CreditCard } from "lucide-react";
 import { PageContainer, Card } from "../components/ui.jsx";
 import { superApi } from "./superadmin/api.js";
 import OrgsTab         from "./superadmin/OrgsTab.jsx";
@@ -12,6 +12,7 @@ import AuditLogsTab    from "./superadmin/AuditLogsTab.jsx";
 import SystemHealthTab from "./superadmin/SystemHealthTab.jsx";
 import AppVersionsTab  from "./superadmin/AppVersionsTab.jsx";
 import GlobalSearchTab from "./superadmin/GlobalSearchTab.jsx";
+import BillingTab      from "./superadmin/BillingTab.jsx";
 
 const KPI_TABS = [
   { key: "orgs",      label: "Organizations", icon: Building2,  color: "var(--accent)",   stat: "total_organizations" },
@@ -31,6 +32,7 @@ const ALL_TABS = [
   { key: "system-health", label: "System Health", icon: HeartPulse },
   { key: "app-versions",  label: "App Versions",  icon: Package    },
   { key: "search",        label: "Global Search", icon: Search     },
+  { key: "billing",       label: "Billing",       icon: CreditCard },
 ];
 
 export default function SuperAdmin() {
@@ -95,6 +97,7 @@ export default function SuperAdmin() {
       {tab === "system-health" && <SystemHealthTab />}
       {tab === "app-versions"  && <AppVersionsTab />}
       {tab === "search"        && <GlobalSearchTab />}
+      {tab === "billing"       && <BillingTab />}
     </PageContainer>
   );
 }

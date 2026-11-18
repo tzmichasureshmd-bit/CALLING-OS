@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   FileSpreadsheet, PhoneIncoming, PhoneOutgoing, PhoneMissed, PhoneOff,
   Play, RotateCcw, FilterX, Phone, Sparkles, Target,
@@ -11,9 +11,8 @@ import {
   Drawer, Badge,
 } from "../components/ui.jsx";
 import { formatDuration, formatDateTime } from "../data/mockData.js";
-import { followUpsStore } from "../data/followUpsStore.js";
 import { dataSource } from "../api/dataSource.js";
-import { callsApi } from "../api/resources.js";
+import { callsApi, followUpsApi } from "../api/resources.js";
 import { useResource } from "../api/useResource.js";
 import { useDeviceSocket } from "../api/useDeviceSocket.js";
 import { useRange } from "../context/RangeContext.jsx";
@@ -97,11 +96,15 @@ const CALL_STATUSES = [
   { key: "not_interested", label: "Not Interested", color: "var(--danger)"   },
 ];
 
+const OTHER_STATUS_KEY = "__other__";
+const CALL_DERIVED_STATUSES = new Set(["connected", "missed", "rejected", "no_answer", "unknown"]);
+
 // Notes are persisted to the backend via PATCH /calls/{id}/note
 // No localStorage usage for call notes.
 
 export default function CallLogs() {
-  const [query, setQuery]   = useState("");
+  const location = useLocation();
+  const [query, setQuery]   = useState(() => new URLSearchParams(location.search).get("search") || "");
   const [filter, setFilter] = useState("All");
   const [selected, setSelected] = useState(null);
   const { range } = useRange();
@@ -306,25 +309,31 @@ function ScheduleModal({ call, onClose }) {
   const [time, setTime]   = useState("");
   const [note, setNote]   = useState("");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const navigate = useNavigate();
 
-  function handleSave() {
+  async function handleSave() {
     if (!date || !time) return;
-    followUpsStore.add({
-      contact:  call.contact,
-      phone:    call.phone,
-      employee: call.employee,
-      callType: call.type,
-      callId:   call.id,
-      date, time, note,
-    });
-    setSaved(true);
+    setSaving(true); setError("");
+    try {
+      await followUpsApi.create({
+        title: `Follow up with ${call.contact || call.phone}`,
+        description: note || null,
+        follow_up_type: "call",
+        due_at: new Date(`${date}T${time}`).toISOString(),
+        call_id: call.id,
+      });
+      setSaved(true);
+    } catch (e) {
+      setError(e?.message || "Unable to schedule follow-up");
+    } finally { setSaving(false); }
   }
 
   return (
     <div className="app-dialog-overlay" style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div className="app-dialog-backdrop" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(3,6,12,0.6)", backdropFilter: "blur(2px)" }} />
-      <div className="app-dialog-panel" style={{ position: "relative", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 16, padding: 24, width: 360, boxShadow: "var(--shadow-lg)" }}>
+      <div className="app-dialog-panel" style={{ position: "relative", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 22, padding: 26, width: "min(520px, 94vw)", boxShadow: "0 28px 80px rgba(0,0,0,.28)" }}>
 
         {saved ? (
           /* ── Success state ── */
@@ -339,8 +348,8 @@ function ScheduleModal({ call, onClose }) {
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, width: "100%" }}>
-              <Button style={{ flex: 1, justifyContent: "center" }} onClick={() => { onClose(); navigate("/follow-ups"); }}>
-                View Follow-ups
+              <Button icon={Calendar} style={{ flex: 1, justifyContent: "center" }} onClick={() => { onClose(); navigate("/follow-ups"); }}>
+                View Calendar
               </Button>
               <Button variant="outline" style={{ flex: 1, justifyContent: "center" }} onClick={onClose}>
                 Close
@@ -351,15 +360,13 @@ function ScheduleModal({ call, onClose }) {
           /* ── Form state ── */
           <>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
-              <span style={{ fontFamily: "Space Grotesk", fontWeight: 700, fontSize: 15, color: "var(--text-primary)" }}>Schedule Follow-up</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 11 }}><div style={{ width: 38, height: 38, borderRadius: 12, display: "grid", placeItems: "center", background: "var(--pastel-green)", color: "var(--accent)" }}><Calendar size={19} /></div><div><div style={{ fontFamily: "Space Grotesk", fontWeight: 750, fontSize: 17, color: "var(--text-primary)" }}>Schedule Follow-up</div><div style={{ marginTop: 3, color: "var(--text-muted)", fontSize: 11 }}>Add the next action to the Follow-up Calendar</div></div></div>
               <button onClick={onClose} style={{ border: "none", background: "var(--bg-hover)", color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <X size={14} />
               </button>
             </div>
-            <div style={{ fontSize: 12.5, color: "var(--text-muted)", marginBottom: 16 }}>
-              {call.contact} · {call.phone}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18, padding: "10px 12px", borderRadius: 12, background: "var(--surface-muted)", color: "var(--text-secondary)", fontSize: 12.5 }}><div style={{ width: 30, height: 30, borderRadius: 10, display: "grid", placeItems: "center", background: "var(--accent-soft)", color: "var(--accent)", fontWeight: 800 }}>{(call.contact || "?").slice(0, 1).toUpperCase()}</div><div><strong style={{ display: "block", color: "var(--text-primary)", fontSize: 13 }}>{call.contact || "Unknown contact"}</strong><span>{call.phone}</span></div></div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <label style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>
                 Date
                 <input type="date" value={date} onChange={e => setDate(e.target.value)}
@@ -370,15 +377,16 @@ function ScheduleModal({ call, onClose }) {
                 <input type="time" value={time} onChange={e => setTime(e.target.value)}
                   style={{ display: "block", marginTop: 4, width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
               </label>
-              <label style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>
+              <label style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>
                 Note (optional)
                 <textarea value={note} onChange={e => setNote(e.target.value)} rows={3} placeholder="Reminder note…"
                   style={{ display: "block", marginTop: 4, width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
               </label>
             </div>
+            {error && <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: "var(--danger-soft)", color: "var(--danger)", fontSize: 12 }}>{error}</div>}
             <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handleSave} disabled={!date || !time}>Save</Button>
+              <Button onClick={handleSave} disabled={!date || !time || saving}>{saving ? "Saving…" : "Save"}</Button>
             </div>
           </>
         )}
@@ -389,6 +397,7 @@ function ScheduleModal({ call, onClose }) {
 
 function ProgressPanel({ call, onSaved, reload }) {
   const [status, setStatus] = useState(call?.callStatus || null);
+  const [customStatus, setCustomStatus] = useState("");
   const [notes,  setNotes]  = useState(call?.notes || "");
   const [saved,  setSaved]  = useState(false);
   const [saving, setSaving] = useState(false);
@@ -399,19 +408,25 @@ function ProgressPanel({ call, onSaved, reload }) {
   useEffect(() => {
     if (!call) return;
     setSaved(false); setError(null);
-    setStatus(call.callStatus || null);
+    const knownStatus = CALL_STATUSES.some((item) => item.key === call.callStatus);
+    const customStoredStatus = call.callStatus && !knownStatus && !CALL_DERIVED_STATUSES.has(call.callStatus) ? call.callStatus : "";
+    setStatus(knownStatus ? call.callStatus : customStoredStatus ? OTHER_STATUS_KEY : null);
+    setCustomStatus(customStoredStatus);
     setNotes(call.notes || "");
   }, [call?.id]);
 
   async function handleSave() {
     if (inFlight.current) return;
     if (!call?.id) return;
+    const statusValue = status === OTHER_STATUS_KEY ? customStatus.trim() : status;
+    if (status === OTHER_STATUS_KEY && !statusValue) { setError("Type a custom status before saving."); return; }
+    if (statusValue && statusValue.length > 20) { setError("Custom status must be 20 characters or fewer."); return; }
     if (notes.length > 2000) { setError("Notes must be 2000 characters or fewer."); return; }
     inFlight.current = true;
     setSaving(true); setSaved(false); setError(null);
-    console.log(`[PROGRESS_SAVE_STARTED] callId=${call.id} status=${status} ts=${Date.now()}`);
+    console.log(`[PROGRESS_SAVE_STARTED] callId=${call.id} status=${statusValue} ts=${Date.now()}`);
     try {
-      const res = await callsApi.updateNote(call.id, status, notes);
+      const res = await callsApi.updateNote(call.id, statusValue, notes);
       console.log(`[PROGRESS_SAVE_SUCCESS] callId=${call.id} updated_at=${res?.call?.updated_at} ts=${Date.now()}`);
       setSaved(true);
       onSaved?.(res?.call);
@@ -447,7 +462,9 @@ function ProgressPanel({ call, onSaved, reload }) {
     }
   }
 
-  const selected = CALL_STATUSES.find(s => s.key === status);
+  const selected = status === OTHER_STATUS_KEY
+    ? { label: "Other (custom)", color: "var(--warning)" }
+    : CALL_STATUSES.find(s => s.key === status);
 
   return (
     <div style={{ background: "var(--bg-hover)", border: "1px solid var(--border)", borderRadius: 12, padding: 14, marginBottom: 18 }}>
@@ -471,6 +488,7 @@ function ProgressPanel({ call, onSaved, reload }) {
             <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
               background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 10,
               boxShadow: "var(--shadow-lg)", overflow: "hidden" }}>
+              <button key="clear" onClick={() => { setStatus(null); setCustomStatus(""); setOpen(false); setSaved(false); }} style={{ width: "100%", padding: "10px 14px", border: "none", borderBottom: "1px solid var(--border)", cursor: "pointer", textAlign: "left", background: !status ? "var(--accent-soft)" : "transparent", color: "var(--text-muted)", fontSize: 13, fontWeight: !status ? 700 : 500 }}>Clear status</button>
               {CALL_STATUSES.map(s => (
                 <button key={s.key} onClick={() => { setStatus(s.key === status ? null : s.key); setOpen(false); setSaved(false); }}
                   style={{ width: "100%", display: "flex", alignItems: "center", gap: 10,
@@ -485,9 +503,15 @@ function ProgressPanel({ call, onSaved, reload }) {
                   {status === s.key && <span style={{ marginLeft: "auto", fontSize: 12 }}>✓</span>}
                 </button>
               ))}
+              <button key="other" onClick={() => { setStatus(OTHER_STATUS_KEY); setCustomStatus(status === OTHER_STATUS_KEY ? customStatus : ""); setOpen(false); setSaved(false); }}
+                style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", border: "none", cursor: "pointer", textAlign: "left", background: status === OTHER_STATUS_KEY ? "var(--warning-soft)" : "transparent", color: status === OTHER_STATUS_KEY ? "var(--warning)" : "var(--text-secondary)", fontSize: 13, fontWeight: status === OTHER_STATUS_KEY ? 700 : 500 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--warning)", flexShrink: 0 }} />Other (custom)
+                {status === OTHER_STATUS_KEY && <span style={{ marginLeft: "auto", fontSize: 12 }}>✓</span>}
+              </button>
             </div>
           )}
         </div>
+        {status === OTHER_STATUS_KEY && <input value={customStatus} maxLength={20} onChange={(event) => { setCustomStatus(event.target.value); setSaved(false); }} placeholder="Type a custom status…" style={{ width: "100%", boxSizing: "border-box", marginTop: 8, padding: "9px 11px", borderRadius: 9, border: "1px solid var(--warning)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13, outline: "none" }} />}
       </div>
 
       {/* Notes */}

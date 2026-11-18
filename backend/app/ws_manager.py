@@ -23,7 +23,7 @@ class ConnectionManager:
         dead = set()
         for ws in list(self._conns.get(org_id, [])):
             try:
-                await ws.send_text(json.dumps(payload))
+                await asyncio.wait_for(ws.send_text(json.dumps(payload)), timeout=1.0)
             except Exception:
                 dead.add(ws)
         for ws in dead:

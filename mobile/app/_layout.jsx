@@ -7,6 +7,7 @@ import { ThemeProvider, useTheme, useThemedColors } from "../src/theme";
 import { AuthProvider, useAuth } from "../src/AuthContext";
 import { RoleProvider, useRole } from "../src/RoleContext";
 import { setupNotificationChannels } from "../src/notificationManager";
+import PostCallCoordinator from "../src/PostCallCoordinator";
 
 // ── Notification tap handler ──────────────────────────────────────────────────
 function NotificationHandler() {
@@ -26,9 +27,9 @@ function NotificationHandler() {
           },
         });
       } else if (screen === "sync_health") {
-        router.push("/(tabs)/settings");
+        router.push("/(employee)/settings");
       } else {
-        router.push("/(tabs)/logs");
+        router.push("/(employee)/logs");
       }
     });
     return () => sub.remove();
@@ -39,42 +40,56 @@ function NotificationHandler() {
 
 // ── Auth gate ─────────────────────────────────────────────────────────────────
 function AuthGate() {
-  const { isAuthed, ready } = useAuth();
+  const { isAuthed, ready, user } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
   useEffect(() => {
     if (!ready) return;
-    const inAuth = segments[0] === "login" || segments[0] === "login-selector" || segments[0] === "intro";
+    const inAuth     = segments[0] === "login" || segments[0] === "login-selector" || segments[0] === "intro";
     const inOnboarding = segments[0] === "onboarding";
+    const inAdmin    = segments[0] === "(admin)";
+    const inEmployee = segments[0] === "(employee)";
+    const role    = (user?.role || "").toUpperCase();
+    const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN" || role === "SUPERADMIN";
+    const isEmployee = role === "EMPLOYEE";
+
     if (!isAuthed && !inAuth && !inOnboarding) {
       router.replace("/intro");
     } else if (isAuthed && inAuth) {
-      router.replace("/(tabs)");
+      // Fresh login redirect
+      if (isAdmin) router.replace("/(admin)/dashboard");
+      else router.replace("/(employee)");
+    } else if (isAuthed && !inOnboarding) {
+      // Already inside app — enforce correct group
+      if (isAdmin && inEmployee) router.replace("/(admin)/dashboard");
+      if (isEmployee && inAdmin) router.replace("/(employee)");
     }
-  }, [isAuthed, ready, segments]);
+  }, [isAuthed, ready, segments, user]);
 
   return null;
 }
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 function Shell() {
-  // Native CallMonitorService owns call detection and recording. JavaScript
-  // only configures notification channels and handles post-call synchronization.
+  const { isDark } = useTheme();
   useEffect(() => {
     setupNotificationChannels();
   }, []);
   
   return (
     <>
-      <StatusBar style="light" />
+      <StatusBar style={isDark ? "light" : "dark"} />
       <AuthGate />
       <NotificationHandler />
+      <PostCallCoordinator />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#FFFFFF" } }}>
         <Stack.Screen name="intro" options={{ animationEnabled: false }} />
         <Stack.Screen name="login-selector" options={{ animationEnabled: true }} />
         <Stack.Screen name="login" />
-        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="(admin)" options={{ headerShown: false }} />
+        <Stack.Screen name="(employee)" options={{ headerShown: false }} />
+        <Stack.Screen name="company-web" options={{ headerShown: false }} />
         <Stack.Screen name="onboarding" options={{ presentation: "modal" }} />
         <Stack.Screen name="call-detail" options={{ presentation: "card" }} />
       </Stack>

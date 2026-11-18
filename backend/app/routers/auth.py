@@ -7,6 +7,7 @@ from ..schemas import LoginRequest, TokenResponse, RefreshRequest, MeResponse
 from ..schemas.auth import RegisterRequest, EmployeeRegisterRequest
 from ..auth import create_access_token, create_refresh_token, decode_token, verify_password, get_current_user
 from ..auth.password import hash_password
+from ..billing_service import enforce_member_limit
 from .. import audit
 from pydantic import BaseModel
 from typing import Optional
@@ -267,6 +268,8 @@ def register_employee(body: EmployeeRegisterRequest, db: Session = Depends(get_d
     if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists")
 
+    # A new employee consumes one active organization seat.
+    enforce_member_limit(db, org.id)
     # Generate employee code
     emp_count = db.query(Employee).filter(Employee.organization_id == org.id).count()
     emp_code = f"EMP{str(emp_count + 1).zfill(3)}"
@@ -306,6 +309,11 @@ class UpdateMeRequest(BaseModel):
     email: Optional[str] = None
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 @router.patch("/me")
 def update_me(
     body: UpdateMeRequest,
@@ -336,6 +344,24 @@ def update_me(
         organization_name=org.name if org else "",
         organization_code=org.code if org else "",
     )
+
+
+@router.post("/change-password")
+def change_password(
+    body: PasswordChangeRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Change the current user's password after verifying the existing password."""
+    if not user.password_hash or not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=422, detail="New password must be at least 8 characters")
+    if body.current_password == body.new_password:
+        raise HTTPException(status_code=400, detail="New password must be different from the current password")
+    user.password_hash = hash_password(body.new_password)
+    db.commit()
+    return {"message": "Password changed successfully"}
 
 
 @router.post("/verify-company-code")

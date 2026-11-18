@@ -31,3 +31,4 @@ class Organization(Base):
     opportunities    = relationship("Opportunity",    back_populates="organization", lazy="dynamic")
     excluded_numbers = relationship("ExcludedNumber", back_populates="organization", lazy="dynamic")
     invoices         = relationship("Invoice",        back_populates="organization", lazy="dynamic")
+    subscriptions    = relationship("OrganizationSubscription", back_populates="organization", lazy="dynamic")

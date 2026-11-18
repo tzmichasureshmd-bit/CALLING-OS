@@ -41,6 +41,8 @@ function DashboardSkeleton() {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { range } = useRange();
+  const { user } = useAuth();
+  const isEmployee = (user?.role || "").toUpperCase() === "EMPLOYEE";
   const { loading, error, data, reload } = useResource(() => dataSource.getDashboard(range), [range]);
   const [livePulse, setLivePulse] = useState(null);
   const pollRef = useRef(null);
@@ -69,7 +71,7 @@ export default function Dashboard() {
       {/* KPI ROW */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 16, marginBottom: 18 }}>
         <div onClick={() => navigate("/call-logs")} style={{ cursor: "pointer" }}>
-          <KpiCard icon={Phone} label="Total Calls" value={kpis.totalCalls} sub="all employees" tone="teal" numeric />
+          <KpiCard icon={Phone} label="Total Calls" value={kpis.totalCalls} sub={isEmployee ? "my calls" : "all employees"} tone="teal" numeric />
         </div>
         <div onClick={() => navigate("/call-logs")} style={{ cursor: "pointer" }}>
           <KpiCard icon={Users2} label="Connected" value={`${kpis.connectedPct}%`} sub={`${kpis.connected} connected`} tone="violet" />
@@ -84,14 +86,14 @@ export default function Dashboard() {
 
       {/* NEEDS ATTENTION — prominent */}
       <Card style={{ marginBottom: 18, borderColor: "var(--border-strong)" }}>
-        <CardHeader icon={AlertTriangle} title="Needs Attention" subtitle="What requires action right now" action={<Badge tone="danger" dot>{needsAttention.length} items</Badge>} />
+        <CardHeader icon={AlertTriangle} title={isEmployee ? "My Attention" : "Needs Attention"} subtitle={isEmployee ? "Your follow-up items" : "What requires action right now"} action={<Badge tone="danger" dot>{needsAttention.length} items</Badge>} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 12 }}>
           {needsAttention.map((n) => {
             const s = SEV[n.severity] || SEV.medium;
             return (
               <button key={n.id} onClick={() => navigate(n.to)} style={{
                 textAlign: "left", cursor: "pointer", border: "1px solid var(--border)",
-                background: "var(--bg-hover)", borderRadius: 12, padding: "12px 14px",
+                background: "var(--pastel-pink)", borderRadius: 12, padding: "12px 14px",
                 display: "flex", alignItems: "center", gap: 12, borderLeft: `3px solid ${s.color}`,
               }}>
                 <div style={{ width: 34, height: 34, borderRadius: 9, background: `var(--${s.tone}-soft)`, color: s.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -196,7 +198,7 @@ export default function Dashboard() {
           <CardHeader icon={Flame} title="Hot Leads" subtitle="High-value, multiple connects" action={<button onClick={() => navigate("/leads")} style={linkBtn}>View all <ArrowRight size={13} /></button>} />
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {hotLeads.map((o, i) => (
-              <div key={o.id} onClick={() => navigate("/leads")} style={{ display: "flex", alignItems: "center", gap: 12, background: "var(--bg-hover)", borderRadius: 12, padding: "10px 12px", cursor: "pointer" }}>
+              <div key={o.id} onClick={() => navigate("/leads")} style={{ display: "flex", alignItems: "center", gap: 12, background: "var(--pastel-yellow)", borderRadius: 12, padding: "10px 12px", cursor: "pointer" }}>
                 <div style={{ width: 26, height: 26, borderRadius: 8, background: "var(--grad-brand)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, fontFamily: "Space Grotesk", flexShrink: 0 }}>{i + 1}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</div>
@@ -231,13 +233,13 @@ export default function Dashboard() {
         </Card>
 
         <Card padding={0}>
-          <div style={{ padding: "20px 20px 8px" }}><CardHeader icon={Trophy} title="Team Leaderboard" /></div>
+          <div style={{ padding: "20px 20px 8px" }}><CardHeader icon={Trophy} title={isEmployee ? "My Performance" : "Team Leaderboard"} /></div>
           <div className="nova-scroll-x">
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead><tr>{["#", "Agent", "Calls", "Connected", "Missed"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
               <tbody>
                 {leaderboard.map((e) => (
-                  <tr key={e.id} onClick={() => navigate("/manage/employees")} style={{ borderBottom: "1px solid var(--border)", cursor: "pointer" }}
+                  <tr key={e.id} onClick={() => { if (!isEmployee) navigate("/manage/employees"); }} style={{ borderBottom: "1px solid var(--border)", cursor: isEmployee ? "default" : "pointer" }}
                       onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-hover)")}
                       onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}>
                     <td style={{ padding: "12px 16px" }}><div style={{ width: 22, height: 22, borderRadius: 7, background: e.rank === 1 ? "var(--grad-brand)" : "var(--bg-hover)", color: e.rank === 1 ? "#fff" : "var(--text-muted)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 }}>{e.rank}</div></td>
@@ -253,7 +255,7 @@ export default function Dashboard() {
         </Card>
 
         <Card>
-          <CardHeader icon={Smartphone} title="Device Health" action={<button onClick={() => navigate("/device-health")} style={linkBtn}>Details <ArrowRight size={13} /></button>} />
+          <CardHeader icon={Smartphone} title="Device Health" action={!isEmployee && <button onClick={() => navigate("/device-health")} style={linkBtn}>Details <ArrowRight size={13} /></button>} />
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {deviceHealth.map((d) => {
               const st = d.status === "healthy" ? { tone: "success", label: "Healthy" } : d.status === "warning" ? { tone: "warning", label: "Warning" } : { tone: "danger", label: "Offline" };

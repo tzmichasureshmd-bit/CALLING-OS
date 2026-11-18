@@ -37,7 +37,7 @@ export default function Onboarding() {
   const goNext = (data) => {
     if (data?.companyCode) setCompanyCode(data.companyCode);
     if (data?.sim) setSimData(data.sim);
-    if (step === total - 1) { router.replace("/(tabs)"); return; }
+    if (step === total - 1) { router.replace("/(employee)"); return; }
     setStep((s) => s + 1);
   };
 

@@ -27,6 +27,7 @@
   flex: 0 0 76px;
   flex-direction: column;
   align-items: center;
+  justify-content: space-between;
   gap: 18px;
   padding: 18px 12px 14px;
   border-right: 1px solid var(--border-primary-app);
@@ -657,4 +658,419 @@
 [data-theme="dark"] .premium-shell__mobile-nav a:hover,
 [data-theme="dark"] .premium-shell__mobile-nav button:hover {
   background: rgba(139, 230, 176, 0.1);
+}
+
+/* Reference rail: fixed narrow icon-only sidebar. Labels remain available through title tooltips. */
+@media (min-width: 901px) {
+  .premium-shell__sidebar,
+  .premium-shell__sidebar:hover {
+    width: 64px;
+    flex-basis: 64px;
+    align-items: center;
+    padding: 18px 9px 14px;
+    box-shadow: none;
+    transition: none;
+  }
+
+  .premium-shell__sidebar .premium-shell__brand,
+  .premium-shell__sidebar:hover .premium-shell__brand {
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+  }
+
+  .premium-shell__sidebar .premium-shell__brand-name,
+  .premium-shell__sidebar:hover .premium-shell__brand-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .premium-shell__sidebar .premium-shell__nav,
+  .premium-shell__sidebar:hover .premium-shell__nav {
+    align-items: center;
+    overflow-y: auto;
+  }
+
+  .premium-shell__sidebar .premium-shell__nav-item,
+  .premium-shell__sidebar:hover .premium-shell__nav-item {
+    width: 38px;
+    height: 38px;
+    flex-basis: 38px;
+    justify-content: center;
+    gap: 0;
+    padding: 0;
+    border-radius: 10px;
+  }
+
+  .premium-shell__sidebar .premium-shell__nav-item span,
+  .premium-shell__sidebar:hover .premium-shell__nav-item span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .premium-shell__sidebar .premium-shell__sidebar-footer,
+  .premium-shell__sidebar:hover .premium-shell__sidebar-footer {
+    align-items: center;
+  }
+
+  .premium-shell__sidebar .premium-shell__icon-button,
+  .premium-shell__sidebar:hover .premium-shell__icon-button {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+  }
+}
+
+/* Keep the reference rail fixed to the viewport instead of stretching with page content. */
+@media (min-width: 901px) {
+  .premium-shell__sidebar {
+    position: sticky;
+    top: 16px;
+    align-self: flex-start;
+    height: calc(100vh - 32px);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .premium-shell__topbar {
+    justify-content: flex-start;
+  }
+
+  .premium-shell__topbar-brand {
+    display: grid;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
+    place-items: center;
+    color: var(--text-primary-app);
+    text-decoration: none;
+  }
+
+  .premium-shell__topbar-brand .premium-shell__brand-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    font-size: 17px;
+  }
+
+  .premium-shell__topbar-left {
+    flex: 0 0 auto;
+  }
+
+  .premium-shell__topbar-center {
+    margin-left: 12px;
+  }
+
+  .premium-shell__topbar-right {
+    margin-left: auto;
+  }
+}
+
+/* Reference composition: full-width header above the body rail and page surface. */
+.premium-shell__body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+@media (min-width: 901px) {
+  .premium-shell__sidebar,
+  .premium-shell__sidebar:hover {
+    position: relative;
+    top: auto;
+    align-self: stretch;
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+    border-right: 0;
+    background: transparent;
+    justify-content: space-between;
+  }
+
+  .premium-shell__nav,
+  .premium-shell__sidebar:hover .premium-shell__nav {
+    margin-top: 0;
+    margin-bottom: 0;
+    flex: 1;
+  }
+}
+
+/* Final reference proportions for the header and body rail. */
+@media (min-width: 901px) {
+  .premium-shell__topbar {
+    min-height: 52px;
+    height: 52px;
+    padding: 7px 18px;
+    gap: 12px;
+  }
+
+  .premium-shell__topbar-brand {
+    width: 32px;
+    height: 32px;
+    flex-basis: 32px;
+  }
+
+  .premium-shell__topbar-brand .premium-shell__brand-mark {
+    width: 29px;
+    height: 29px;
+    border-radius: 8px;
+    font-size: 15px;
+  }
+
+  .premium-shell__page-switcher-button,
+  .premium-shell__compact-button {
+    min-height: 32px;
+    height: 32px;
+  }
+
+  .premium-shell__search {
+    min-height: 32px;
+    padding: 6px 10px;
+  }
+
+  .premium-shell__account {
+    gap: 7px;
+  }
+
+  .premium-shell__avatar {
+    width: 30px;
+    height: 30px;
+    flex-basis: 30px;
+    border-radius: 9px;
+  }
+
+  .premium-shell__sidebar,
+  .premium-shell__sidebar:hover {
+    width: 58px;
+    flex-basis: 58px;
+    padding: 14px 8px 12px;
+  }
+
+  .premium-shell__sidebar .premium-shell__nav-item,
+  .premium-shell__sidebar:hover .premium-shell__nav-item,
+  .premium-shell__sidebar .premium-shell__icon-button,
+  .premium-shell__sidebar:hover .premium-shell__icon-button {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+    border-radius: 9px;
+  }
+}
+
+.premium-shell__topbar-brand img {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+/* Desktop header owns profile actions; the full menu stays in the left rail. */
+@media (min-width: 901px) {
+  .premium-shell__mobile-nav {
+    display: none !important;
+  }
+}
+
+.premium-shell__account-wrap {
+  position: relative;
+}
+
+.premium-shell__account-button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.premium-shell__account-button > svg {
+  color: var(--text-muted-app);
+}
+
+.premium-shell__profile-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 80;
+  display: flex;
+  width: 260px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border-primary-app);
+  border-radius: var(--radius-lg-app);
+  background: var(--surface-primary);
+  box-shadow: var(--shadow-floating);
+}
+
+.premium-shell__profile-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-soft-app);
+}
+
+.premium-shell__profile-heading div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.premium-shell__profile-heading strong,
+.premium-shell__profile-heading small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.premium-shell__profile-heading strong {
+  color: var(--text-primary-app);
+  font-size: 12px;
+}
+
+.premium-shell__profile-heading small {
+  max-width: 180px;
+  color: var(--text-muted-app);
+  font-size: 10px;
+}
+
+.premium-shell__avatar--large {
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+}
+
+.premium-shell__profile-role {
+  padding: 5px 8px;
+  border-radius: var(--radius-sm-app);
+  background: var(--primary-soft-app);
+  color: var(--success-app);
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.premium-shell__profile-popover a,
+.premium-shell__profile-popover button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 8px;
+  border: 0;
+  border-radius: var(--radius-sm-app);
+  background: transparent;
+  color: var(--text-secondary-app);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.premium-shell__profile-popover a:hover,
+.premium-shell__profile-popover button:hover {
+  background: var(--surface-muted);
+  color: var(--text-primary-app);
+}
+
+/* Main module rail with nested page flyouts. */
+.premium-shell__nav-group {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.premium-shell__submenu {
+  position: absolute;
+  top: 0;
+  left: 48px;
+  z-index: 90;
+  display: none;
+  width: 190px;
+  padding: 8px;
+  border: 1px solid var(--border-primary-app);
+  border-radius: var(--radius-lg-app);
+  background: var(--surface-primary);
+  box-shadow: var(--shadow-floating);
+}
+
+.premium-shell__nav-group:hover .premium-shell__submenu,
+.premium-shell__nav-group:focus-within .premium-shell__submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.premium-shell__submenu strong {
+  padding: 6px 8px 7px;
+  border-bottom: 1px solid var(--border-soft-app);
+  color: var(--text-muted-app);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.premium-shell__submenu a {
+  display: block;
+  padding: 8px;
+  border-radius: var(--radius-sm-app);
+  color: var(--text-secondary-app);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.premium-shell__submenu a:hover,
+.premium-shell__submenu a.is-active {
+  background: var(--primary-soft-app);
+  color: var(--text-primary-app);
+}
+
+[data-theme="dark"] .premium-shell__submenu {
+  background: var(--surface-primary);
+}
+
+.premium-shell__mobile-subnav {
+  padding-left: 34px !important;
+  color: var(--text-muted-app) !important;
+  font-size: 11px !important;
+}
+
+/* Keep the curved application frame fixed; only the page body scrolls inside it. */
+@media (min-width: 901px) {
+  .premium-shell__container {
+    height: calc(100vh - 32px);
+    max-height: calc(100vh - 32px);
+  }
+
+  .premium-shell__workspace,
+  .premium-shell__body {
+    min-height: 0;
+  }
+
+  .premium-shell__body {
+    overflow: hidden;
+  }
+
+  .premium-shell__page {
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+}
+
+@media (max-width: 900px) {
+  .premium-shell__container {
+    height: 100vh;
+    max-height: none;
+  }
 }

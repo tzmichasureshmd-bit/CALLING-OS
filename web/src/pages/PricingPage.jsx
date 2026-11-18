@@ -4,66 +4,33 @@ import { motion } from "framer-motion";
 import { PageHeader, Footer } from "./LandingPage.jsx";
 import { ArrowUpRight, Check, ChevronDown } from "lucide-react";
 
-const PRICING_TABLE = [
-  { users: "5 Members", validity: "1 Year", regular: "₹17,500", offer: "60% off", diwali: "₹6,999 + GST*" },
-  { users: "10 Members", validity: "1 Year", regular: "₹25,000", offer: "60% off", diwali: "₹9,999 + GST" },
-  { users: "15 Members", validity: "1 Year", regular: "₹42,500", offer: "60% off", diwali: "₹16,999 + GST" },
-  { users: "20 Members", validity: "1 Year", regular: "₹50,000", offer: "Special offer", diwali: "₹19,999 + GST" },
+const SALES_PHONE = "+918341551387";
+const SALES_PHONE_DISPLAY = "+91 83415 51387";
+const SALES_EMAIL = "suresh.md@tzmicha.com";
+
+const DURATIONS = [
+  { key: "1_month", label: "1 Month" },
+  { key: "6_months", label: "6 Months" },
+  { key: "1_year", label: "1 Year" },
 ];
 
-const PLANS = [
-  {
-    kicker: "STARTER",
-    name: "5-10 Members",
-    desc: "Perfect for small sales teams getting started.",
-    price: "₹6,999 - ₹9,999",
-    period: "per year + GST",
-    features: [
-      "Desktop + Mobile App",
-      "Call log sync & recordings",
-      "AI call summaries",
-      "Basic analytics dashboard",
-      "1 Year validity",
-      "60% Diwali discount",
-    ],
-    cta: "Get Started",
-    dark: false,
-  },
-  {
-    kicker: "GROWTH",
-    name: "15-20 Members",
-    desc: "For growing teams that need full analytics.",
-    price: "₹16,999 - ₹19,999",
-    period: "per year + GST",
-    features: [
-      "Everything in Starter",
-      "Full analytics suite",
-      "Opportunities pipeline",
-      "Call transcripts",
-      "Priority support",
-      "Special Diwali pricing",
-    ],
-    cta: "Contact Sales",
-    dark: true,
-  },
-  {
-    kicker: "ENTERPRISE",
-    name: "50+ Members",
-    desc: "Custom solutions for large organizations.",
-    price: "Custom Pricing",
-    period: "talk to us",
-    features: [
-      "Everything in Growth",
-      "Custom integrations",
-      "Dedicated account manager",
-      "SLA guarantee",
-      "On-premise deployment",
-      "White-label options",
-    ],
-    cta: "Talk to Us",
-    dark: false,
-  },
+const PRICING_TABLE = [
+  { users: "5 Members", prices: { "1_month": [2458, 1499], "6_months": [9750, 5999], "1_year": [17500, 6999] } },
+  { users: "10 Members", prices: { "1_month": [3083, 1849], "6_months": [13500, 8099], "1_year": [25000, 9999] } },
+  { users: "15 Members", prices: { "1_month": [4542, 2799], "6_months": [22250, 13349], "1_year": [42500, 16999] } },
+  { users: "20 Members", prices: { "1_month": [5167, 3099], "6_months": [26000, 15599], "1_year": [50000, 19999] } },
 ];
+
+const PLANS = [5, 10, 15, 20].map((members, index) => ({
+  kicker: ["STARTER", "GROWTH", "PROFESSIONAL", "BUSINESS"][index],
+  name: `${members} Members`,
+  members,
+  desc: `CallNexa Desktop + Mobile App for up to ${members} active members.`,
+  features: ["Desktop + Mobile App", "Call log sync and management", "Sales call monitoring", "Organization analytics", `${members} included member seats`],
+  cta: "Select Plan",
+  dark: index === 1,
+}));
+
 
 const FAQS = [
   { q: "How does CallNexa capture call data?", a: "The CallNexa mobile app reads the device call log and syncs data to the dashboard. Employees install the app, enter the company code, and grant the required permissions." },
@@ -74,7 +41,10 @@ const FAQS = [
   { q: "How long is the Diwali offer valid?", a: "The Diwali special pricing (60% off) is valid for a limited time. Contact us to lock in your discount before the offer expires." },
 ];
 
-function PlanCard({ plan, i }) {
+function PlanCard({ plan, i, duration, onContact }) {
+  const source = PRICING_TABLE.find((row) => row.users === `${plan.members} Members`);
+  const [regular, selling] = source.prices[duration];
+  const savings = regular - selling;
   return (
     <motion.div
       className={plan.dark ? "co-plan-card-dark" : "co-plan-card-light"}
@@ -87,20 +57,26 @@ function PlanCard({ plan, i }) {
       <div className="co-plan-kicker">{plan.kicker}</div>
       <h3 className="co-plan-name">{plan.name}</h3>
       <p className="co-plan-desc">{plan.desc}</p>
-      <div className="co-plan-price">{plan.price}</div>
-      <div className="co-plan-period">{plan.period}</div>
+      <div className="co-plan-price"><span style={{ textDecoration: "line-through", opacity: 0.55, fontSize: 16 }}>₹{regular.toLocaleString("en-IN")}</span> ₹{selling.toLocaleString("en-IN")}</div>
+      <div className="co-plan-period">{DURATIONS.find((item) => item.key === duration).label} · Save ₹{savings.toLocaleString("en-IN")}</div>
       <ul className="co-plan-features">
         {plan.features.map((f) => (
           <li key={f}><Check size={14} /><span>{f}</span></li>
         ))}
       </ul>
-      <Link to="/login" className={plan.dark ? "co-button-light co-plan-btn" : "co-button-dark co-plan-btn"}>
+      <button onClick={() => onContact(plan)} className={plan.dark ? "co-button-light co-plan-btn" : "co-button-dark co-plan-btn"}>
         {plan.cta} <ArrowUpRight size={15} />
-      </Link>
+      </button>
     </motion.div>
   );
 }
 
+function ContactPlanModal({ plan, duration, onClose }) {
+  const source = PRICING_TABLE.find((row) => row.users === `${plan.members} Members`);
+  const [, selling] = source.prices[duration];
+  const message = `I am interested in the CallNexa ${plan.name} package for ${DURATIONS.find((item) => item.key === duration).label}. Listed price: ₹${selling.toLocaleString("en-IN")}.`;
+  return <div className="app-dialog-overlay" style={{ position: "fixed", inset: 0, zIndex: 500, display: "flex", alignItems: "center", justifyContent: "center" }}><div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.5)" }} /><div style={{ position: "relative", width: "min(440px, 92vw)", padding: 24, borderRadius: 20, background: "var(--co-surface, #fff)", boxShadow: "0 24px 64px rgba(0,0,0,.3)" }}><h2 style={{ margin: 0 }}>Contact CallNexa</h2><p style={{ color: "var(--co-muted)", lineHeight: 1.6 }}>We will confirm payment, taxes, activation, and the final package details before taking any payment.</p><div style={{ padding: 12, borderRadius: 10, background: "rgba(123,217,208,.14)", fontSize: 13 }}>{message}</div><div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 16, padding: 12, borderRadius: 10, background: "rgba(123,217,208,.14)", fontSize: 13 }}><strong>Contact Sales</strong><a href={`tel:${SALES_PHONE}`} style={{ color: "inherit" }}>{SALES_PHONE_DISPLAY}</a><a href={`mailto:${SALES_EMAIL}?subject=CallNexa plan enquiry&body=${encodeURIComponent(message)}`} style={{ color: "inherit" }}>{SALES_EMAIL}</a></div><div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 18 }}><button onClick={onClose} className="co-button-quiet">Close</button></div></div></div>;
+}
 function FAQItem({ q, a, open, onClick }) {
   return (
     <button className={`co-faq-item ${open ? "is-open" : ""}`} onClick={onClick} aria-expanded={open}>
@@ -112,6 +88,7 @@ function FAQItem({ q, a, open, onClick }) {
 
 export default function PricingPage() {
   const [openFaq, setOpenFaq] = useState(0);
+  const [duration, setDuration] = useState("1_month");
 
   return (
     <main className="co-site">
@@ -130,7 +107,8 @@ export default function PricingPage() {
             <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 8 }}>
               Desktop + Mobile App
             </h2>
-            <p style={{ fontSize: 15, color: 'var(--co-muted)' }}>1 Year Validity • Diwali Special Offer</p>
+            <p style={{ fontSize: 15, color: 'var(--co-muted)' }}>Every package includes both applications. Choose the member limit and duration that fit your organization.</p>
+            <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 16 }}>{DURATIONS.map((item) => <button key={item.key} onClick={() => setDuration(item.key)} style={{ border: "1px solid var(--co-border, #e5e7e6)", borderRadius: 999, padding: "8px 16px", background: duration === item.key ? "var(--co-night, #07191c)" : "var(--co-surface, #fff)", color: duration === item.key ? "#fff" : "var(--co-ink, #07191c)", cursor: "pointer", fontWeight: 700 }}>{item.label}</button>)}</div>
           </motion.div>
 
           {/* Pricing Table */}
@@ -144,29 +122,30 @@ export default function PricingPage() {
             <div className="co-pricing-table">
               <div className="co-pricing-header">
                 <div>Plan / Users</div>
-                <div>Validity</div>
+                <div>Duration</div>
                 <div>Regular Price</div>
-                <div>Offer</div>
-                <div>Diwali Offer Price</div>
+                <div>Savings</div>
+                <div>Selling Price</div>
               </div>
-              {PRICING_TABLE.map((row, i) => (
-                <div key={i} className="co-pricing-row">
+              {PRICING_TABLE.map((row) => {
+                const [regular, selling] = row.prices[duration];
+                return <div key={row.users} className="co-pricing-row">
                   <div><strong>{row.users}</strong></div>
-                  <div>{row.validity}</div>
-                  <div className="co-price-strike">{row.regular}</div>
-                  <div className="co-price-offer">{row.offer}</div>
-                  <div className="co-price-final">{row.diwali}</div>
-                </div>
-              ))}
+                  <div>{DURATIONS.find((item) => item.key === duration).label}</div>
+                  <div className="co-price-strike">₹{regular.toLocaleString("en-IN")}</div>
+                  <div className="co-price-offer">₹{(regular - selling).toLocaleString("en-IN")}</div>
+                  <div className="co-price-final">₹{selling.toLocaleString("en-IN")}</div>
+                </div>;
+              })}
             </div>
             <p style={{ fontSize: 12, color: 'var(--co-muted)', marginTop: 12, textAlign: 'center' }}>
-              * GST extra as applicable. Prices valid until stocks last.
+              Prices are shown in INR. Any applicable tax is displayed during backend checkout after tax configuration.
             </p>
           </motion.div>
 
           {/* Feature Cards */}
           <div className="co-plans-grid">
-            {PLANS.map((plan, i) => <PlanCard key={plan.kicker} plan={plan} i={i} />)}
+            {PLANS.map((plan, i) => <PlanCard key={plan.kicker} plan={plan} i={i} duration={duration} />)}
           </div>
         </div>
       </section>
@@ -183,23 +162,21 @@ export default function PricingPage() {
               <div>Feature</div>
               <div>Starter</div>
               <div>Growth</div>
-              <div>Enterprise</div>
+              <div>Professional</div>
+              <div>Business</div>
             </div>
             {[
-              ["Call log sync", true, true, true],
-              ["Basic dashboard", true, true, true],
-              ["AI call summaries", false, true, true],
-              ["Full analytics", false, true, true],
-              ["Call recordings", false, true, true],
-              ["Unlimited employees", false, true, true],
-              ["Custom integrations", false, false, true],
-              ["Dedicated support", false, false, true],
-            ].map(([feat, s, g, e]) => (
+              ["Desktop + Mobile App", true, true, true, true],
+              ["Call log monitoring", true, true, true, true],
+              ["Organization analytics", true, true, true, true],
+              ["Member limit", "5", "10", "15", "20"],
+            ].map(([feat, s, g, p, b]) => (
               <div key={feat} className="co-compare-row">
                 <div>{feat}</div>
-                <div>{s ? <Check size={16} className="co-check-yes" /> : <span className="co-check-no">—</span>}</div>
-                <div>{g ? <Check size={16} className="co-check-yes" /> : <span className="co-check-no">—</span>}</div>
-                <div>{e ? <Check size={16} className="co-check-yes" /> : <span className="co-check-no">—</span>}</div>
+                <div>{typeof s === "boolean" ? (s ? <Check size={16} className="co-check-yes" /> : <span className="co-check-no">—</span>) : s}</div>
+                <div>{typeof g === "boolean" ? (g ? <Check size={16} className="co-check-yes" /> : <span className="co-check-no">—</span>) : g}</div>
+                <div>{typeof p === "boolean" ? (p ? <Check size={16} className="co-check-yes" /> : <span className="co-check-no">—</span>) : p}</div>
+                <div>{typeof b === "boolean" ? (b ? <Check size={16} className="co-check-yes" /> : <span className="co-check-no">—</span>) : b}</div>
               </div>
             ))}
           </motion.div>

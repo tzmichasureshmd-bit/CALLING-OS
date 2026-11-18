@@ -17,7 +17,7 @@ export function RoleProvider({ children }) {
     if (!auth?.user) return;
     
     const userRole = auth.user.role?.toUpperCase();
-    if (userRole === "ADMIN" || userRole === "SUPERADMIN") {
+    if (userRole === "ADMIN" || userRole === "SUPERADMIN" || userRole === "SUPER_ADMIN") {
       setAppMode("admin");
     } else {
       setAppMode("employee");
@@ -26,7 +26,7 @@ export function RoleProvider({ children }) {
 
   // Allow manual switching if admin
   const switchMode = useCallback((mode) => {
-    if (auth?.user?.role?.toUpperCase() === "ADMIN") {
+    if (["ADMIN", "SUPERADMIN", "SUPER_ADMIN"].includes(auth?.user?.role?.toUpperCase())) {
       setAppMode(mode === "admin" ? "admin" : "employee");
     }
   }, [auth?.user]);
@@ -34,8 +34,8 @@ export function RoleProvider({ children }) {
   const value = {
     appMode,                    // "employee" or "admin"
     switchMode,
-    isAdmin: auth?.user?.role?.toUpperCase() === "ADMIN",
-    isSuperAdmin: auth?.user?.role?.toUpperCase() === "SUPERADMIN",
+    isAdmin: ["ADMIN", "SUPERADMIN", "SUPER_ADMIN"].includes(auth?.user?.role?.toUpperCase()),
+    isSuperAdmin: ["SUPERADMIN", "SUPER_ADMIN"].includes(auth?.user?.role?.toUpperCase()),
     isEmployee: auth?.user?.role?.toUpperCase() === "EMPLOYEE",
     user: auth?.user,
   };

@@ -5,6 +5,7 @@ import {
   ChevronRight, ExternalLink, Cloud, Smartphone,
 } from "lucide-react";
 import { PageContainer, Card, CardHeader, Badge, Button } from "../components/ui.jsx";
+import { callsApi, leadsApi, transcriptsApi, analyticsApi } from "../api/resources.js";
 
 // ── Integration card data ────────────────────────────────────────────────────
 
@@ -15,7 +16,7 @@ const INTEGRATIONS = [
     description: "Sync leads, contacts and opportunities between CallNexa and TzMicha CRM. Calls automatically create or update CRM records.",
     icon: "🗂️",
     color: "var(--accent)",
-    status: "available",
+    status: "coming_soon",
     category: "CRM",
     features: ["Auto-create leads from calls", "Sync contact details", "Push call notes to CRM", "Two-way lead status sync"],
   },
@@ -93,6 +94,20 @@ const INTEGRATIONS = [
 
 const CATEGORIES = ["All", "CRM", "Data", "Automation", "Productivity", "Communication", "Developer"];
 
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) => row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadLeadTemplate() {
+  downloadCsv("callnexa-leads-template.csv", [["name", "phone", "source", "employee_id", "priority", "notes"], ["John Doe", "+91 9876543210", "Referral", "", "Medium", ""]]);
+}
+
 // ── CSV Import modal UI ───────────────────────────────────────────────────────
 
 function ImportModal({ onClose }) {
@@ -100,12 +115,29 @@ function ImportModal({ onClose }) {
   const [dragging, setDragging] = useState(false);
   const [file, setFile] = useState(null);
   const [type, setType] = useState("leads");
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState("");
 
   function handleDrop(e) {
     e.preventDefault();
     setDragging(false);
     const dropped = e.dataTransfer.files[0];
     if (dropped) setFile(dropped);
+  }
+
+  async function importFile() {
+    if (!file) return;
+    setImporting(true); setError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const token = localStorage.getItem("callos_token");
+      const response = await fetch(`${import.meta.env.VITE_API_URL || "/api/v1"}/leads/bulk/upload`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: formData });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "Import failed");
+      setStep(3);
+    } catch (err) { setError(err.message || "Import failed"); }
+    finally { setImporting(false); }
   }
 
   const inputStyle = { width: "100%", padding: "10px 13px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 13.5, outline: "none", boxSizing: "border-box" };
@@ -128,7 +160,7 @@ function ImportModal({ onClose }) {
             <div style={{ marginBottom: 16 }}>
               <label style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Import Type</label>
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                {["leads", "contacts", "calls"].map(t => (
+                {(["leads"]).map(t => (
                   <button key={t} onClick={() => setType(t)} style={{ flex: 1, padding: "9px 0", borderRadius: 10, border: `1.5px solid ${type === t ? "var(--accent)" : "var(--border)"}`, background: type === t ? "var(--accent-soft)" : "transparent", color: type === t ? "var(--accent)" : "var(--text-muted)", fontWeight: 600, fontSize: 13, cursor: "pointer", textTransform: "capitalize" }}>
                     {t}
                   </button>
@@ -164,7 +196,7 @@ function ImportModal({ onClose }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 13px", background: "var(--bg-hover)", borderRadius: 10, marginBottom: 20, border: "1px solid var(--border)" }}>
               <FileSpreadsheet size={16} color="var(--accent)" />
               <span style={{ fontSize: 13, color: "var(--text-secondary)", flex: 1 }}>Need a template?</span>
-              <button style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}>Download Template ↓</button>
+              <button onClick={downloadLeadTemplate} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}>Download Template ↓</button>
             </div>
 
             <Button onClick={() => file && setStep(2)} style={{ width: "100%", justifyContent: "center", opacity: file ? 1 : 0.5 }}>
@@ -188,9 +220,10 @@ function ImportModal({ onClose }) {
             <div style={{ background: "var(--success-soft)", border: "1px solid var(--success)", borderRadius: 10, padding: "10px 14px", marginBottom: 20, fontSize: 13, color: "var(--success)" }}>
               ✓ File ready — 0 errors detected. Click Import to proceed.
             </div>
+            {error && <div style={{ background: "var(--danger-soft)", color: "var(--danger)", borderRadius: 9, padding: "9px 12px", marginBottom: 12, fontSize: 12.5 }}>{error}</div>}
             <div style={{ display: "flex", gap: 10 }}>
               <Button variant="outline" onClick={() => setStep(1)} style={{ flex: 1, justifyContent: "center" }}>Back</Button>
-              <Button onClick={() => setStep(3)} style={{ flex: 2, justifyContent: "center" }}>Import Now</Button>
+              <Button onClick={importFile} disabled={importing} style={{ flex: 2, justifyContent: "center" }}>{importing ? "Importing…" : "Import Now"}</Button>
             </div>
           </>
         )}
@@ -285,10 +318,28 @@ export default function Integrations() {
 
   const filtered = INTEGRATIONS.filter(i => category === "All" || i.category === category);
 
+  async function exportData(kind) {
+    try {
+      if (kind === "Calls") {
+        const result = await callsApi.list({ page: 1, page_size: 200 });
+        downloadCsv("callnexa-calls.csv", [["Contact", "Phone", "Type", "Status", "Duration", "Date"], ...(result.items || []).map((row) => [row.contact_name, row.phone_number, row.call_type, row.call_status, row.duration_seconds, row.start_time])]);
+      } else if (kind === "Leads") {
+        const result = await leadsApi.list();
+        downloadCsv("callnexa-leads.csv", [["Name", "Phone", "Source", "Status", "Priority"], ...(result.items || []).map((row) => [row.name, row.phone, row.source, row.status, row.priority])]);
+      } else if (kind === "Transcripts") {
+        const result = await transcriptsApi.list({ page: 1, page_size: 200 });
+        downloadCsv("callnexa-transcripts.csv", [["Contact", "Phone", "Transcript status", "Summary status", "Date"], ...(result.items || []).map((row) => [row.contact, row.phone, row.transcript_status, row.summary_status, row.date])]);
+      } else {
+        const result = await analyticsApi.dashboard({ range: "30d" });
+        downloadCsv("callnexa-analytics.csv", [["Day", "Total", "Connected", "Missed"], ...(result.daily_metrics || []).map((row) => [row.day, row.total, row.connected, row.missed])]);
+      }
+    } catch (err) { window.alert(err?.message || "Unable to export this data"); }
+  }
+
   function handleCard(integration) {
     if (integration.id === "csv_import") { setShowImport(true); return; }
-    if (integration.id === "crm3") { setShowCRM3(true); return; }
     if (integration.id === "csv_export") { setShowExport(true); return; }
+    if (integration.id === "api") { const apiRoot = (import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1").replace(/\/api\/v1\/?$/, ""); window.open(`${apiRoot}/docs`, "_blank", "noopener,noreferrer"); }
   }
 
   return (
@@ -408,8 +459,7 @@ export default function Integrations() {
                     <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{desc}</div>
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent)", background: "var(--accent-soft)", border: "none", borderRadius: 7, padding: "4px 10px", cursor: "pointer" }}>CSV</button>
-                    <button style={{ fontSize: 11.5, fontWeight: 600, color: "var(--success)", background: "var(--success-soft)", border: "none", borderRadius: 7, padding: "4px 10px", cursor: "pointer" }}>Excel</button>
+                    <button onClick={() => exportData(name)} style={{ fontSize: 11.5, fontWeight: 600, color: "var(--accent)", background: "var(--accent-soft)", border: "none", borderRadius: 7, padding: "4px 10px", cursor: "pointer" }}>Download CSV</button>
                   </div>
                 </div>
               ))}

@@ -56,7 +56,13 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 5174,
+    strictPort: true,
+    hmr: {
+      host: 'localhost',
+      port: 5174,
+      clientPort: 5174,
+    },
     headers: {
       // Allow Google OAuth popup to communicate back to the opener
       "Cross-Origin-Opener-Policy": "same-origin-allow-popups",

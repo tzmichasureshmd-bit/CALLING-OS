@@ -7,8 +7,12 @@
   --app-gradient-peach: #ffe8cf;
   --surface-primary: #ffffff;
   --surface-secondary: #fafcfa;
-  --surface-muted: #f3f8f3;
-  --text-primary-app: #20272b;
+  --surface-muted: #fafcfb;
+  --pastel-yellow: #fff5d9;
+  --pastel-blue: #e3f2ff;
+  --pastel-green: #e2f8e6;
+  --pastel-pink: #ffe6e6;
+  --pastel-peach: #ffebdd;
   --text-secondary-app: #5f6c70;
   --text-muted-app: #87939a;
   --text-subtle-app: #a0a9ad;
@@ -24,21 +28,29 @@
   --danger-soft-app: #ffebeb;
   --info-app: #6b9db1;
   --info-soft-app: #e8f3f8;
-  --pastel-yellow: #fff0d6;
-  --pastel-blue: #d9f1ff;
-  --pastel-green: #ddfbdd;
-  --pastel-pink: #ffe2e4;
+  --text-primary-app: #20272b;
   --radius-sm-app: 8px;
   --radius-md-app: 12px;
   --radius-lg-app: 16px;
   --radius-xl-app: 22px;
   --radius-2xl-app: 28px;
-  --shadow-sm-app: 0 2px 8px rgba(68, 82, 70, 0.07);
-  --shadow-md-app: 0 10px 26px rgba(68, 82, 70, 0.11);
-  --shadow-lg-app: 0 20px 50px rgba(68, 82, 70, 0.16);
+  --shadow-sm-app: 0 8px 28px rgba(35, 45, 40, 0.045);
+  --shadow-md-app: 0 10px 28px rgba(35, 45, 40, 0.06);
+  --shadow-lg-app: 0 12px 32px rgba(35, 45, 40, 0.08);
   --focus-app: 0 0 0 3px rgba(128, 217, 139, 0.22);
   --button-primary-bg: #1d262a;
   --button-primary-fg: #ffffff;
+  --background: var(--app-canvas);
+  --surface: var(--surface-primary);
+  --surface-soft: var(--surface-secondary);
+  --primary: var(--primary-dark-app);
+  --secondary: var(--text-muted-app);
+  --border-app: var(--border-primary-app);
+  --radius-card-app: var(--radius-xl-app);
+  --radius-inner-app: var(--radius-lg-app);
+  --radius-button-app: var(--radius-md-app);
+  --shadow-card: var(--shadow-sm-app);
+  --shadow-floating: var(--shadow-lg-app);
 
   /* Compatibility aliases for existing page logic. Values now belong to the new system. */
   --bg: var(--app-canvas);
@@ -75,7 +87,7 @@
   --shadow-lg: var(--shadow-lg-app);
   --glow: 0 0 0 rgba(0, 0, 0, 0);
   --radius-btn: var(--radius-sm-app);
-  --radius-card: var(--radius-lg-app);
+  --radius-card: var(--radius-xl-app);
   --radius-panel: var(--radius-xl-app);
 }
 
@@ -189,7 +201,7 @@ textarea {
 
 .nova-card {
   border: 1px solid var(--border-primary-app);
-  border-radius: var(--radius-lg-app);
+  border-radius: var(--radius-card-app);
   background: var(--surface-primary);
   box-shadow: var(--shadow-sm-app);
 }
@@ -493,4 +505,16 @@ textarea {
 [data-theme="dark"] .co-button-dark {
   background: #edf7f1;
   color: #14211b;
+}
+
+.app-card--yellow { background: var(--pastel-yellow); }
+.app-card--pink { background: var(--pastel-pink); }
+.app-card--green { background: var(--pastel-green); }
+.app-card--blue { background: var(--pastel-blue); }
+.app-card--peach { background: var(--pastel-peach); }
+.app-card__inner {
+  border: 1px solid var(--border-soft-app);
+  border-radius: var(--radius-inner-app);
+  background: var(--surface-primary);
+  box-shadow: var(--shadow-sm-app);
 }

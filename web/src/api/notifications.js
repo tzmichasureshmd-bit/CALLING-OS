@@ -38,11 +38,11 @@ function relTime(iso) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-export async function fetchNotifications() {
+export async function fetchNotifications({ employee = false } = {}) {
   const readIds = getReadIds();
 
   const [attentionRes, callsRes] = await Promise.all([
-    notificationsApi.needsAttention().catch(() => ({ items: [] })),
+    employee ? Promise.resolve({ items: [] }) : notificationsApi.needsAttention().catch(() => ({ items: [] })),
     notificationsApi.recentCalls().catch(() => ({ items: [] })),
   ]);
 
@@ -82,7 +82,7 @@ export async function fetchNotifications() {
   }
 
   // 3. Recent recordings synced
-  const recordings = (callsRes.items || [])
+  const recordings = employee ? [] : (callsRes.items || [])
     .filter((c) => c.recording_url || c.recordingUrl)
     .slice(0, 3);
 

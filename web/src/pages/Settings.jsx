@@ -5,7 +5,7 @@ import { useTheme } from "../context/ThemeContext.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
-import { twoFaApi } from "../api/resources.js";
+import { twoFaApi, authApi } from "../api/resources.js";
 import client from "../api/client.js";
 
 // ── Edit Profile Modal ────────────────────────────────────────────────────────
@@ -271,6 +271,27 @@ function TwoFAModal({ user, onClose, onSuccess }) {
   );
 }
 
+function ChangePasswordModal({ onClose }) {
+  const [fields, setFields] = useState({ current_password: "", new_password: "", confirm_password: "" });
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function submit(event) {
+    event.preventDefault();
+    setError(""); setMessage("");
+    if (fields.new_password.length < 8) { setError("New password must be at least 8 characters"); return; }
+    if (fields.new_password !== fields.confirm_password) { setError("New passwords do not match"); return; }
+    setSaving(true);
+    try { await authApi.changePassword({ current_password: fields.current_password, new_password: fields.new_password }); setMessage("Password changed successfully"); setFields({ current_password: "", new_password: "", confirm_password: "" }); }
+    catch (err) { setError(err?.message || "Unable to change password"); }
+    finally { setSaving(false); }
+  }
+
+  const input = { width: "100%", boxSizing: "border-box", marginTop: 6, padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)" };
+  return <div className="app-dialog-overlay" style={{ position: "fixed", inset: 0, zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center" }}><div className="app-dialog-backdrop" onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.5)" }} /><form onSubmit={submit} className="app-dialog-panel" style={{ position: "relative", width: 400, padding: 24 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}><h2 style={{ margin: 0, fontSize: 17, color: "var(--text-primary)" }}>Change password</h2><button type="button" onClick={onClose} style={{ border: 0, background: "var(--bg-hover)", color: "var(--text-muted)", width: 28, height: 28, borderRadius: 8, cursor: "pointer" }}><X size={14} /></button></div>{[["Current password", "current_password"], ["New password", "new_password"], ["Confirm new password", "confirm_password"]].map(([label, key]) => <label key={key} style={{ display: "block", marginBottom: 12, color: "var(--text-muted)", fontSize: 11.5, fontWeight: 650 }}>{label}<input required type="password" value={fields[key]} onChange={(event) => setFields((current) => ({ ...current, [key]: event.target.value }))} style={input} minLength={key === "current_password" ? 1 : 8} /></label>)}{error && <div style={{ marginBottom: 12, padding: 9, borderRadius: 8, background: "var(--danger-soft)", color: "var(--danger)", fontSize: 12.5 }}>{error}</div>}{message && <div style={{ marginBottom: 12, padding: 9, borderRadius: 8, background: "var(--success-soft)", color: "var(--success)", fontSize: 12.5 }}>{message}</div>}<div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}><Button type="button" variant="outline" onClick={onClose}>Close</Button><Button type="submit" disabled={saving}>{saving ? "Saving…" : "Change password"}</Button></div></form></div>;
+}
+
 // ── Settings Page ─────────────────────────────────────────────────────────────
 export default function Settings() {
   const { theme, toggleTheme } = useTheme();
@@ -278,6 +299,8 @@ export default function Settings() {
   const { loading, error, data, reload } = useResource(() => dataSource.getOrganization());
   const [show2FA, setShow2FA] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [emailNotifications, setEmailNotifications] = useState(() => localStorage.getItem("callos_email_notifications") !== "off");
   const [totpEnabled, setTotpEnabled] = useState(!!user?.totp_enabled);
   const [waNumber, setWaNumber] = useState(() => localStorage.getItem("callos_wa_number") || "");
   const [waSaved, setWaSaved] = useState(false);
@@ -308,13 +331,13 @@ export default function Settings() {
   return (
     <PageContainer>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }} className="callos-grid-2">
-        <Card>
+        {user?.role !== "EMPLOYEE" && <Card>
           <CardHeader icon={Building2} title="Organization" subtitle="Company account details" />
           <Row label="Company Name" value={org.name || "—"} />
           <Row label="Company Code" value={<Badge tone="accent">{org.companyCode || org.company_code || "—"}</Badge>} />
           <Row label="Admin" value={org.admin?.name || user?.name || "—"} />
           <Row label="Admin Email" value={org.admin?.email || user?.email || "—"} />
-        </Card>
+        </Card>}
 
         <Card>
           <CardHeader icon={Palette} title="Appearance" subtitle="Theme preferences" />
@@ -330,7 +353,7 @@ export default function Settings() {
               <Bell size={18} color="var(--text-muted)" />
               <span style={{ fontSize: 13.5, color: "var(--text-secondary)" }}>Email notifications</span>
             </div>
-            <Toggle on onClick={() => {}} />
+            <Toggle on={emailNotifications} onClick={() => { const next = !emailNotifications; setEmailNotifications(next); localStorage.setItem("callos_email_notifications", next ? "on" : "off"); }} />
           </div>
         </Card>
 
@@ -403,7 +426,7 @@ export default function Settings() {
           </div>
 
           <div style={{ display: "flex", gap: 10 }}>
-            <Button variant="outline">Change Password</Button>
+            <Button variant="outline" onClick={() => setShowChangePassword(true)}>Change Password</Button>
             <Button variant={totpEnabled ? "danger" : "soft"} onClick={() => setShow2FA(true)}>
               {totpEnabled ? "Disable 2FA" : "Enable 2FA"}
             </Button>
@@ -425,6 +448,7 @@ export default function Settings() {
           onSaved={handleProfileSaved}
         />
       )}
+      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
     </PageContainer>
   );
 }

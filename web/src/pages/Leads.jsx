@@ -5,6 +5,7 @@ import { LEAD_STATUS_META } from "../data/mockData.js";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
 import { leadsApi } from "../api/resources.js";
+import { useAuth } from "../context/AuthContext.jsx";
 
 function BulkUploadModal({ onClose, onAdded }) {
   const [file, setFile] = useState(null);
@@ -153,7 +154,7 @@ function BulkUploadModal({ onClose, onAdded }) {
             {err && <div style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 12, padding: 12, borderRadius: 8, background: "var(--danger-soft)" }}>{err}</div>}
 
             <div style={{ fontSize: 12, color: "var(--accent)", marginBottom: 16, padding: 12, borderRadius: 8, background: "var(--accent-soft)", border: "1px solid var(--accent)" }}>
-              <strong>ℹ️ Upload recordings of any size</strong> — they'll be saved to the dashboard automatically
+              <strong>ℹ️ CSV lead import</strong> — upload rows with the name and phone columns shown above.
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
@@ -236,11 +237,22 @@ function exportLeadsCSV(leads) {
 const FLOW = ["Call", "Connected", "Conversation", "Follow-up", "Lead", "Opportunity", "Won/Lost"];
 
 export default function Leads() {
+  const { user } = useAuth();
+  const canManage = ["ADMIN", "SUPER_ADMIN"].includes((user?.role || "").toUpperCase());
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [showAdd, setShowAdd] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
   const { loading, error, data, reload } = useResource(() => dataSource.getLeads());
+  const [updatingLead, setUpdatingLead] = useState(null);
+
+  async function updateStatus(lead, nextStatus) {
+    if (!nextStatus || nextStatus === lead.status) return;
+    setUpdatingLead(lead.id);
+    try { await leadsApi.update(lead.id, { status: nextStatus }); await reload(); }
+    catch (err) { window.alert(err?.message || "Unable to update lead"); }
+    finally { setUpdatingLead(null); }
+  }
 
   if (loading) return <PageContainer><Card><SkeletonRows rows={6} cols={5} /></Card></PageContainer>;
   if (error) return <PageContainer><Card><ErrorState title="Couldn't load leads" message={error.message} code={error.error_code} onRetry={reload} /></Card></PageContainer>;
@@ -277,8 +289,10 @@ export default function Leads() {
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <Button variant="outline" icon={FileSpreadsheet} onClick={() => exportLeadsCSV(filtered)}>Export CSV</Button>
-            <Button icon={Upload} variant="outline" onClick={() => setShowBulkUpload(true)}>Bulk Upload</Button>
-            <Button icon={Plus} onClick={() => setShowAdd(true)}>Add Lead</Button>
+            {canManage && <>
+              <Button icon={Upload} variant="outline" onClick={() => setShowBulkUpload(true)}>Bulk Upload</Button>
+              <Button icon={Plus} onClick={() => setShowAdd(true)}>Add Lead</Button>
+            </>}
             <SearchInput value={query} onChange={setQuery} placeholder="Search leads..." />
           </div>
         </div>
@@ -300,7 +314,7 @@ export default function Leads() {
                       </td>
                       <td style={{ padding: "13px 16px", color: "var(--text-secondary)" }}>{l.source}</td>
                       <td style={{ padding: "13px 16px", color: "var(--text-secondary)" }}>{l.employee}</td>
-                      <td style={{ padding: "13px 16px" }}><Badge tone={meta.tone}>{meta.label}</Badge></td>
+                      <td style={{ padding: "13px 16px" }}>{canManage ? <select value={l.status} disabled={updatingLead === l.id} onChange={(event) => updateStatus(l, event.target.value)} style={{ padding: "5px 7px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)", fontSize: 12 }}>{Object.keys(LEAD_STATUS_META).map((key) => <option key={key} value={key}>{LEAD_STATUS_META[key].label}</option>)}</select> : <Badge tone={meta.tone}>{meta.label}</Badge>}</td>
                       <td style={{ padding: "13px 16px", color: "var(--text-secondary)" }}>{l.priority}</td>
                       <td style={{ padding: "13px 16px", color: l.nextFollowUp === "Overdue" ? "var(--danger)" : "var(--text-secondary)", fontWeight: l.nextFollowUp === "Overdue" ? 600 : 400 }}>{l.nextFollowUp}</td>
                       <td style={{ padding: "13px 16px", fontFamily: "Space Grotesk", fontWeight: 600, color: "var(--text-primary)" }}>{l.expectedValue}</td>

@@ -1,10 +1,23 @@
+import { useState } from "react";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { PageContainer, Card, CardHeader, Badge, EmptyState, LoadingState, ErrorState } from "../components/ui.jsx";
 import { dataSource } from "../api/dataSource.js";
 import { useResource } from "../api/useResource.js";
+import { opportunitiesApi } from "../api/resources.js";
+import { useAuth } from "../context/AuthContext.jsx";
 
 export default function OpportunitiesClosed() {
   const { loading, error, data, reload } = useResource(() => dataSource.getClosedOpportunities());
+
+  const { user } = useAuth();
+  const [updatingId, setUpdatingId] = useState(null);
+
+  async function updateOutcome(opportunity, stage) {
+    setUpdatingId(opportunity.id);
+    try { await opportunitiesApi.update(opportunity.id, { stage }); await reload(); }
+    catch (err) { window.alert(err?.message || "Unable to update opportunity"); }
+    finally { setUpdatingId(null); }
+  }
 
   if (loading) return <PageContainer><Card><LoadingState message="Loading..." /></Card></PageContainer>;
   if (error) return <PageContainer><Card><ErrorState title="Couldn't load opportunities" message={error.message} code={error.error_code} onRetry={reload} /></Card></PageContainer>;
@@ -12,6 +25,7 @@ export default function OpportunitiesClosed() {
   const CLOSED_OPPORTUNITIES = data.items || [];
   const won = CLOSED_OPPORTUNITIES.filter((o) => o.outcome === "Won").length;
   const lost = CLOSED_OPPORTUNITIES.filter((o) => o.outcome === "Lost").length;
+  const canManage = ["ADMIN", "SUPER_ADMIN"].includes((user?.role || "").toUpperCase());
 
   return (
     <PageContainer>
@@ -51,7 +65,7 @@ export default function OpportunitiesClosed() {
                     <td style={{ padding: "13px 16px", fontWeight: 700, color: "var(--text-primary)" }}>{o.value}</td>
                     <td style={{ padding: "13px 16px", color: "var(--text-muted)" }}>{new Date(o.closedDate).toLocaleDateString("en-IN")}</td>
                     <td style={{ padding: "13px 16px" }}>
-                      <Badge tone={o.outcome === "Won" ? "success" : "danger"}>{o.outcome}</Badge>
+                      {canManage ? <select value={o.outcome} disabled={updatingId === o.id} onChange={(event) => updateOutcome(o, event.target.value)} style={{ padding: "5px 8px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--bg-input)", color: "var(--text-primary)" }}><option value="Won">Won</option><option value="Lost">Lost</option><option value="Negotiation">Reopen</option></select> : <Badge tone={o.outcome === "Won" ? "success" : "danger"}>{o.outcome}</Badge>}
                     </td>
                   </tr>
                 ))}

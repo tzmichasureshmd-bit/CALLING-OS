@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
-from ..models import User, Call, Device, Employee, SIM
+from ..models import User, Call, Device, Employee, SIM, Lead, Opportunity, FollowUp, Customer, CustomerActivity
 from ..schemas import CallSyncRequest, CallSyncResponse, CallOut, PaginatedCalls
 from ..schemas.call import CallSyncItemResult
 from ..auth import get_current_user, require_role
@@ -432,7 +432,7 @@ async def upload_recording(
     call_id: str,
     background_tasks: BackgroundTasks,
     request: Request,
-    file: UploadFile = File(...),
+    file: UploadFile = File(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -444,8 +444,6 @@ async def upload_recording(
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
 
-    # Organization admins may upload any organization call. Other roles must
-    # own the call through an active employee profile.
     if (user.role or "").upper() not in {"ADMIN", "SUPER_ADMIN"}:
         emp = db.query(Employee).filter(
             Employee.user_id == user.id,
@@ -455,34 +453,73 @@ async def upload_recording(
         if not emp or call.employee_id != emp.id:
             raise HTTPException(status_code=403, detail="Not authorized to upload recording for this call")
 
-    # ── File validation ───────────────────────────────────────────────────────
-    content_type = (file.content_type or "").lower().split(";")[0].strip()
-    if content_type and content_type not in ALLOWED_AUDIO_MIME:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {content_type}")
+    # ── Accept both multipart/form-data AND raw binary body ──────────────────
+    # Mobile sends BINARY_CONTENT (raw bytes) to avoid nginx 413 from multipart
+    # boundary overhead. Web dashboard sends multipart. Support both.
+    content_type = (request.headers.get("content-type") or "").lower().split(";")[0].strip()
+    is_raw_binary = content_type in ALLOWED_AUDIO_MIME or content_type.startswith("audio/") or content_type == "video/mp4"
 
-    raw_ext = ""
-    if file.filename and "." in file.filename:
-        raw_ext = file.filename.rsplit(".", 1)[-1].lower()
-    if raw_ext and raw_ext not in ALLOWED_AUDIO_EXT:
-        raise HTTPException(status_code=400, detail=f"Unsupported file extension: {raw_ext}")
+    if is_raw_binary:
+        # Raw binary upload — read directly from request body
+        raw_filename = request.headers.get("x-file-name", "recording.mp4")
+        raw_ext = raw_filename.rsplit(".", 1)[-1].lower() if "." in raw_filename else "mp4"
+        if raw_ext not in ALLOWED_AUDIO_EXT:
+            raw_ext = "mp4"
+        file_content_type = content_type
+        file_size = 0
+        header = b""
+        chunks = []
+        async for chunk in request.stream():
+            if len(header) < 16:
+                header = (header + chunk)[:16]
+            file_size += len(chunk)
+            chunks.append(chunk)
+        if file_size == 0:
+            raise HTTPException(status_code=400, detail="Recording file is empty")
+        if not _has_supported_audio_signature(header, raw_ext):
+            raise HTTPException(status_code=400, detail="File content does not match a supported recording format")
+        ext = raw_ext
 
-    ext = raw_ext if raw_ext in ALLOWED_AUDIO_EXT else "mp4"
+        async def _raw_stream():
+            for c in chunks:
+                yield c
+        upload_stream = _raw_stream()
+    else:
+        # Multipart upload (web dashboard / manual upload)
+        if file is None:
+            raise HTTPException(status_code=400, detail="No file provided")
+        file_content_type = (file.content_type or "").lower().split(";")[0].strip()
+        if file_content_type and file_content_type not in ALLOWED_AUDIO_MIME:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_content_type}")
+        raw_ext = ""
+        if file.filename and "." in file.filename:
+            raw_ext = file.filename.rsplit(".", 1)[-1].lower()
+        if raw_ext and raw_ext not in ALLOWED_AUDIO_EXT:
+            raise HTTPException(status_code=400, detail=f"Unsupported file extension: {raw_ext}")
+        ext = raw_ext if raw_ext in ALLOWED_AUDIO_EXT else "mp4"
+        file_size = 0
+        header = b""
+        while True:
+            chunk = await file.read(64 * 1024)
+            if not chunk:
+                break
+            if len(header) < 16:
+                header = (header + chunk)[:16]
+            file_size += len(chunk)
+        if file_size == 0:
+            raise HTTPException(status_code=400, detail="Recording file is empty")
+        if not _has_supported_audio_signature(header, ext):
+            raise HTTPException(status_code=400, detail="File content does not match a supported recording format")
+        await file.seek(0)
 
-    # Validate size without retaining the entire recording in memory.
-    file_size = 0
-    header = b""
-    while True:
-        chunk = await file.read(64 * 1024)
-        if not chunk:
-            break
-        if len(header) < 16:
-            header = (header + chunk)[:16]
-        file_size += len(chunk)
-    if file_size == 0:
-        raise HTTPException(status_code=400, detail="Recording file is empty")
-    if not _has_supported_audio_signature(header, ext):
-        raise HTTPException(status_code=400, detail="File content does not match a supported recording format")
-    await file.seek(0)
+        async def _multipart_stream():
+            while True:
+                chunk = await file.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        upload_stream = _multipart_stream()
+        file_content_type = file_content_type or "audio/mp4"
 
     logger.info("[RECORDING_UPLOAD_STARTED] call_id=%s size=%d ext=%s org=%s",
                 call_id, file_size, ext, user.organization_id)
@@ -499,20 +536,13 @@ async def upload_recording(
         f"/{settings.SUPABASE_RECORDINGS_BUCKET}/{storage_path}"
     )
 
-    async def recording_chunks():
-        while True:
-            chunk = await file.read(64 * 1024)
-            if not chunk:
-                break
-            yield chunk
-
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(
             storage_url,
-            content=recording_chunks(),
+            content=upload_stream,
             headers={
                 "Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}",
-                "Content-Type": content_type or "audio/mp4",
+                "Content-Type": file_content_type or "audio/mp4",
                 "Content-Length": str(file_size),
                 "x-upsert": "true",
             },
@@ -541,7 +571,7 @@ async def upload_recording(
     call.recording_available     = True
     call.recording_status        = RECORDING_STATUS_UPLOADED
     call.recording_size_bytes    = file_size
-    call.recording_mime_type     = content_type or "audio/mp4"
+    call.recording_mime_type     = file_content_type or "audio/mp4"
     call.recording_uploaded_at   = now
     call.recording_error         = None
     if should_transcribe:
@@ -766,6 +796,7 @@ VALID_PROGRESS_STATUSES = {
     "connected", "missed", "rejected", "no_answer", "unknown",
 }
 MAX_NOTES_LENGTH = 2000
+MAX_CUSTOM_STATUS_LENGTH = 20
 
 
 class _NoteBody(_BaseModel):
@@ -784,9 +815,11 @@ async def update_call_note(
     """Save salesperson progress (status + notes) on the call row."""
     logger.info("[BACKEND_NOTE_UPDATE] call_id=%s org=%s", call_id, user.organization_id)
 
-    # Validate status
-    if body.call_status is not None and body.call_status not in VALID_PROGRESS_STATUSES:
-        raise HTTPException(status_code=422, detail=f"Invalid status: {body.call_status}")
+    if body.call_status is not None:
+        status_value = body.call_status.strip()
+        if not status_value or len(status_value) > MAX_CUSTOM_STATUS_LENGTH:
+            raise HTTPException(status_code=422, detail=f"Status must be between 1 and {MAX_CUSTOM_STATUS_LENGTH} characters")
+        body.call_status = status_value
 
     # Validate notes length
     if body.notes is not None and len(body.notes) > MAX_NOTES_LENGTH:
@@ -838,6 +871,284 @@ async def update_call_note(
             "notes":       call.notes,
             "updated_at":  now.isoformat(),
         },
+    }
+
+
+class _PostCallLead(_BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    source: str | None = "Phone Call"
+    priority: str | None = "Medium"
+    notes: str | None = None
+    email: str | None = None
+    company: str | None = None
+    next_follow_up: datetime | None = None
+
+
+class _PostCallBody(_BaseModel):
+    call_status: str | None = None
+    notes: str | None = None
+    lead_id: str | None = None
+    lead: _PostCallLead | None = None
+    opportunity_id: str | None = None
+
+
+@router.post("/{call_id}/post-call")
+async def post_call_progress(
+    call_id: str,
+    body: _PostCallBody,
+    background_tasks: _BG,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Atomically save post-call progress and customer timeline activity."""
+    if body.call_status is not None:
+        status_value = body.call_status.strip()
+        if not status_value or len(status_value) > MAX_CUSTOM_STATUS_LENGTH:
+            raise HTTPException(status_code=422, detail=f"Status must be between 1 and {MAX_CUSTOM_STATUS_LENGTH} characters")
+        body.call_status = status_value
+    if body.notes is not None and len(body.notes) > MAX_NOTES_LENGTH:
+        raise HTTPException(status_code=422, detail=f"Notes must be {MAX_NOTES_LENGTH} characters or fewer")
+
+    call = db.query(Call).filter(
+        Call.id == call_id,
+        Call.organization_id == user.organization_id,
+    ).with_for_update().first()
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    employee = None
+    if (user.role or "").upper() == "EMPLOYEE":
+        employee = db.query(Employee).filter(
+            Employee.user_id == user.id,
+            Employee.organization_id == user.organization_id,
+            Employee.status == "active",
+        ).first()
+        if not employee or call.employee_id != employee.id:
+            raise HTTPException(status_code=404, detail="Call not found")
+    elif call.employee_id:
+        employee = db.query(Employee).filter(
+            Employee.id == call.employee_id,
+            Employee.organization_id == user.organization_id,
+        ).first()
+
+    if body.call_status is not None:
+        call.call_status = body.call_status
+    if body.notes is not None:
+        call.notes = body.notes
+    call.updated_at = datetime.now(timezone.utc)
+
+    linked_lead = None
+    if body.lead_id:
+        linked_lead = db.query(Lead).filter(
+            Lead.id == body.lead_id,
+            Lead.organization_id == user.organization_id,
+        ).with_for_update().first()
+        if not linked_lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        if (user.role or "").upper() == "EMPLOYEE" and linked_lead.employee_id not in (None, employee.id):
+            raise HTTPException(status_code=403, detail="Lead is assigned to another employee")
+    elif body.lead and body.lead.name and body.lead.phone:
+        phone = body.lead.phone.strip()
+        linked_lead = db.query(Lead).filter(
+            Lead.organization_id == user.organization_id,
+            Lead.phone == phone,
+        ).first()
+        if linked_lead and (user.role or "").upper() == "EMPLOYEE" and linked_lead.employee_id not in (None, employee.id):
+            raise HTTPException(status_code=403, detail="Lead is assigned to another employee")
+        if not linked_lead:
+            linked_lead = Lead(
+                organization_id=user.organization_id,
+                employee_id=call.employee_id,
+                call_id=call.id,
+                name=body.lead.name.strip(),
+                phone=phone,
+                source=body.lead.source or "Phone Call",
+                priority=body.lead.priority or "Medium",
+                notes=body.lead.notes,
+                next_follow_up=body.lead.next_follow_up,
+                last_contact_at=call.start_time,
+            )
+            db.add(linked_lead)
+        else:
+            if not linked_lead.employee_id:
+                linked_lead.employee_id = call.employee_id
+            linked_lead.call_id = call.id
+            linked_lead.last_contact_at = call.start_time
+            if body.lead.next_follow_up:
+                linked_lead.next_follow_up = body.lead.next_follow_up
+            if body.lead.notes:
+                linked_lead.notes = body.lead.notes
+        if body.call_status in {"interested", "asked_details", "follow_up", "proposal_sent"} and linked_lead.status == "new":
+            linked_lead.status = "interested"
+
+    linked_opportunity = None
+    if body.opportunity_id:
+        linked_opportunity = db.query(Opportunity).filter(
+            Opportunity.id == body.opportunity_id,
+            Opportunity.organization_id == user.organization_id,
+        ).with_for_update().first()
+        if not linked_opportunity:
+            raise HTTPException(status_code=404, detail="Opportunity not found")
+        if (user.role or "").upper() == "EMPLOYEE" and linked_opportunity.employee_id not in (None, employee.id):
+            raise HTTPException(status_code=403, detail="Opportunity is assigned to another employee")
+        if not linked_opportunity.employee_id:
+            linked_opportunity.employee_id = call.employee_id
+        if linked_lead and not linked_opportunity.lead_id:
+            linked_opportunity.lead_id = linked_lead.id
+
+    # Customer activity is created only for a synced call owned by an employee.
+    linked_customer = None
+    if call.employee_id and call.sync_status == "synced":
+        normalized_phone = call.phone_number_normalized or normalize_phone(call.phone_number)
+        if normalized_phone:
+            linked_customer = db.query(Customer).filter(
+                Customer.organization_id == user.organization_id,
+                Customer.phone_normalized == normalized_phone,
+            ).with_for_update().first()
+            if linked_customer and (user.role or "").upper() == "EMPLOYEE" and linked_customer.employee_id not in (None, call.employee_id):
+                raise HTTPException(status_code=403, detail="Customer is assigned to another employee")
+            customer_name = (
+                body.lead.name.strip() if body.lead and body.lead.name
+                else call.contact_name or normalized_phone
+            )
+            if not linked_customer:
+                linked_customer = Customer(
+                    organization_id=user.organization_id,
+                    employee_id=call.employee_id,
+                    name=customer_name,
+                    phone=call.phone_number,
+                    phone_normalized=normalized_phone,
+                    email=body.lead.email if body.lead else None,
+                    company=body.lead.company if body.lead else None,
+                    notes=body.lead.notes if body.lead else None,
+                    next_follow_up=linked_lead.next_follow_up if linked_lead else None,
+                    last_contact_at=call.start_time,
+                )
+                db.add(linked_customer)
+            else:
+                if not linked_customer.employee_id:
+                    linked_customer.employee_id = call.employee_id
+                if linked_customer.name == linked_customer.phone_normalized and customer_name:
+                    linked_customer.name = customer_name
+                if body.lead and body.lead.email:
+                    linked_customer.email = body.lead.email
+                if body.lead and body.lead.company:
+                    linked_customer.company = body.lead.company
+                if body.lead and body.lead.notes:
+                    linked_customer.notes = body.lead.notes
+                if linked_lead and linked_lead.next_follow_up:
+                    linked_customer.next_follow_up = linked_lead.next_follow_up
+                linked_customer.last_contact_at = call.start_time
+                linked_customer.updated_at = datetime.now(timezone.utc)
+
+    follow_up = None
+    if linked_lead and linked_lead.next_follow_up:
+        idempotency_key = f"post-call:{call.id}:{linked_lead.next_follow_up.isoformat()}"
+        follow_up = db.query(FollowUp).filter(
+            FollowUp.organization_id == user.organization_id,
+            FollowUp.idempotency_key == idempotency_key,
+        ).first()
+        if not follow_up:
+            follow_up = db.query(FollowUp).filter(
+                FollowUp.organization_id == user.organization_id,
+                FollowUp.call_id == call.id,
+                FollowUp.status == "pending",
+            ).order_by(FollowUp.created_at.desc()).first()
+        if not follow_up:
+            follow_up = FollowUp(
+                organization_id=user.organization_id,
+                employee_id=call.employee_id,
+                call_id=call.id,
+                lead_id=linked_lead.id,
+                opportunity_id=linked_opportunity.id if linked_opportunity else None,
+                customer_id=linked_customer.id if linked_customer else None,
+                created_by=user.id,
+                title="Follow up after call",
+                description=body.notes,
+                follow_up_type="call",
+                due_at=linked_lead.next_follow_up,
+                idempotency_key=idempotency_key,
+            )
+            db.add(follow_up)
+        else:
+            follow_up.employee_id = call.employee_id
+            follow_up.lead_id = linked_lead.id
+            follow_up.opportunity_id = linked_opportunity.id if linked_opportunity else follow_up.opportunity_id
+            follow_up.customer_id = linked_customer.id if linked_customer else follow_up.customer_id
+            follow_up.due_at = linked_lead.next_follow_up
+            follow_up.description = body.notes or follow_up.description
+            follow_up.idempotency_key = idempotency_key
+
+    if linked_customer:
+        db.flush()
+        activity_key = f"post-call:{call.id}:{call.call_status}:{linked_lead.id if linked_lead else ''}:{linked_opportunity.id if linked_opportunity else ''}"
+        if not db.query(CustomerActivity).filter(
+            CustomerActivity.organization_id == user.organization_id,
+            CustomerActivity.idempotency_key == activity_key,
+        ).first():
+            db.add(CustomerActivity(
+                organization_id=user.organization_id,
+                customer_id=linked_customer.id,
+                call_id=call.id,
+                lead_id=linked_lead.id if linked_lead else None,
+                opportunity_id=linked_opportunity.id if linked_opportunity else None,
+                follow_up_id=follow_up.id if follow_up else None,
+                actor_id=user.id,
+                employee_id=call.employee_id,
+                event_type="call_post_call",
+                description=f"Post-call update for {call.call_type} call",
+                payload={
+                    "call_status": call.call_status,
+                    "notes": call.notes,
+                    "lead_id": linked_lead.id if linked_lead else None,
+                    "opportunity_id": linked_opportunity.id if linked_opportunity else None,
+                },
+                event_at=call.start_time or datetime.now(timezone.utc),
+                idempotency_key=activity_key,
+            ))
+        if follow_up:
+            follow_up_key = f"follow-up:{follow_up.id}:scheduled:{follow_up.due_at.isoformat()}"
+            if not db.query(CustomerActivity).filter(
+                CustomerActivity.organization_id == user.organization_id,
+                CustomerActivity.idempotency_key == follow_up_key,
+            ).first():
+                db.add(CustomerActivity(
+                    organization_id=user.organization_id,
+                    customer_id=linked_customer.id,
+                    call_id=call.id,
+                    lead_id=linked_lead.id if linked_lead else None,
+                    opportunity_id=linked_opportunity.id if linked_opportunity else None,
+                    follow_up_id=follow_up.id,
+                    actor_id=user.id,
+                    employee_id=call.employee_id,
+                    event_type="follow_up_scheduled",
+                    description="Follow-up scheduled after call",
+                    payload={"due_at": follow_up.due_at.isoformat()},
+                    event_at=follow_up.due_at,
+                    idempotency_key=follow_up_key,
+                ))
+
+    db.commit()
+    payload = {
+        "event": "call_updated",
+        "call_id": call.id,
+        "call_status": call.call_status,
+        "notes": call.notes,
+        "lead_id": linked_lead.id if linked_lead else None,
+        "opportunity_id": linked_opportunity.id if linked_opportunity else None,
+        "updated_at": call.updated_at.isoformat(),
+    }
+    background_tasks.add_task(manager.broadcast, user.organization_id, payload)
+    return {
+        "status": "success",
+        "call_id": call.id,
+        "call_status": call.call_status,
+        "notes": call.notes,
+        "customer": {"id": linked_customer.id, "name": linked_customer.name, "phone": linked_customer.phone} if linked_customer else None,
+        "lead": {"id": linked_lead.id, "name": linked_lead.name, "phone": linked_lead.phone} if linked_lead else None,
+        "opportunity_id": linked_opportunity.id if linked_opportunity else None,
+        "follow_up": {"id": follow_up.id, "scheduled_at": follow_up.due_at} if follow_up else None,
     }
 
 

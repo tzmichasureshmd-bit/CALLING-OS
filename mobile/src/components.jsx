@@ -390,7 +390,7 @@ function useConnectionStatus() {
   return status;
 }
 
-// ── AppHeader — matches web Topbar visual language ────────────────────────────
+// ── AppHeader — mint+navy employee style ─────────────────────────────────────
 export function AppHeader({ title, subtitle, right, showStatus = true }) {
   const { theme } = useTheme();
   const [showNotifs, setShowNotifs] = useState(false);
@@ -398,9 +398,15 @@ export function AppHeader({ title, subtitle, right, showStatus = true }) {
   const connStatus = useConnectionStatus();
   const badgeScale = useRef(new Animated.Value(1)).current;
 
+  // Employee: mint bg header; Admin/other: surface
+  const isEmployee = theme.mode === "employee";
+  const headerBg   = isEmployee ? theme.bg : theme.surface;
+  const NAVY       = "#0D1B4B";
+  const TEAL       = "#0ABFA3";
+
   const connMeta = {
-    connected:    { color: palette.emerald, bg: palette.emerald + "22", label: "Connected",   dot: palette.emerald },
-    disconnected: { color: palette.red,     bg: palette.red     + "22", label: "No Internet", dot: palette.red     },
+    connected:    { color: TEAL,         bg: TEAL + "22",         label: "Online",      dot: TEAL         },
+    disconnected: { color: palette.red,  bg: palette.red + "22", label: "No Internet", dot: palette.red  },
   };
   const cm = connMeta[connStatus];
 
@@ -410,7 +416,6 @@ export function AppHeader({ title, subtitle, right, showStatus = true }) {
         const count = items.filter(n => !n.read).length;
         setUnread(prev => {
           if (count > prev) {
-            // Pop animation when new notification arrives
             Animated.sequence([
               Animated.spring(badgeScale, { toValue: 1.4, useNativeDriver: true, speed: 60 }),
               Animated.spring(badgeScale, { toValue: 1,   useNativeDriver: true, speed: 60 }),
@@ -431,13 +436,14 @@ export function AppHeader({ title, subtitle, right, showStatus = true }) {
       <View style={{
         flexDirection: "row", alignItems: "center", justifyContent: "space-between",
         paddingHorizontal: SPACE.lg + 2, paddingVertical: SPACE.md,
-        backgroundColor: theme.surface,
-        borderBottomWidth: 1, borderBottomColor: theme.border,
+        backgroundColor: headerBg,
+        borderBottomWidth: 1,
+        borderBottomColor: isEmployee ? "#C3F0E0" : theme.border,
       }}>
         <View>
           {title ? (
             <>
-              <Text style={{ ...TYPE.h2, color: theme.primary }}>{title}</Text>
+              <Text style={{ ...TYPE.h2, color: isEmployee ? NAVY : theme.primary }}>{title}</Text>
               {subtitle && <Text style={{ ...TYPE.caption, color: theme.muted, marginTop: 2 }}>{subtitle}</Text>}
             </>
           ) : <Logo />}
@@ -449,7 +455,7 @@ export function AppHeader({ title, subtitle, right, showStatus = true }) {
 
           {/* Connection status pill */}
           {showStatus && (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: cm.bg, paddingHorizontal: SPACE.sm + 1, paddingVertical: 4, borderRadius: RADIUS.full }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: cm.bg, paddingHorizontal: SPACE.sm + 1, paddingVertical: 4, borderRadius: RADIUS.full }}>
               <LiveDot color={cm.dot} />
               <Text style={{ ...TYPE.micro, color: cm.color }}>{cm.label}</Text>
             </View>
@@ -459,13 +465,16 @@ export function AppHeader({ title, subtitle, right, showStatus = true }) {
           <Pressable
             onPress={() => setShowNotifs(true)}
             hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-            accessibilityLabel="Notifications"
-            accessibilityRole="button"
+            style={{
+              width: 36, height: 36, borderRadius: 10,
+              backgroundColor: isEmployee ? "#E2FBF3" : theme.surface2,
+              alignItems: "center", justifyContent: "center",
+            }}
           >
-            <Ionicons name="notifications-outline" size={22} color={theme.secondary} />
+            <Ionicons name="notifications-outline" size={20} color={isEmployee ? NAVY : theme.secondary} />
             {unread > 0 && (
               <Animated.View style={{
-                position: "absolute", top: -6, right: -8,
+                position: "absolute", top: -4, right: -4,
                 backgroundColor: palette.red,
                 borderRadius: RADIUS.full,
                 minWidth: 16, height: 16,

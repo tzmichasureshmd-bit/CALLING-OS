@@ -19,7 +19,7 @@ class ExcludedNumberCreate(BaseModel):
 
 
 @router.get("")
-def list_excluded_numbers(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def list_excluded_numbers(db: Session = Depends(get_db), user: User = Depends(require_role("ADMIN"))):
     items = db.query(ExcludedNumber).filter(ExcludedNumber.organization_id == user.organization_id).order_by(ExcludedNumber.created_at.desc()).all()
     return {"items": [{"id": item.id, "number": item.number, "reason": item.reason, "added_by_id": item.added_by_id, "date": item.created_at} for item in items], "total": len(items)}
 
