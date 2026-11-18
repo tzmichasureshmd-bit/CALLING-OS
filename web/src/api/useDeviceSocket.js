@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { devicesApi, callsApi } from "./resources.js";
 
-const API_BASE = import.meta.env.VITE_API_URL || "https://api.callingos.tzmicha.com/api/v1";
+const API_BASE = import.meta.env.VITE_API_URL || "https://api.callnexa.in/api/v1";
 const WS_BASE  = API_BASE.replace(/^http/, "ws");
 
 function normalizeDevice(d) {

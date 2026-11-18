@@ -1,15 +1,15 @@
 services:
-  callingos-backend:
+  callnexa-backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: callingos-backend
+    container_name: callnexa-backend
     restart: unless-stopped
     ports:
       - "8001:8000"  # Expose backend on port 8001
     volumes:
-      - /opt/callingos/backend/.env:/app/.env:ro
-      - /opt/callingos/backend/firebase-service-account.json:/app/firebase-service-account.json:ro
+      - /opt/callnexa/backend/.env:/app/.env:ro
+      - /opt/callnexa/backend/firebase-service-account.json:/app/firebase-service-account.json:ro
     environment:
       APP_ENV: production
       APP_DEBUG: "false"
@@ -21,12 +21,12 @@ services:
       timeout: 5s
       retries: 3
 
-  callingos-web:
+  callnexa-web:
     build:
       context: ../web
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: ${VITE_API_URL:-https://api.callingos.tzmicha.com/api/v1}
+        VITE_API_URL: ${VITE_API_URL:-https://api.callnexa.in/api/v1}
         VITE_USE_MOCK: ${VITE_USE_MOCK:-false}
         VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
         VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
@@ -35,7 +35,7 @@ services:
         VITE_FIREBASE_MESSAGING_SENDER_ID: ${VITE_FIREBASE_MESSAGING_SENDER_ID:-}
         VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
         VITE_FIREBASE_MEASUREMENT_ID: ${VITE_FIREBASE_MEASUREMENT_ID:-}
-    container_name: callingos-web
+    container_name: callnexa-web
     restart: unless-stopped
     ports:
       - "3003:80"  # Keep existing web port

@@ -10,7 +10,7 @@ try {
 }
 
 export const BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "https://api.callingos.tzmicha.com/api/v1";
+  process.env.EXPO_PUBLIC_API_URL || "https://api.callnexa.in/api/v1";
 
 // ── Secure token storage ──────────────────────────────────────────────────────
 

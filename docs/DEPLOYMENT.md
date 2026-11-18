@@ -66,11 +66,12 @@ ORGANIZATION MANAGER                    EMPLOYEE (Field Sales)
                     └─────────────┘
 
 Domains:
-  callingos.tzmicha.com       → backend API
-  app.callingos.tzmicha.com   → web dashboard
+  api.callnexa.in       → backend API
+  app.callnexa.in       → web dashboard
+  callnexa.in           → landing page
 
 Mobile App:
-  Expo (React Native) → hits https://callingos.tzmicha.com/api/v1
+  Expo (React Native) → hits https://api.callnexa.in/api/v1
 ```
 
 ---
@@ -150,7 +151,7 @@ CALL OSS/
 
 ### Manager Flow
 ```
-1. Manager opens app.callingos.tzmicha.com
+1. Manager opens app.callnexa.in
 2. Registers → POST /api/v1/auth/register
    → Creates Organization + User + Employee in DB
    → Gets company code e.g. TZM-2026-5823
@@ -178,9 +179,9 @@ CALL OSS/
 
 ## 6. Backend API
 
-**Base URL (production):** `https://callingos.tzmicha.com/api/v1`  
-**Swagger docs:** `https://callingos.tzmicha.com/docs`  
-**Health check:** `https://callingos.tzmicha.com/health`
+**Base URL (production):** `https://api.callnexa.in/api/v1`  
+**Swagger docs:** `https://api.callnexa.in/docs`  
+**Health check:** `https://api.callnexa.in/health`
 
 ### Auth Endpoints
 
@@ -242,7 +243,7 @@ POST /api/v1/calls/sync
 
 ## 7. Web Dashboard
 
-**URL:** `https://app.callingos.tzmicha.com`
+**URL:** `https://app.callnexa.in`
 
 ### Pages
 
@@ -400,8 +401,8 @@ ssh root@YOUR_VPS_IP
 
 # 2. Clone repo
 cd /opt
-git clone https://github.com/tzmichasureshmd-bit/CALLING-OS.git callingos
-cd callingos/backend
+git clone https://github.com/tzmichasureshmd-bit/CALLING-OS.git callnexa
+cd callnexa/backend
 
 # 3. Set up environment
 cp .env.production .env
@@ -415,14 +416,14 @@ docker network create traefik-net 2>/dev/null || true
 docker compose up -d --build
 
 # 6. Check it's running
-docker ps | grep callingos
-docker logs callingos-backend --tail 50
+docker ps | grep callnexa
+docker logs callnexa-backend --tail 50
 ```
 
 ### Update / Redeploy
 
 ```bash
-cd /opt/callingos
+cd /opt/callnexa
 git pull
 docker compose up -d --build
 ```
@@ -431,10 +432,10 @@ docker compose up -d --build
 
 ```bash
 # Backend logs
-docker logs callingos-backend --tail 100 -f
+docker logs callnexa-backend --tail 100 -f
 
 # Web logs
-docker logs callingos-web --tail 50
+docker logs callnexa-web --tail 50
 ```
 
 ### Stop / Restart
@@ -449,16 +450,19 @@ docker compose restart     # restart
 
 ## 13. DNS Setup
 
-Go to **Hostinger DNS Manager** for `tzmicha.com` and add:
+Go to **Hostinger DNS Manager** for `callnexa.in` and add:
 
 | Type | Name | Value | TTL |
 |---|---|---|---|
-| A | callingos | YOUR_VPS_IP | 300 |
-| A | app.callingos | YOUR_VPS_IP | 300 |
+| A | @ | YOUR_VPS_IP | 300 |
+| A | www | YOUR_VPS_IP | 300 |
+| A | app | YOUR_VPS_IP | 300 |
+| A | api | YOUR_VPS_IP | 300 |
 
 After adding DNS records, Traefik automatically:
-- Routes `callingos.tzmicha.com` → backend container port 8000
-- Routes `app.callingos.tzmicha.com` → web container port 80
+- Routes `api.callnexa.in` → backend container port 8000
+- Routes `app.callnexa.in` → web container port 80
+- Routes `callnexa.in` → landing page
 - Gets SSL certificate from Let's Encrypt automatically
 - Redirects HTTP → HTTPS automatically
 
@@ -479,7 +483,7 @@ DNS propagation takes 2-10 minutes.
 | `REFRESH_TOKEN_EXPIRE_DAYS` | Refresh token lifetime | `30` |
 | `APP_ENV` | Environment | `production` |
 | `APP_DEBUG` | Debug logging | `false` |
-| `CORS_ORIGINS` | Allowed frontend origins | `https://app.callingos.tzmicha.com` |
+| `CORS_ORIGINS` | Allowed frontend origins | `https://app.callnexa.in,https://callnexa.in` |
 | `SEED_DEMO_DATA` | Auto-seed demo data on startup | `false` |
 | `GOOGLE_CLIENT_ID` | Firebase Google OAuth | From Firebase console |
 
@@ -493,9 +497,8 @@ DNS propagation takes 2-10 minutes.
 ### Mobile `src/api.js`
 
 ```js
-export const BASE_URL = "https://callingos.tzmicha.com/api/v1";
+export const BASE_URL = "https://api.callnexa.in/api/v1";
 ```
-Change this if the domain changes.
 
 ---
 
@@ -557,13 +560,13 @@ Run backend with `--host 0.0.0.0`.
 
 ### Docker — Container Won't Start
 ```bash
-docker logs callingos-backend --tail 50
+docker logs callnexa-backend --tail 50
 ```
 Usually a missing env variable or DB connection issue.
 
 ### Traefik — SSL Certificate Not Issued
 - DNS must propagate first (wait 5-10 mins after adding A record)
-- Check Traefik logs: `docker logs traefik-traefik-1 --tail 50`
+- Check Traefik logs: `docker logs traefik --tail 50`
 
 ### Database — Table Does Not Exist
 - Tables are auto-created on startup via `Base.metadata.create_all()`
@@ -597,4 +600,4 @@ Shared with employees to join the organization.
 
 ---
 
-*Last updated: 2026 — CallingOS by Tzmicha IT Solutions*
+*Last updated: 2026 — CallNexa by Tzmicha IT Solutions*
