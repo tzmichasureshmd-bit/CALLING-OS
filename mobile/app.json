@@ -41,7 +41,7 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.WAKE_LOCK"
       ],
-      "versionCode": 28
+      "versionCode": 29
     },
     "plugins": [
       "expo-router",

@@ -42,6 +42,7 @@ const FollowUps = lazy(() => import("./pages/FollowUps.jsx"));
 const LandingPage = lazy(() => import("./pages/LandingPage.jsx"));
 const FeaturesPage = lazy(() => import("./pages/FeaturesPage.jsx"));
 const PricingPage = lazy(() => import("./pages/PricingPage.jsx"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy.jsx"));
 
 const ICONS = {
   dashboard: LayoutDashboard,
@@ -229,7 +230,7 @@ export default function App() {
   const isLandingSite = typeof window !== "undefined" &&
     (window.location.hostname === "callnexa.in" || window.location.hostname === "www.callnexa.in");
 
-  if (isLandingSite || ["/landing", "/features", "/pricing"].includes(location.pathname)) {
+  if (isLandingSite || ["/landing", "/features", "/pricing", "/privacy"].includes(location.pathname)) {
     return (
       <Suspense fallback={<RouteFallback />}>
         <Routes>
@@ -237,6 +238,7 @@ export default function App() {
           <Route path="/landing" element={<LandingPage />} />
           <Route path="/features" element={<FeaturesPage />} />
           <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/login" element={<Login />} />
           <Route path="*" element={<LandingPage />} />
         </Routes>
@@ -251,6 +253,7 @@ export default function App() {
           <Route path="/landing" element={<LandingPage />} />
           <Route path="/features" element={<FeaturesPage />} />
           <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/login" element={<Login />} />
           <Route path="/admin" element={<AdminLogin />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
