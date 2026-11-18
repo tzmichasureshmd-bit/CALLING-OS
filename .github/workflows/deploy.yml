@@ -39,7 +39,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
           source: "backend/app/,backend/migrations/,backend/migration_runner.py,backend/Dockerfile,backend/docker-compose.yml,backend/requirements.txt,web/"
-          target: "/opt/callingos/"
+          target: "/opt/callnexa/"
           strip_components: 0
           overwrite: true
           rm: true
@@ -60,31 +60,28 @@ jobs:
 
             # Write runtime secrets using env vars passed via appleboy/ssh-action
             # to avoid shell quoting issues with special characters in JSON/values.
-            echo "$SECRET_BACKEND_ENV" > /opt/callingos/backend/.env
-            chmod 644 /opt/callingos/backend/.env
-            chown root:10001 /opt/callingos/backend/.env
+            echo "$SECRET_BACKEND_ENV" > /opt/callnexa/backend/.env
+            chmod 644 /opt/callnexa/backend/.env
+            chown root:10001 /opt/callnexa/backend/.env
 
-            cd /opt/callingos/backend
+            cd /opt/callnexa/backend
 
             # Rebuild both backend and web images
-            docker compose build callingos-backend callingos-web --no-cache
+            docker compose build callnexa-backend callnexa-web --no-cache
 
             # Apply append-only database migrations before restarting the API.
-            # The runner is checksum-protected and fails closed on errors.
-            docker compose run --rm callingos-backend python migration_runner.py
+            docker compose run --rm callnexa-backend python migration_runner.py
 
             # Stop old containers first, then start new ones
-            docker compose down callingos-backend callingos-web --remove-orphans || true
-            docker compose up -d callingos-backend callingos-web
+            docker compose down callnexa-backend callnexa-web --remove-orphans || true
+            docker compose up -d callnexa-backend callnexa-web
 
             # Clean up old images
             docker image prune -f
 
-            # Verify backend is healthy by checking directly inside the container
-            # (bypasses Traefik so we don't wait for proxy registration)
             echo "Waiting for backend to become healthy..."
             for i in $(seq 1 18); do
-              if docker exec callingos-backend curl --fail --silent \
+              if docker exec callnexa-backend curl --fail --silent \
                    http://localhost:8000/health/db > /dev/null 2>&1; then
                 echo "Deploy verified: backend healthy (attempt $i)"
                 exit 0
@@ -93,5 +90,5 @@ jobs:
               sleep 10
             done
             echo "Health check failed after 3 minutes"
-            docker logs callingos-backend --tail 50
+            docker logs callnexa-backend --tail 50
             exit 1
