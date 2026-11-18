@@ -226,13 +226,19 @@ export default function App() {
   const { isAuthed, user } = useAuth();
   const location = useLocation();
 
-  if (["/landing", "/features", "/pricing"].includes(location.pathname)) {
+  const isLandingSite = typeof window !== "undefined" &&
+    (window.location.hostname === "callnexa.in" || window.location.hostname === "www.callnexa.in");
+
+  if (isLandingSite || ["/landing", "/features", "/pricing"].includes(location.pathname)) {
     return (
       <Suspense fallback={<RouteFallback />}>
         <Routes>
+          <Route path="/" element={<LandingPage />} />
           <Route path="/landing" element={<LandingPage />} />
           <Route path="/features" element={<FeaturesPage />} />
           <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="*" element={<LandingPage />} />
         </Routes>
       </Suspense>
     );
